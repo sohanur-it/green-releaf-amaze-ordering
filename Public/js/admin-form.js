@@ -136,16 +136,74 @@ function setupImageUpload() {
         const files = e.target.files;
         if (files.length === 0) return;
 
-        //need to save details first to get product_detail_id
+        //auto-save if no product_detail_id yet
         if (!productDetailId) {
-            showToast('Please save product details before uploading images', 'warning');
-            fileInput.value = '';
-            return;
+            showToast('Saving product details before upload...', 'info');
+
+            try {
+                await autoSaveForPhotoUpload();
+                //now upload images
+                await uploadImages(files);
+            } catch (error) {
+                console.error('Auto-save failed:', error);
+                showToast('Please complete required fields before uploading photos', 'warning');
+                fileInput.value = '';
+                return;
+            }
+        } else {
+            await uploadImages(files);
         }
 
-        await uploadImages(files);
         fileInput.value = ''; //reset input
     });
+}
+
+//auto-save form data before photo upload
+async function autoSaveForPhotoUpload() {
+    try {
+        //collect minimal form data
+        const formData = new FormData(document.getElementById('product-details-form'));
+        const data = {};
+
+        formData.forEach((value, key) => {
+            if (key === 'buyer_types') {
+                if (!data.buyer_types) data.buyer_types = [];
+                data.buyer_types.push(value);
+            } else {
+                data[key] = value;
+            }
+        });
+
+        //checkboxes
+        data.list_to_buyers = document.getElementById('list_to_buyers').checked;
+        data.featured_product = document.getElementById('featured_product').checked;
+
+        //get tinymce content
+        if (tinymce.get('product_description')) {
+            data.product_description = tinymce.get('product_description').getContent();
+        }
+
+        //save via auto-save endpoint
+        const response = await fetch('/admin/api/auto-save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+
+        const result = await response.json();
+
+        if (!result.success) {
+            throw new Error(result.error || 'Failed to auto-save');
+        }
+
+        productDetailId = result.data.id;
+        showToast('Product details saved', 'success');
+
+        return result.data;
+    } catch (error) {
+        console.error('Error in auto-save:', error);
+        throw error;
+    }
 }
 
 //upload images to server
@@ -374,10 +432,9 @@ function setupFormSubmit() {
 
             showToast('Product details saved successfully!', 'success');
 
-            //redirect back to list after short delay
-            setTimeout(() => {
-                window.location.href = '/admin';
-            }, 1500);
+            //don't redirect - stay on form
+            //show delete button if not already visible
+            document.getElementById('delete-btn').style.display = 'inline-block';
 
         } catch (error) {
             console.error('Error saving product details:', error);

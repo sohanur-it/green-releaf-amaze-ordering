@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="icon" type="image/svg+xml" href="/public/favicon.svg">
+    <link rel="stylesheet" href="/public/css/main.css">
+</head>
+<body>
+    <%- include('../partials/header') %>
+
+    <!-- Notification Banner (hidden by default) -->
+    <div id="notification-banner" class="notification-banner" style="display: none;"></div>
+
+    <main class="admin-container">
+        <div class="batch-management-container">
+            <h1 class="page-title">Batch Management</h1>
+
+            <!-- Tab Navigation -->
+            <div class="tabs">
+                <button class="tab-button active" data-tab="workflow">Batch Workflow</button>
+                <button class="tab-button" data-tab="view-all">View All Batches</button>
+            </div>
+
+            <!-- Tab: Batch Workflow -->
+            <div id="workflow-tab" class="tab-content active">
+                <div id="workflow-empty" class="empty-state" style="display: none;">
+                    <h2>🎉 All Caught Up!</h2>
+                    <p>No products with pending batches. Check back later or configure more products.</p>
+                    <button class="btn btn-secondary" onclick="window.location.href='/admin/product-setup'">
+                        Go to Product Setup
+                    </button>
+                </div>
+
+                <div id="workflow-content" style="display: none;">
+                    <!-- Product Info Card -->
+                    <div class="product-info-card">
+                        <h2 id="product-name">Loading...</h2>
+                        <div class="product-details">
+                            <div class="detail-item">
+                                <span class="detail-label">Category:</span>
+                                <span id="product-category">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Brand:</span>
+                                <span id="product-brand">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Price:</span>
+                                <span id="product-price">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Unit Weight:</span>
+                                <span id="product-weight">-</span>
+                            </div>
+                            <div class="detail-item">
+                                <span class="detail-label">Packages Per Case:</span>
+                                <span id="product-packages">-</span>
+                            </div>
+                        </div>
+                        <div class="remaining-count" id="remaining-count"></div>
+                    </div>
+
+                    <!-- Batches List -->
+                    <div id="batches-list" class="batches-list">
+                        <!-- Populated by JS -->
+                    </div>
+
+                    <!-- Complete Button -->
+                    <div class="workflow-actions">
+                        <button class="btn btn-primary btn-large" id="complete-button" onclick="submitBatchDecisions()">
+                            Complete & Continue
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab: View All Batches -->
+            <div id="view-all-tab" class="tab-content">
+                <div class="table-controls">
+                    <input type="text" id="batch-search" placeholder="Search batches..." class="search-input">
+                    <select id="status-filter" class="filter-select">
+                        <option value="">All Statuses</option>
+                        <option value="Sellable">Sellable</option>
+                        <option value="On Deck">On Deck</option>
+                        <option value="On Hold">On Hold</option>
+                    </select>
+                </div>
+
+                <div class="table-container">
+                    <table id="all-batches-table" class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Product Name</th>
+                                <th>Batch Name</th>
+                                <th>Status</th>
+                                <th>Full Packages</th>
+                                <th>Partial Packages</th>
+                                <th>THC %</th>
+                                <th>Test Date</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="all-batches-tbody">
+                            <!-- Populated by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal: Full Package Details -->
+    <div id="package-modal" class="modal" style="display: none;">
+        <div class="modal-overlay" onclick="closePackageModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Full Package Details</h2>
+                <button class="btn-close-modal" onclick="closePackageModal()">×</button>
+            </div>
+            <div class="modal-body" id="package-modal-body">
+                <!-- Populated by JS -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closePackageModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Edit Batch Status -->
+    <div id="edit-batch-modal" class="modal" style="display: none;">
+        <div class="modal-overlay" onclick="closeEditBatchModal()"></div>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit Batch Status</h2>
+                <button class="btn-close-modal" onclick="closeEditBatchModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="edit-status">Status</label>
+                    <select id="edit-status" class="form-control">
+                        <option value="Sellable">Sellable</option>
+                        <option value="On Deck">On Deck</option>
+                        <option value="On Hold">On Hold</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="edit-custom-name">Custom Batch Name (optional)</label>
+                    <input type="text" id="edit-custom-name" class="form-control" placeholder="Leave blank to use default">
+                </div>
+                <input type="hidden" id="edit-batch-name">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeEditBatchModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveEditBatch()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <%- include('../partials/footer') %>
+    <%- include('../partials/scripts') %>
+
+    <script src="/public/js/shared/notification.js"></script>
+    <script src="/public/js/admin/batch-workflow.js"></script>
+    <script src="/public/js/admin/batch-management-table.js"></script>
+</body>
+</html>

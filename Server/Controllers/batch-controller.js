@@ -1,20 +1,21 @@
-const BatchModel = require('../Models/batch-model');
+const BatchStagingModel = require('../Models/batch-staging-model');
 const ItemDetailsModel = require('../Models/item-details-model');
 const logger = require('../../Utilities/logger');
 
 //batch controller - handles batch-related operations
+//now uses BatchStagingModel for better performance
 
 class BatchController {
 
     //get all batches grouped by item name with details status
     static async getBatchesWithDetailsStatus(req, res, next) {
         try {
-            //get grouped batches
-            const groupedBatches = await BatchModel.getBatchesGroupedByName();
+            //get grouped batches from staging table
+            const groupedBatches = await BatchStagingModel.getBatchesGroupedByName();
 
             //get all existing product details
             const allDetails = await ItemDetailsModel.getAll();
-            const detailsMap = new Map(allDetails.map(d => [d.item_name, d]));
+            const detailsMap = new Map(allDetails.map(d => [d.original_item_name, d]));
 
             //add details status to each group
             const batchesWithStatus = groupedBatches.map(group => ({
@@ -55,7 +56,7 @@ class BatchController {
                 });
             }
 
-            const batches = await BatchModel.getBatchesByItemName(itemName);
+            const batches = await BatchStagingModel.getBatchesByItemName(itemName);
 
             res.json({
                 success: true,
@@ -70,7 +71,7 @@ class BatchController {
     //get all unique item names
     static async getUniqueItemNames(req, res, next) {
         try {
-            const names = await BatchModel.getUniqueItemNames();
+            const names = await BatchStagingModel.getUniqueItemNames();
 
             res.json({
                 success: true,

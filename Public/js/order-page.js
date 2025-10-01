@@ -274,14 +274,9 @@ function createProductCard(product, isOutOfStock) {
     const card = document.createElement('div');
     card.className = 'product-card' + (isOutOfStock ? ' out-of-stock' : '');
 
-    //get primary image
-    const primaryImage = product.images && product.images.length > 0
-        ? '/' + product.images[0].file_path
-        : '/public/images/placeholder.jpg';
-
+    // Create card structure
     card.innerHTML = `
-        <div class="product-image">
-            <img src="${primaryImage}" alt="${escapeHtml(product.item_name)}" onerror="this.src='/public/images/placeholder.jpg'">
+        <div class="product-image-container">
             ${product.featured_product ? '<span class="badge-featured">⭐ Featured</span>' : ''}
             ${isOutOfStock ? '<span class="badge-out-of-stock">Out of Stock</span>' : ''}
         </div>
@@ -309,6 +304,25 @@ function createProductCard(product, isOutOfStock) {
             `}
         </div>
     `;
+
+    // Add carousel to image container
+    const imageContainer = card.querySelector('.product-image-container');
+    if (window.createProductCarousel) {
+        window.createProductCarousel(imageContainer, product, {
+            showArrows: false, // No arrows in product cards
+            showDots: product.images && product.images.length > 1, // Only show dots if multiple images
+            cycleDelay: 6000
+        });
+    } else {
+        // Fallback if carousel not loaded
+        const fallbackImage = product.images && product.images.length > 0
+            ? `<img src="/${product.images[0].file_path}" alt="${escapeHtml(product.item_name)}">`
+            : `<div class="product-image-placeholder">
+                <span class="placeholder-icon">📦</span>
+                <span class="placeholder-text">No Image Available</span>
+               </div>`;
+        imageContainer.innerHTML += fallbackImage;
+    }
 
     //click card to view details (TODO: implement modal)
     card.addEventListener('click', (e) => {

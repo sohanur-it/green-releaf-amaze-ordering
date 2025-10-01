@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link rel="icon" type="image/svg+xml" href="/public/favicon.svg">
+    <link rel="stylesheet" href="/public/css/main.css">
+</head>
+<body>
+    <%- include('../partials/header') %>
+
+    <main class="admin-container">
+        <div class="dashboard-container">
+            <h1 class="dashboard-title">Admin Dashboard</h1>
+
+            <!-- Stats Cards -->
+            <div class="stats-grid">
+                <div class="stat-card stat-card-pending">
+                    <div class="stat-icon">📦</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="pending-batches">-</div>
+                        <div class="stat-label">Batches Pending Listing</div>
+                    </div>
+                </div>
+
+                <div class="stat-card stat-card-warning">
+                    <div class="stat-icon">⚠️</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="products-needing-info">-</div>
+                        <div class="stat-label">Products Needing Info</div>
+                    </div>
+                </div>
+
+                <div class="stat-card stat-card-success">
+                    <div class="stat-icon">✅</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="sellable-batches">-</div>
+                        <div class="stat-label">Sellable Batches</div>
+                    </div>
+                </div>
+
+                <div class="stat-card stat-card-info">
+                    <div class="stat-icon">🔜</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="on-deck-batches">-</div>
+                        <div class="stat-label">On Deck Batches</div>
+                    </div>
+                </div>
+
+                <div class="stat-card stat-card-hold">
+                    <div class="stat-icon">⏸️</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="on-hold-batches">-</div>
+                        <div class="stat-label">On Hold Batches</div>
+                    </div>
+                </div>
+
+                <div class="stat-card stat-card-complete">
+                    <div class="stat-icon">🎯</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="products-complete">-</div>
+                        <div class="stat-label">Complete Products</div>
+                    </div>
+                </div>
+
+                <div class="stat-card stat-card-waiting">
+                    <div class="stat-icon">⏳</div>
+                    <div class="stat-content">
+                        <div class="stat-value" id="products-with-pending-batches">-</div>
+                        <div class="stat-label">Products w/ Pending Batches</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Cards -->
+            <div class="action-cards">
+                <div class="action-card">
+                    <h2>Product Setup</h2>
+                    <p>Configure product details, pricing, descriptions, and photos</p>
+                    <button class="btn btn-primary" onclick="window.location.href='/admin/product-setup'">
+                        Go to Product Setup
+                    </button>
+                </div>
+
+                <div class="action-card">
+                    <h2>Batch Management</h2>
+                    <p>Mark batches as Sellable, On Deck, or On Hold to control listing</p>
+                    <button class="btn btn-primary" onclick="window.location.href='/admin/batch-management'">
+                        Go to Batch Management
+                    </button>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <%- include('../partials/footer') %>
+    <%- include('../partials/scripts') %>
+
+    <script src="/public/js/admin/dashboard.js"></script>
+</body>
+</html>
