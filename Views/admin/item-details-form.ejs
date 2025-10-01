@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %> - <%= itemName %></title>
+    <link rel="stylesheet" href="/public/css/main.css">
+    <!-- tinymce wysiwyg editor -->
+    <script src="/public/lib/tinymce/tinymce.min.js"></script>
+</head>
+<body>
+    <%- include('../partials/header') %>
+
+    <main class="form-container">
+        <div class="form-header">
+            <h1>Product Details</h1>
+            <p class="item-name-display"><%= itemName %></p>
+            <a href="/admin" class="btn-back">← Back to List</a>
+        </div>
+
+        <form id="product-details-form" class="product-form">
+            <input type="hidden" name="item_name" value="<%= itemName %>">
+
+            <!-- batches info - collapsible -->
+            <div class="form-section collapsible collapsed">
+                <h2 class="section-title" onclick="toggleFormSection(this)">
+                    <span class="toggle-icon">▶</span>
+                    Batch Information
+                </h2>
+                <div class="section-content">
+                    <div id="batches-display">
+                        <!-- populated by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- required fields -->
+            <div class="form-section">
+                <h2 class="section-title">Required Information</h2>
+                <div class="section-content">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="category">Category *</label>
+                            <select id="category" name="category" required>
+                                <option value="">Select Category</option>
+                                <% categories.forEach(cat => { %>
+                                    <option value="<%= cat %>"><%= cat %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="brand">Brand *</label>
+                            <select id="brand" name="brand" required>
+                                <option value="">Select Brand</option>
+                                <% brands.forEach(brand => { %>
+                                    <option value="<%= brand %>"><%= brand %></option>
+                                <% }); %>
+                            </select>
+                            <small class="form-hint">Changes will update items table</small>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="default_price">Default Price (per case) *</label>
+                            <input type="number" id="default_price" name="default_price" step="0.01" min="0" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="strain_type">Strain Type *</label>
+                            <select id="strain_type" name="strain_type" required>
+                                <option value="">Select Type</option>
+                                <% strainTypes.forEach(type => { %>
+                                    <option value="<%= type %>"><%= type %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- product specifications -->
+            <div class="form-section">
+                <h2 class="section-title">Product Specifications</h2>
+                <div class="section-content">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="sku">SKU (optional)</label>
+                            <input type="text" id="sku" name="sku">
+                        </div>
+
+                        <div class="form-group">
+                            <label for="strain_flavor">Strain/Flavor</label>
+                            <input type="text" id="strain_flavor" name="strain_flavor">
+                            <small class="form-hint">Can override from items table</small>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="unit_weight">Unit Weight</label>
+                            <input type="number" id="unit_weight" name="unit_weight" step="0.0001" min="0">
+                            <small class="form-hint">Updates items table if empty</small>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="packages_per_case">Packages Per Case</label>
+                            <input type="number" id="packages_per_case" name="packages_per_case" min="0">
+                            <small class="form-hint">Updates items table if empty</small>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="unit_size_measurement">Unit Size Measurement</label>
+                            <select id="unit_size_measurement" name="unit_size_measurement">
+                                <option value="">Select Measurement</option>
+                                <% unitSizeMeasurements.forEach(unit => { %>
+                                    <option value="<%= unit %>"><%= unit %></option>
+                                <% }); %>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ingredients - read only -->
+            <div class="form-section">
+                <h2 class="section-title">Ingredients (from items table)</h2>
+                <div class="section-content">
+                    <div class="form-group">
+                        <textarea id="ingredients" name="ingredients" rows="3" readonly></textarea>
+                        <small class="form-hint">Read-only field from items table</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- product description with wysiwyg -->
+            <div class="form-section">
+                <h2 class="section-title">Product Description</h2>
+                <div class="section-content">
+                    <div class="form-group">
+                        <textarea id="product_description" name="product_description"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- internal notes -->
+            <div class="form-section">
+                <h2 class="section-title">Internal Notes (optional)</h2>
+                <div class="section-content">
+                    <div class="form-group">
+                        <textarea id="internal_notes" name="internal_notes" rows="3"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- buyer types and visibility -->
+            <div class="form-section">
+                <h2 class="section-title">Buyer Settings</h2>
+                <div class="section-content">
+                    <div class="form-group">
+                        <label>Buyer Types</label>
+                        <div class="checkbox-group">
+                            <% buyerTypes.forEach(type => { %>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" name="buyer_types" value="<%= type.code %>">
+                                    <%= type.name %>
+                                </label>
+                            <% }); %>
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="list_to_buyers" name="list_to_buyers" checked>
+                                List to Buyers (show on order page)
+                            </label>
+                        </div>
+
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="featured_product" name="featured_product">
+                                Featured Product
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- product images -->
+            <div class="form-section">
+                <h2 class="section-title">Product Images</h2>
+                <div class="section-content">
+                    <div class="form-group">
+                        <label for="image-upload">Upload Images</label>
+                        <input type="file" id="image-upload" accept="image/*" multiple>
+                        <small class="form-hint">Max 10 images, drag to reorder, first image is primary</small>
+                    </div>
+
+                    <div id="images-preview" class="images-preview">
+                        <!-- populated by JS with drag-drop support -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- form actions -->
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Save Product Details</button>
+                <button type="button" class="btn btn-secondary" onclick="window.location.href='/admin'">Cancel</button>
+                <button type="button" class="btn btn-danger" id="delete-btn" style="display: none;">Delete</button>
+            </div>
+        </form>
+    </main>
+
+    <%- include('../partials/footer') %>
+    <%- include('../partials/scripts') %>
+
+    <script>
+        //pass server data to JS
+        window.ITEM_NAME = '<%= itemName %>';
+        window.CATEGORIES = <%- JSON.stringify(categories) %>;
+        window.BRANDS = <%- JSON.stringify(brands) %>;
+        window.STRAIN_TYPES = <%- JSON.stringify(strainTypes) %>;
+        window.UNIT_SIZE_MEASUREMENTS = <%- JSON.stringify(unitSizeMeasurements) %>;
+        window.BUYER_TYPES = <%- JSON.stringify(buyerTypes) %>;
+
+        //helper to toggle collapsible sections
+        function toggleFormSection(titleElem) {
+            const section = titleElem.closest('.collapsible');
+            section.classList.toggle('collapsed');
+        }
+    </script>
+
+    <script src="/public/js/admin-form.js"></script>
+</body>
+</html>
