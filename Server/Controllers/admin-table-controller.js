@@ -8,9 +8,10 @@ const logger = require('../../Utilities/logger');
 class AdminTableController {
 
     /**
-     * Get all table data with completion tracking and batch info
+     * Get all table data with completion tracking, batch info, and pairing info
      * GET /admin/api/table-data
      * Shows ALL items from batch staging (including those without product details)
+     * Includes master/child pairing information and organizes children under masters
      */
     static async getTableData(req, res, next) {
         try {
@@ -61,7 +62,8 @@ class AdminTableController {
                         batch_count: batch.batch_count,
                         total_packages: (batch.total_full_packages || 0) + (batch.total_partial_packages || 0),
                         total_quantity_available: batch.total_quantity_available,
-                        last_modified: null
+                        last_modified: null,
+                        parent_product_id: null
                     };
                 }
             });
@@ -69,24 +71,112 @@ class AdminTableController {
             // Calculate completion percentage for each product
             const withCompletion = CompletionTrackingService.bulkCalculateCompletion(allProducts);
 
+            // Add pairing information to each product
+            const withPairingInfo = await Promise.all(withCompletion.map(async (product) => {
+                if (!product.id) {
+                    // Product has no details yet, no pairing possible
+                    return {
+                        ...product,
+                        is_child: false,
+                        is_master: false,
+                        child_count: 0,
+                        children: []
+                    };
+                }
+
+                // Check if this is a child
+                const isChild = product.parent_product_id !== null;
+
+                // Get children if this is a master
+                const children = isChild ? [] : await ItemDetailsModel.getChildProducts(product.id);
+
+                // If this is a child, get master info
+                let masterInfo = null;
+                if (isChild) {
+                    const master = await ItemDetailsModel.getMasterProduct(product.id);
+                    if (master) {
+                        masterInfo = {
+                            id: master.id,
+                            item_name: master.item_name,
+                            display_item_name: master.display_item_name
+                        };
+                    }
+                }
+
+                return {
+                    ...product,
+                    is_child: isChild,
+                    is_master: children.length > 0,
+                    child_count: children.length,
+                    children: children,
+                    master_info: masterInfo
+                };
+            }));
+
+            // Group products into families (master + children)
+            // Then sort families by master's display name, with children immediately after master
+            const families = [];
+            const processedItemNames = new Set(); // Use item_name instead of id to handle products without details
+
+            // First pass: identify all masters and independent products
+            for (const product of withPairingInfo) {
+                const uniqueKey = product.item_name || product.original_item_name;
+                if (processedItemNames.has(uniqueKey)) continue;
+
+                if (!product.is_child) {
+                    // This is either a master or an independent product
+                    const family = [product];
+                    processedItemNames.add(uniqueKey);
+
+                    // If it's a master, add all its children
+                    if (product.is_master && product.children && product.children.length > 0) {
+                        const childIds = product.children.map(c => c.id);
+                        const childProducts = withPairingInfo.filter(p => childIds.includes(p.id));
+
+                        // Sort children alphabetically by original_item_name
+                        childProducts.sort((a, b) =>
+                            (a.original_item_name || a.item_name).localeCompare(b.original_item_name || b.item_name)
+                        );
+
+                        family.push(...childProducts);
+                        childProducts.forEach(c => {
+                            const childKey = c.item_name || c.original_item_name;
+                            processedItemNames.add(childKey);
+                        });
+                    }
+
+                    families.push(family);
+                }
+            }
+
+            // Sort families by the master/independent product's display name
+            families.sort((familyA, familyB) => {
+                const nameA = (familyA[0].display_item_name || familyA[0].original_item_name || familyA[0].item_name).toLowerCase();
+                const nameB = (familyB[0].display_item_name || familyB[0].original_item_name || familyB[0].item_name).toLowerCase();
+                return nameA.localeCompare(nameB);
+            });
+
+            // Flatten families into a single sorted array
+            const sorted = families.flat();
+
             // Get filter options for sidebar
-            const categories = [...new Set(withCompletion.map(p => p.category).filter(Boolean))];
-            const brands = [...new Set(withCompletion.map(p => p.brand).filter(Boolean))];
-            const strainTypes = [...new Set(withCompletion.map(p => p.strain_type).filter(Boolean))];
+            const categories = [...new Set(sorted.map(p => p.category).filter(Boolean))];
+            const brands = [...new Set(sorted.map(p => p.brand).filter(Boolean))];
+            const strainTypes = [...new Set(sorted.map(p => p.strain_type).filter(Boolean))];
 
             res.json({
                 success: true,
                 data: {
-                    products: withCompletion,
+                    products: sorted,
                     filters: {
                         categories: categories.sort(),
                         brands: brands.sort(),
                         strainTypes: strainTypes.sort()
                     },
                     stats: {
-                        total: withCompletion.length,
-                        complete: withCompletion.filter(p => p.is_complete).length,
-                        incomplete: withCompletion.filter(p => !p.is_complete).length
+                        total: sorted.length,
+                        complete: sorted.filter(p => p.is_complete).length,
+                        incomplete: sorted.filter(p => !p.is_complete).length
                     }
                 }
             });
@@ -100,6 +190,7 @@ class AdminTableController {
      * Inline edit a single field
      * PUT /admin/api/inline-edit/:itemName
      * Creates product details if not exists, then updates field
+     * Prevents editing child products (except unpair action)
      */
     static async inlineEdit(req, res, next) {
         try {
@@ -130,7 +221,25 @@ class AdminTableController {
 
                 product = await ItemDetailsModel.create(minimalData);
             } else {
-                // Product exists - update the field
+                // Check if this is a child product
+                if (product.parent_product_id) {
+                    // Get master info
+                    const master = await ItemDetailsModel.getMasterProduct(product.id);
+                    const masterDisplayName = master ? (master.display_item_name || master.item_name) : 'master product';
+
+                    return res.status(400).json({
+                        success: false,
+                        error: `This product is paired to "${masterDisplayName}". Please edit the master product or unpair this product first.`,
+                        isChild: true,
+                        masterInfo: master ? {
+                            id: master.id,
+                            item_name: master.item_name,
+                            display_item_name: master.display_item_name
+                        } : null
+                    });
+                }
+
+                // Product exists and is not a child - update the field
                 await ItemDetailsModel.updateField(itemName, fieldName, fieldValue);
                 product = await ItemDetailsModel.getByItemName(itemName);
             }

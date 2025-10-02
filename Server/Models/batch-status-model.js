@@ -142,6 +142,7 @@ class BatchStatusModel {
 
     /**
      * Get all marked batches with product and staging details
+     * Groups display by display_item_name for unified product view
      * @returns {Array} Batch statuses joined with related data
      */
     static async getAllWithDetails() {
@@ -150,7 +151,8 @@ class BatchStatusModel {
                 SELECT
                     bs.*,
                     pd.item_name as product_display_name,
-                    pd.display_item_name,
+                    COALESCE(pd.display_item_name, pd.original_item_name) as display_item_name,
+                    pd.original_item_name,
                     pd.category,
                     pd.brand,
                     staging.full_package_count,
@@ -166,7 +168,7 @@ class BatchStatusModel {
                 LEFT JOIN "ORDERS-product_details" pd ON bs.product_detail_id = pd.id
                 LEFT JOIN "ORDERS-batch_staging" staging ON bs.batch_name = staging.batch_name
                 WHERE bs.batch_is_active = true
-                ORDER BY bs.item_name, bs.created_at DESC
+                ORDER BY COALESCE(pd.display_item_name, pd.original_item_name), bs.created_at DESC
             `;
 
             const result = await pool.query(query);
@@ -250,42 +252,111 @@ class BatchStatusModel {
 
     /**
      * Get products with complete details that have pending (unmarked) batches
-     * Used for batch workflow - only shows products ready for batch decisions
-     * @returns {Array} Products with pending batches
+     * Used for batch workflow - only shows MASTER products (not children)
+     * Includes batches from master's original_item_name AND all children's original_item_names
+     * @returns {Array} Master products with pending batches (including children's batches)
      */
     static async getProductsWithPendingBatches() {
         try {
             const query = `
-                WITH complete_products AS (
-                    -- Get products that have all required fields filled
+                WITH master_products AS (
+                    -- Get only master products (not children) with completion status
                     SELECT
-                        pd.*
+                        pd.*,
+                        CASE WHEN
+                            pd.category IS NOT NULL
+                            AND pd.brand IS NOT NULL
+                            AND pd.default_price IS NOT NULL
+                            AND pd.strain_type IS NOT NULL
+                            AND pd.product_description IS NOT NULL
+                            AND pd.unit_weight IS NOT NULL
+                            AND pd.packages_per_case IS NOT NULL
+                            AND pd.unit_size_measurement IS NOT NULL
+                            AND pd.strain_flavor IS NOT NULL
+                            AND pd.display_item_name IS NOT NULL
+                        THEN true ELSE false END as is_complete
                     FROM "ORDERS-product_details" pd
-                    WHERE pd.category IS NOT NULL
-                      AND pd.brand IS NOT NULL
-                      AND pd.default_price IS NOT NULL
-                      AND pd.strain_type IS NOT NULL
-                      AND pd.product_description IS NOT NULL
-                      AND pd.unit_weight IS NOT NULL
-                      AND pd.packages_per_case IS NOT NULL
-                      AND pd.unit_size_measurement IS NOT NULL
-                      AND pd.strain_flavor IS NOT NULL
+                    WHERE pd.parent_product_id IS NULL  -- Only masters (independent products or products with children)
+                ),
+                complete_masters AS (
+                    -- Only show complete masters
+                    SELECT * FROM master_products WHERE is_complete = true
+                ),
+                master_and_children AS (
+                    -- Get each master and all its children's original_item_names
+                    SELECT
+                        m.id as master_id,
+                        m.original_item_name as item_name
+                    FROM complete_masters m
+                    UNION
+                    SELECT
+                        m.id as master_id,
+                        c.original_item_name as item_name
+                    FROM complete_masters m
+                    INNER JOIN "ORDERS-product_details" c ON c.parent_product_id = m.id
                 ),
                 pending_batches AS (
-                    -- Get batches that don't have a status yet
+                    -- Get batches that don't have a status yet (for master + all children)
                     SELECT
                         staging.*,
-                        staging.name as item_name
+                        staging.name as item_name,
+                        mc.master_id
                     FROM "ORDERS-batch_staging" staging
+                    INNER JOIN master_and_children mc ON staging.name = mc.item_name
                     LEFT JOIN "ORDERS-batch_status" bs ON staging.batch_name = bs.batch_name
                     WHERE staging.is_active = true
                       AND bs.id IS NULL
+                ),
+                masters_with_pending AS (
+                    -- Get distinct masters that have at least one pending batch
+                    SELECT DISTINCT master_id
+                    FROM pending_batches
                 )
                 SELECT
-                    cp.*,
+                    m.id,
+                    COALESCE(m.display_item_name, m.original_item_name) as display_item_name,
+                    (
+                        -- Get array of all original_item_names (master + children)
+                        SELECT array_agg(DISTINCT original_item_name ORDER BY original_item_name)
+                        FROM (
+                            SELECT m.original_item_name
+                            UNION
+                            SELECT c.original_item_name
+                            FROM "ORDERS-product_details" c
+                            WHERE c.parent_product_id = m.id
+                        ) all_items
+                    ) as original_item_names,
+                    (
+                        -- Count of linked products (1 if no children, 1 + child count if has children)
+                        SELECT 1 + COUNT(*)
+                        FROM "ORDERS-product_details" c
+                        WHERE c.parent_product_id = m.id
+                    ) as linked_product_count,
+                    m.item_name,
+                    m.original_item_name,
+                    m.sku,
+                    m.category,
+                    m.brand,
+                    m.strain_flavor,
+                    m.strain_type,
+                    m.default_price,
+                    m.unit_weight,
+                    m.packages_per_case,
+                    m.unit_size_measurement,
+                    m.ingredients,
+                    m.product_description,
+                    m.internal_notes,
+                    m.list_to_buyers,
+                    m.featured_product,
+                    m.created_at,
+                    m.updated_at,
+                    m.created_by,
+                    m.updated_by,
+                    m.last_modified,
                     json_agg(
                         json_build_object(
                             'batch_name', pb.batch_name,
+                            'original_item_name', pb.item_name,
                             'full_package_count', pb.full_package_count,
                             'partial_package_count', pb.partial_package_count,
                             'partial_package_details', pb.partial_package_details,
@@ -294,18 +365,19 @@ class BatchStatusModel {
                             'test_date', pb.test_date,
                             'best_by_date', pb.best_by_date,
                             'production_date', pb.production_date
-                        ) ORDER BY pb.batch_name
+                        ) ORDER BY pb.item_name, pb.batch_name
                     ) as pending_batches,
                     COUNT(pb.batch_name) as pending_batch_count
-                FROM complete_products cp
-                INNER JOIN pending_batches pb ON cp.original_item_name = pb.item_name
-                GROUP BY cp.id, cp.item_name, cp.original_item_name, cp.display_item_name, cp.sku,
-                         cp.category, cp.brand, cp.strain_flavor, cp.strain_type, cp.default_price,
-                         cp.unit_weight, cp.packages_per_case, cp.unit_size_measurement,
-                         cp.ingredients, cp.product_description, cp.internal_notes,
-                         cp.list_to_buyers, cp.featured_product, cp.created_at, cp.updated_at,
-                         cp.created_by, cp.updated_by, cp.last_modified
-                ORDER BY cp.item_name
+                FROM complete_masters m
+                INNER JOIN masters_with_pending mwp ON m.id = mwp.master_id
+                INNER JOIN pending_batches pb ON pb.master_id = m.id
+                GROUP BY m.id, m.item_name, m.original_item_name, m.sku, m.category, m.brand,
+                         m.strain_flavor, m.strain_type, m.default_price, m.unit_weight,
+                         m.packages_per_case, m.unit_size_measurement, m.ingredients,
+                         m.product_description, m.internal_notes, m.list_to_buyers,
+                         m.featured_product, m.created_at, m.updated_at, m.created_by,
+                         m.updated_by, m.last_modified, m.display_item_name
+                ORDER BY COALESCE(m.display_item_name, m.original_item_name)
             `;
 
             const result = await pool.query(query);

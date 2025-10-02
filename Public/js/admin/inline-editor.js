@@ -35,6 +35,22 @@ async function loadConstants() {
 // Start inline editing
 function startInlineEdit(cell) {
     const fieldName = cell.dataset.field;
+    const row = cell.closest('tr');
+    const itemName = row.dataset.itemName;
+
+    // Check if this row is a child product
+    if (row.classList.contains('child-product-row')) {
+        // Get product data from table
+        const product = tableData ? tableData.find(p => p.item_name === itemName) : null;
+        const masterName = product && product.master_info ?
+            (product.master_info.display_item_name || product.master_info.item_name) : 'master product';
+
+        // Show message with option to unpair
+        if (confirm(`This product is paired to "${masterName}".\n\nYou cannot edit paired products directly. Would you like to unpair this product?`)) {
+            handleUnpair(itemName);
+        }
+        return;
+    }
 
     // Special handling for product_description - open modal instead
     if (fieldName === 'product_description') {

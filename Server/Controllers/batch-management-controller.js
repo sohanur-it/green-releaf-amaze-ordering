@@ -149,14 +149,15 @@ class BatchManagementController {
             const results = await BatchStatusModel.bulkCreate(batchStatuses);
 
             // Update list_to_buyers if any batch was marked as "Sellable"
+            // This updates ALL products with the same display_item_name
             const hasSellable = decisionsToSave.some(d => d.status === 'Sellable');
             if (hasSellable && decisionsToSave[0].product_detail_id) {
-                await ItemDetailsModel.updateField(
-                    decisionsToSave[0].item_name,
-                    'list_to_buyers',
-                    true
-                );
-                logger.info(`Set list_to_buyers=true for ${decisionsToSave[0].item_name}`);
+                const product = await ItemDetailsModel.getByOriginalItemName(decisionsToSave[0].item_name);
+                if (product) {
+                    const displayName = product.display_item_name || product.original_item_name;
+                    await ItemDetailsModel.updateListToBuyersByDisplayName(displayName, true);
+                    logger.info(`Set list_to_buyers=true for all products with display_item_name=${displayName}`);
+                }
             }
 
             res.json({
@@ -225,24 +226,27 @@ class BatchManagementController {
             // Update the batch status
             const updated = await BatchStatusModel.updateStatus(batchName, status, custom_batch_name);
 
-            // Get the product_detail_id to update list_to_buyers
+            // Get the product_detail_id to update list_to_buyers for ALL related products
             if (updated.product_detail_id) {
-                // Get all batches for this product
-                const allBatchesForProduct = await BatchStatusModel.getByItemName(updated.item_name);
-
-                // Check if any are Sellable and active
-                const hasSellableActive = allBatchesForProduct.some(
-                    b => b.status === 'Sellable' && b.batch_is_active
-                );
-
-                // Update list_to_buyers accordingly
                 const product = await ItemDetailsModel.getByOriginalItemName(updated.item_name);
                 if (product) {
-                    await ItemDetailsModel.updateField(
-                        product.item_name,
-                        'list_to_buyers',
-                        hasSellableActive
-                    );
+                    const displayName = product.display_item_name || product.original_item_name;
+
+                    // Get all products with this display_item_name
+                    const relatedProducts = await ItemDetailsModel.getAllByDisplayName(displayName);
+
+                    // Check if ANY related product has a Sellable active batch
+                    let hasSellableActive = false;
+                    for (const relatedProduct of relatedProducts) {
+                        const batches = await BatchStatusModel.getByItemName(relatedProduct.original_item_name);
+                        if (batches.some(b => b.status === 'Sellable' && b.batch_is_active)) {
+                            hasSellableActive = true;
+                            break;
+                        }
+                    }
+
+                    // Update list_to_buyers for all products with this display_item_name
+                    await ItemDetailsModel.updateListToBuyersByDisplayName(displayName, hasSellableActive);
                 }
             }
 

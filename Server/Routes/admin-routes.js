@@ -4,6 +4,7 @@ const BatchController = require('../Controllers/batch-controller');
 const ItemDetailsController = require('../Controllers/item-details-controller');
 const AdminTableController = require('../Controllers/admin-table-controller');
 const BatchManagementController = require('../Controllers/batch-management-controller');
+const ProductPairingController = require('../Controllers/product-pairing-controller');
 const { uploadMultiple, handleUploadErrors } = require('../Middleware/upload-middleware');
 const { PRODUCT_CATEGORIES, BRANDS, STRAIN_TYPES, UNIT_SIZE_MEASUREMENTS, BUYER_TYPES } = require('../config/constants');
 
@@ -138,5 +139,27 @@ router.delete('/api/images/:imageId', ItemDetailsController.deleteImage);
 
 //delete product details
 router.delete('/api/details/:itemName', ItemDetailsController.deleteDetails);
+
+//==============================================
+// PRODUCT PAIRING API
+//==============================================
+
+//get products available for pairing
+router.get('/api/products/:itemName/available-for-pairing', ProductPairingController.getAvailableForPairing);
+
+//pair products to a master
+router.post('/api/products/:itemName/pair', ProductPairingController.pairProducts);
+
+//unpair a child product
+router.delete('/api/products/:itemName/unpair', ProductPairingController.unpairProduct);
+
+//get children of a master
+router.get('/api/products/:itemName/children', ProductPairingController.getChildren);
+
+//get pairing information
+router.get('/api/products/:itemName/pairing-info', ProductPairingController.getPairingInfo);
+
+//update display name for master
+router.put('/api/products/:itemName/display-name', ProductPairingController.updateDisplayName);
 
 module.exports = router;

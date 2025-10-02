@@ -119,7 +119,49 @@ function displayProduct() {
     if (!currentProduct) return;
 
     const displayName = currentProduct.display_item_name || currentProduct.item_name;
-    document.getElementById('product-name').textContent = displayName;
+    const productNameEl = document.getElementById('product-name');
+    productNameEl.textContent = displayName;
+
+    // Remove any existing linked products info
+    const existingInfo = document.querySelector('.linked-products-info');
+    if (existingInfo) {
+        existingInfo.remove();
+    }
+
+    // Check if this product is linked to multiple original products
+    const isLinked = currentProduct.linked_product_count > 1;
+    const linkedCount = currentProduct.linked_product_count || 1;
+
+    if (isLinked) {
+        // Add visual indicator for linked products
+        const linkedBadge = document.createElement('span');
+        linkedBadge.className = 'linked-products-badge';
+        linkedBadge.textContent = `🔗 ${linkedCount} Products Linked`;
+        linkedBadge.title = 'This display name groups multiple products together';
+        linkedBadge.style.cssText = 'margin-left: 10px; padding: 4px 10px; background: #4CAF50; color: white; border-radius: 12px; font-size: 0.85rem; font-weight: normal;';
+        productNameEl.appendChild(linkedBadge);
+
+        // Show which original products are linked
+        const originalNamesEl = document.createElement('div');
+        originalNamesEl.className = 'linked-products-info';
+        originalNamesEl.style.cssText = 'margin-top: 10px; padding: 12px; background: #e8f5e9; border-left: 4px solid #4CAF50; border-radius: 4px; font-size: 0.9rem;';
+
+        const originalNames = currentProduct.original_item_names || [];
+        originalNamesEl.innerHTML = `
+            <strong>📦 Linked Products:</strong>
+            <ul style="margin: 8px 0 0 20px; padding: 0;">
+                ${originalNames.map(name => `<li style="margin: 4px 0;">${name}</li>`).join('')}
+            </ul>
+            <p style="margin: 8px 0 0 0; font-size: 0.85rem; color: #2e7d32;">
+                ℹ️ All batches from these products are being managed together using shared product information from the most complete product.
+            </p>
+        `;
+
+        // Insert after the product-details div
+        const productDetailsDiv = document.querySelector('.product-details');
+        productDetailsDiv.parentNode.insertBefore(originalNamesEl, productDetailsDiv.nextSibling);
+    }
+
     document.getElementById('product-category').textContent = currentProduct.category || '-';
     document.getElementById('product-brand').textContent = currentProduct.brand || '-';
     document.getElementById('product-price').textContent = currentProduct.default_price ? `$${parseFloat(currentProduct.default_price).toFixed(2)}` : '-';
@@ -173,6 +215,14 @@ function createBatchCard(batch) {
     nameValue.textContent = batch.batch_name;
     header.appendChild(nameLabel);
     header.appendChild(nameValue);
+
+    // Show source product if this is a linked product group
+    if (batch.original_item_name && currentProduct.linked_product_count > 1) {
+        const sourceLabel = document.createElement('div');
+        sourceLabel.style.cssText = 'font-size: 0.75rem; color: #666; margin-top: 4px;';
+        sourceLabel.textContent = `From: ${batch.original_item_name}`;
+        header.appendChild(sourceLabel);
+    }
 
     // Custom name input (compact)
     const customNameGroup = document.createElement('div');

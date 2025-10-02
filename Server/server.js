@@ -11,7 +11,6 @@ const BatchSyncService = require('./Services/batch-sync-service');
 
 //import routes
 const adminRoutes = require('./Routes/admin-routes');
-const orderRoutes = require('./Routes/order-routes');
 const apiRoutes = require('./Routes/api-routes');
 
 //create express app
@@ -38,7 +37,6 @@ app.use((req, res, next) => {
 
 //routes
 app.use('/admin', adminRoutes);
-app.use('/order', orderRoutes);
 app.use('/api', apiRoutes);
 
 //root redirect
@@ -65,7 +63,6 @@ CleanupService.startPeriodicCleanup(60, 20);
 app.listen(PORT, () => {
     logger.info(`🚀 Server started on port ${PORT}`);
     logger.info(`📝 Admin panel: http://localhost:${PORT}/admin`);
-    logger.info(`🛒 Order page: http://localhost:${PORT}/order`);
     logger.info(`💚 Green Releaf Amaze Ordering System`);
     logger.info(`🔄 Batch sync: every 15 minutes`);
     logger.info(`🧹 Cleanup service: every 60 minutes (20 min grace period)`);

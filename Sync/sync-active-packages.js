@@ -13,7 +13,7 @@ const DB_CONFIG = {
 const API_CREDENTIALS = {
     hostname: process.env.T3_HOSTNAME || 'mo.metrc.com',
     username: process.env.T3_USERNAME || 'AGT007392',
-    password: process.env.T3_PASSWORD || 'Metalhead3!',
+    password: process.env.T3_PASSWORD || 'Metalhead4!',
 };
 const LOG_LEVEL_CONFIG = process.env.LOG_LEVEL || 'INFO';
 const MAX_CONCURRENT_API_REQUESTS = parseInt(process.env.MAX_CONCURRENT_API_REQUESTS, 10) || 3;

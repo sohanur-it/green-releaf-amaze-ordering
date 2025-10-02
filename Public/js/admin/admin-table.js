@@ -66,8 +66,39 @@ function createTableRow(product) {
     row.className = 'product-row';
     row.dataset.itemName = product.item_name;
 
-    // Display name (editable)
+    // Add visual styling for children
+    if (product.is_child) {
+        row.classList.add('child-product-row');
+    }
+    if (product.is_master) {
+        row.classList.add('master-product-row');
+    }
+
+    // Display name (editable for masters only)
     const displayName = product.display_item_name || product.original_item_name || product.item_name;
+
+    // Create display name cell content
+    let displayNameContent = '';
+    if (product.is_child && product.master_info) {
+        // Child product - show linked icon and master's display name
+        displayNameContent = `
+            <span class="child-product-indicator" title="Paired to ${escapeHtml(product.master_info.display_item_name || product.master_info.item_name)}">
+                🔗
+            </span>
+            <span class="child-display-name">${escapeHtml(product.master_info.display_item_name || product.master_info.item_name)}</span>
+        `;
+    } else if (product.is_master) {
+        // Master product - show display name with badge
+        displayNameContent = `
+            ${escapeHtml(displayName)}
+            <span class="master-badge" title="${product.child_count} product(s) paired">
+                👑 Master (${product.child_count})
+            </span>
+        `;
+    } else {
+        // Independent product
+        displayNameContent = escapeHtml(displayName);
+    }
 
     // Completion badge
     const completionBadge = `<span class="completion-badge ${product.completion_badge_class}">${product.completion_percentage}%</span>`;
@@ -82,8 +113,11 @@ function createTableRow(product) {
         ? '<span class="status-icon status-yes" title="Has description">✓</span>'
         : '<span class="status-icon status-no" title="No description">✗</span>';
 
+    // Editable class for display name - not editable for children
+    const displayNameEditable = product.is_child ? '' : 'cell-editable';
+
     row.innerHTML = `
-        <td class="cell-editable" data-field="display_item_name" data-type="text">${escapeHtml(displayName)}</td>
+        <td class="${displayNameEditable}" data-field="display_item_name" data-type="text">${displayNameContent}</td>
         <td>${escapeHtml(product.original_item_name || product.item_name)}</td>
         <td class="completion-cell">${completionBadge}</td>
         <td class="cell-editable" data-field="category" data-type="select">${escapeHtml(product.category || '')}</td>
@@ -94,12 +128,34 @@ function createTableRow(product) {
         <td>${product.batch_count || 0}</td>
         <td>${product.total_packages || 0}</td>
         <td class="actions-cell">
-            <button class="btn-icon btn-expand" onclick="toggleBatchDetails(this, '${escapeHtml(product.item_name)}')" title="View batches">▼</button>
-            <a href="/admin/item/${encodeURIComponent(product.item_name)}" class="btn-icon btn-edit" title="Edit full details">✎</a>
+            ${createActionButtons(product)}
         </td>
     `;
 
     return row;
+}
+
+/**
+ * Create action buttons based on product type (master/child/independent)
+ */
+function createActionButtons(product) {
+    let buttons = '';
+
+    if (product.is_child) {
+        // Child product - show unpair button
+        buttons += `<button class="btn-icon btn-unpair" onclick="handleUnpair('${escapeHtml(product.item_name)}')" title="Unpair from master">🔓</button>`;
+    } else if (product.completion_percentage >= 82) {
+        // Product is at least 82% complete (has all required fields except possibly images) - show pair button
+        buttons += `<button class="btn-icon btn-pair" onclick="handlePair('${escapeHtml(product.item_name)}')" title="Pair products">🔗</button>`;
+    }
+
+    // Standard buttons for all products
+    buttons += `
+        <button class="btn-icon btn-expand" onclick="toggleBatchDetails(this, '${escapeHtml(product.item_name)}')" title="View batches">▼</button>
+        <a href="/admin/item/${encodeURIComponent(product.item_name)}" class="btn-icon btn-edit" title="Edit full details">✎</a>
+    `;
+
+    return buttons;
 }
 
 // Setup table event handlers
@@ -381,9 +437,27 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// Handle pairing action
+function handlePair(itemName) {
+    openPairingModal(itemName, async () => {
+        // Reload table data after successful pairing
+        await loadTableData();
+    });
+}
+
+// Handle unpair action
+function handleUnpair(itemName) {
+    showUnpairConfirmation(itemName, async () => {
+        // Reload table data after successful unpair
+        await loadTableData();
+    });
+}
+
 // Expose functions to window for other scripts
 window.applyFilters = applyFilters;
 window.updateTableRow = updateTableRow;
+window.handlePair = handlePair;
+window.handleUnpair = handleUnpair;
 
 // Description Modal Functions
 let currentDescriptionCell = null;
