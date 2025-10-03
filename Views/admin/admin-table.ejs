@@ -73,21 +73,103 @@
 
             <!-- Table Container -->
             <div class="products-main">
+                <!-- Table Controls -->
+                <div class="table-controls-bar">
+                    <button class="btn-table-control" id="toggle-column-visibility" title="Show/Hide Columns">
+                        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        Columns
+                    </button>
+                </div>
+
+                <!-- Column Visibility Menu -->
+                <div id="column-visibility-menu" class="column-visibility-menu" style="display: none;">
+                    <div class="column-visibility-header">
+                        <h3>Show/Hide Columns</h3>
+                        <button class="btn-close-menu" onclick="closeColumnMenu()">×</button>
+                    </div>
+                    <div class="column-visibility-list" id="column-visibility-list">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
                 <div class="admin-table-container">
-                    <table id="admin-table" class="admin-table">
+                    <table id="admin-table" class="admin-table modern-table">
                         <thead>
-                            <tr>
-                                <th data-sort="display_name">Display Name</th>
-                                <th data-sort="original_name">Original Name</th>
-                                <th data-sort="completion">Completion</th>
-                                <th data-sort="category">Category</th>
-                                <th data-sort="brand">Brand</th>
-                                <th data-sort="price">Price</th>
-                                <th>Photos</th>
-                                <th>Description</th>
-                                <th data-sort="batches"># Batches</th>
-                                <th data-sort="packages">Packages</th>
-                                <th>Actions</th>
+                            <tr id="table-header-row">
+                                <th data-sort="display_name" data-column="display_name" class="resizable">
+                                    <div class="th-content">
+                                        <span class="th-text">Display Name</span>
+                                    </div>
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th data-sort="original_name" data-column="original_name" class="resizable">
+                                    <div class="th-content">
+                                        <span class="th-text">Original Name</span>
+                                    </div>
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th data-sort="completion" data-column="completion" class="resizable">
+                                    <div class="th-content">
+                                        <span class="th-text">Completion</span>
+                                    </div>
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th data-sort="category" data-column="category" class="resizable">
+                                    <div class="th-content">
+                                        <span class="th-text">Category</span>
+                                    </div>
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th data-sort="brand" data-column="brand" class="resizable">
+                                    <div class="th-content">
+                                        <span class="th-text">Brand</span>
+                                    </div>
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th data-sort="price" data-column="price" class="resizable">
+                                    <div class="th-content">
+                                        <span class="th-text">Price</span>
+                                    </div>
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th data-column="photos" class="resizable">
+                                    <div class="th-content">
+                                        <span class="th-text">Photos</span>
+                                    </div>
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th data-column="description" class="resizable">
+                                    <div class="th-content">
+                                        <span class="th-text">Description</span>
+                                    </div>
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th data-sort="batches" data-column="batches" class="resizable">
+                                    <div class="th-content">
+                                        <span class="th-text"># Batches</span>
+                                    </div>
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th data-sort="full_packages" data-column="full_packages" class="resizable">
+                                    <div class="th-content">
+                                        <span class="th-text">Full Packages</span>
+                                    </div>
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th data-sort="partial_packages" data-column="partial_packages" class="resizable">
+                                    <div class="th-content">
+                                        <span class="th-text">Partial Packages</span>
+                                    </div>
+                                    <div class="resize-handle"></div>
+                                </th>
+                                <th data-column="actions" class="non-resizable">
+                                    <div class="th-content">
+                                        <span class="th-text">Actions</span>
+                                    </div>
+                                </th>
                             </tr>
                         </thead>
                         <tbody id="admin-table-body">

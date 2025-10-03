@@ -33,6 +33,8 @@ class AdminTableController {
                     return {
                         ...details,
                         batch_count: batch.batch_count,
+                        total_full_packages: batch.total_full_packages || 0,
+                        total_partial_packages: batch.total_partial_packages || 0,
                         total_packages: (batch.total_full_packages || 0) + (batch.total_partial_packages || 0),
                         total_quantity_available: batch.total_quantity_available
                     };
@@ -60,6 +62,8 @@ class AdminTableController {
                         image_count: 0,
                         images: null,
                         batch_count: batch.batch_count,
+                        total_full_packages: batch.total_full_packages || 0,
+                        total_partial_packages: batch.total_partial_packages || 0,
                         total_packages: (batch.total_full_packages || 0) + (batch.total_partial_packages || 0),
                         total_quantity_available: batch.total_quantity_available,
                         last_modified: null,

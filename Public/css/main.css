@@ -775,6 +775,116 @@ body {
    ADMIN TABLE STYLES
    =========================== */
 
+/* Table controls bar */
+.table-controls-bar {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    align-items: center;
+}
+
+.btn-table-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    background: var(--white);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-dark);
+    transition: all 0.2s;
+}
+
+.btn-table-control:hover {
+    background: var(--light-bg);
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+}
+
+.btn-table-control .icon {
+    width: 18px;
+    height: 18px;
+}
+
+/* Column visibility menu */
+.column-visibility-menu {
+    position: absolute;
+    top: 50px;
+    left: 20px;
+    background: var(--white);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: var(--shadow-lg);
+    z-index: 1000;
+    min-width: 250px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.column-visibility-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.column-visibility-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--text-dark);
+}
+
+.btn-close-menu {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-close-menu:hover {
+    color: var(--danger-color);
+}
+
+.column-visibility-list {
+    padding: 0.5rem;
+}
+
+.column-visibility-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: background 0.2s;
+}
+
+.column-visibility-item:hover {
+    background: var(--light-bg);
+}
+
+.column-visibility-item input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.column-visibility-item span {
+    font-size: 0.875rem;
+    color: var(--text-dark);
+}
+
 /* Admin table container */
 .admin-table-container {
     overflow-x: auto;
@@ -783,43 +893,193 @@ body {
     border-radius: 12px;
     padding: 1.5rem;
     box-shadow: var(--shadow-sm);
+    position: relative;
 }
 
-/* Admin table */
-.admin-table {
+/* Modern table */
+.modern-table {
     width: 100%;
-    border-collapse: collapse;
-    min-width: 1400px;
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 1600px;
     font-size: 0.875rem;
+    table-layout: fixed;
 }
 
-.admin-table th,
-.admin-table td {
+.modern-table th,
+.modern-table td {
     padding: 12px 16px;
     text-align: left;
     border-bottom: 1px solid var(--border-color);
-    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 200px;
+    position: relative;
 }
 
-.admin-table th {
+/* Default column widths */
+.modern-table th[data-column="display_name"],
+.modern-table td[data-column="display_name"] {
+    width: 200px;
+    min-width: 150px;
+}
+
+.modern-table th[data-column="original_name"],
+.modern-table td[data-column="original_name"] {
+    width: 200px;
+    min-width: 150px;
+}
+
+.modern-table th[data-column="completion"],
+.modern-table td[data-column="completion"] {
+    width: 120px;
+    min-width: 100px;
+}
+
+.modern-table th[data-column="category"],
+.modern-table td[data-column="category"] {
+    width: 140px;
+    min-width: 100px;
+}
+
+.modern-table th[data-column="brand"],
+.modern-table td[data-column="brand"] {
+    width: 140px;
+    min-width: 100px;
+}
+
+.modern-table th[data-column="price"],
+.modern-table td[data-column="price"] {
+    width: 100px;
+    min-width: 80px;
+}
+
+.modern-table th[data-column="photos"],
+.modern-table td[data-column="photos"] {
+    width: 80px;
+    min-width: 60px;
+    text-align: center;
+}
+
+.modern-table th[data-column="description"],
+.modern-table td[data-column="description"] {
+    width: 100px;
+    min-width: 80px;
+    text-align: center;
+}
+
+.modern-table th[data-column="batches"],
+.modern-table td[data-column="batches"] {
+    width: 100px;
+    min-width: 80px;
+    text-align: center;
+}
+
+.modern-table th[data-column="full_packages"],
+.modern-table td[data-column="full_packages"] {
+    width: 130px;
+    min-width: 100px;
+    text-align: center;
+}
+
+.modern-table th[data-column="partial_packages"],
+.modern-table td[data-column="partial_packages"] {
+    width: 140px;
+    min-width: 100px;
+    text-align: center;
+}
+
+.modern-table th[data-column="actions"],
+.modern-table td[data-column="actions"] {
+    width: 180px;
+    min-width: 150px;
+}
+
+/* Table header cells */
+.modern-table th {
     background: var(--light-bg);
     font-weight: 600;
     color: var(--text-dark);
     position: sticky;
     top: 0;
-    z-index: 10;
+    z-index: 20;
+    user-select: none;
+    border-right: 1px solid var(--border-color);
 }
 
-.admin-table th[data-sort] {
+.modern-table th:last-child {
+    border-right: none;
+}
+
+/* Header content wrapper */
+.th-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.th-text {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Sortable columns */
+.modern-table th[data-sort] .th-content {
     cursor: pointer;
+}
+
+.modern-table th[data-sort]:hover {
+    background: #e9ecef;
+}
+
+/* Resize handle */
+.resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+    cursor: col-resize;
+    user-select: none;
+    z-index: 25;
+    background: transparent;
+    transition: background 0.2s;
+}
+
+.resize-handle:hover {
+    background: rgba(42, 99, 84, 0.2);
+}
+
+.resize-handle:active {
+    background: rgba(42, 99, 84, 0.4);
+}
+
+/* Dragging states */
+.modern-table th.dragging {
+    opacity: 0.5;
+    background: var(--primary-color);
+    color: var(--white);
+}
+
+.modern-table th.drag-over {
+    background: var(--accent-color);
+    border-left: 3px solid var(--primary-color);
+}
+
+.modern-table.resizing {
+    cursor: col-resize;
     user-select: none;
 }
 
-.admin-table th[data-sort]:hover {
-    background: #e9ecef;
+.modern-table.resizing * {
+    cursor: col-resize !important;
+}
+
+/* Table body */
+.admin-table tbody tr:hover {
+    background: var(--light-bg);
 }
 
 .sort-arrow {
@@ -871,15 +1131,26 @@ body {
 }
 
 .status-icon {
-    font-size: 1.125rem;
+    width: 20px;
+    height: 20px;
+    display: inline-block;
+    vertical-align: middle;
 }
 
 .status-yes {
     color: var(--success-color);
 }
 
+.status-yes .status-icon {
+    stroke: var(--success-color);
+}
+
 .status-no {
     color: var(--text-muted);
+}
+
+.status-no .status-icon {
+    stroke: var(--text-muted);
 }
 
 /* Editable cells */
@@ -927,25 +1198,71 @@ body {
 .btn-icon {
     background: none;
     border: 1px solid var(--border-color);
-    padding: 0.5rem 0.75rem;
+    padding: 0.5rem;
     margin-right: 0.5rem;
     cursor: pointer;
-    border-radius: 4px;
-    font-size: 1rem;
+    border-radius: 6px;
     transition: all 0.2s;
     text-decoration: none;
     color: var(--text-dark);
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    min-height: 32px;
 }
 
 .btn-icon:hover {
     background: var(--light-bg);
     border-color: var(--primary-color);
-    color: var(--primary-color);
+    transform: translateY(-1px);
 }
 
-.btn-expand {
-    font-weight: bold;
+.btn-icon-svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    fill: none;
+}
+
+.btn-icon:hover .btn-icon-svg {
+    stroke: var(--primary-color);
+}
+
+.btn-pair:hover {
+    border-color: var(--primary-color);
+    background: rgba(42, 99, 84, 0.1);
+}
+
+.btn-pair:hover .btn-icon-svg {
+    stroke: var(--primary-color);
+}
+
+.btn-unpair:hover {
+    border-color: var(--warning-color);
+    background: rgba(255, 193, 7, 0.1);
+}
+
+.btn-unpair:hover .btn-icon-svg {
+    stroke: var(--warning-color);
+}
+
+.btn-edit:hover {
+    border-color: var(--info-color);
+    background: rgba(23, 162, 184, 0.1);
+}
+
+.btn-edit:hover .btn-icon-svg {
+    stroke: var(--info-color);
+}
+
+.btn-expand:hover {
+    border-color: var(--primary-color);
+    background: rgba(42, 99, 84, 0.1);
+}
+
+.btn-expand:hover .btn-icon-svg {
+    stroke: var(--primary-color);
 }
 
 /* Expandable batch details row */
