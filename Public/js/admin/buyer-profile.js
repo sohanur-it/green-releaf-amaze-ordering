@@ -218,8 +218,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 locationForm.setAttribute('data-action', `/api/crm/locations/${locationId}`);
                 locationIdField.value = locationId;
 
-                //explicitly set the value for each field using its correct ID.
-                //this is more verbose but 100% reliable.
                 document.getElementById('locationName').value = target.dataset.locationName || '';
                 document.getElementById('locationLineOne').value = target.dataset.locationLine_one || '';
                 document.getElementById('locationLineTwo').value = target.dataset.locationLine_two || '';
@@ -237,6 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const modalTitle = confirmationModal.querySelector('#modalTitle');
                 const modalText = confirmationModal.querySelector('#modalText');
                 const modalForm = confirmationModal.querySelector('#modalConfirmForm');
+
                 modalTitle.textContent = 'Delete Location?';
                 modalText.textContent = `Are you sure you want to delete the "${target.dataset.locationName}" location?`;
                 modalForm.action = `/api/crm/locations/${locationId}`;
@@ -284,6 +283,143 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // ========================================================
+    // ========== NOTE CRUD FUNCTIONALITY =====================
+    // ========================================================
+
+    // === DOM ELEMENT SELECTORS (Notes) ===
+    const addNoteBtn = document.getElementById('addNoteBtn');
+    const noteModal = document.getElementById('noteModal');
+    const noteForm = document.getElementById('noteForm');
+    const notesList = document.getElementById('notes-list');
+
+    // === MODAL & FORM ELEMENTS (Notes) ===
+    const noteModalTitle = document.getElementById('noteModalTitle');
+    const noteFormError = document.getElementById('noteFormError');
+    const noteIdField = document.getElementById('noteId');
+    const noteTitleField = document.getElementById('noteTitle');
+    const noteTextField = document.getElementById('noteText');
+
+    // === RENDER FUNCTION (Notes) ===
+    const renderNoteListItem = (note) => {
+        const formattedDate = new Date(note.created_at).toLocaleString();
+        const formattedText = (note.text || '').replace(/\r\n|\r|\n/g, '<br>');
+        return `
+            <div class="note-header">
+                <strong>${note.title || 'Note'}</strong>
+                <div class="note-meta">
+                    <span class="note-date">${formattedDate}</span>
+                    <div class="note-actions">
+                        <button class="action-btn" data-action="edit-note"
+                            data-note-id="${note.entry_id}"
+                            data-note-title="${note.title || ''}"
+                            data-note-text="${note.text || ''}">
+                            Edit
+                        </button>
+                        <button class="action-btn" data-action="delete-note"
+                            data-note-id="${note.entry_id}"
+                            data-note-title="${note.title || 'Note'}">
+                            Delete
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <p class="note-text">${formattedText}</p>
+        `;
+    };
+
+    // === EVENT: Click "Add Note" button ===
+    if (addNoteBtn) {
+        addNoteBtn.addEventListener('click', () => {
+            noteForm.reset();
+            noteModalTitle.textContent = 'Add New Note';
+            noteForm.setAttribute('data-method', 'POST');
+            noteForm.setAttribute('data-action', `/api/crm/buyers/${addNoteBtn.dataset.buyerId}/notes`);
+            noteIdField.value = '';
+            noteFormError.style.display = 'none';
+            openModal(noteModal);
+        });
+    }
+
+    // === EVENT DELEGATION: Clicks inside the notes list ===
+    if (notesList) {
+        notesList.addEventListener('click', (e) => {
+            const target = e.target.closest('[data-action]');
+            if (!target) return;
+
+            const action = target.dataset.action;
+            const noteId = target.dataset.noteId;
+
+            if (action === 'edit-note') {
+                noteForm.reset();
+                noteModalTitle.textContent = 'Edit Note';
+                noteForm.setAttribute('data-method', 'PATCH');
+                noteForm.setAttribute('data-action', `/api/crm/notes/${noteId}`);
+                noteIdField.value = noteId;
+                noteTitleField.value = target.dataset.noteTitle;
+                noteTextField.value = target.dataset.noteText;
+                noteFormError.style.display = 'none';
+                openModal(noteModal);
+            }
+
+            if (action === 'delete-note') {
+                const confirmationModal = document.querySelector('#confirmationModal');
+                const modalTitle = confirmationModal.querySelector('#modalTitle');
+                const modalText = confirmationModal.querySelector('#modalText');
+                const modalForm = confirmationModal.querySelector('#modalConfirmForm');
+
+                modalTitle.textContent = 'Delete Note?';
+                modalText.textContent = `Are you sure you want to delete the note titled "${target.dataset.noteTitle}"?`;
+                modalForm.action = `/api/crm/notes/${noteId}`;
+                modalForm.setAttribute('data-method', 'DELETE');
+                modalForm.setAttribute('data-target-row', `[data-note-id="${noteId}"]`);
+                openModal(confirmationModal);
+            }
+        });
+    }
+
+    // === EVENT: Submission of the Add/Edit Note Form ===
+    if (noteForm) {
+        noteForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const action = noteForm.getAttribute('data-action');
+            const method = noteForm.getAttribute('data-method');
+            const formData = new FormData(noteForm);
+            const noteData = Object.fromEntries(formData.entries());
+
+            try {
+                const response = await fetch(action, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(noteData),
+                });
+                if (!response.ok) throw new Error((await response.json()).message);
+                const resultNote = await response.json();
+
+                if (method === 'POST') {
+                    const emptyMessage = document.getElementById('empty-notes-message');
+                    if (emptyMessage) {
+                        emptyMessage.remove();
+                        notesList.style.display = '';
+                    }
+                    const newListItem = document.createElement('li');
+                    newListItem.className = 'note-item';
+                    newListItem.dataset.noteId = resultNote.entry_id;
+                    newListItem.innerHTML = renderNoteListItem(resultNote);
+                    notesList.prepend(newListItem);
+                } else {
+                    const itemToUpdate = notesList.querySelector(`[data-note-id="${resultNote.entry_id}"]`);
+                    if (itemToUpdate) itemToUpdate.innerHTML = renderNoteListItem(resultNote);
+                }
+                closeModal(noteModal);
+            } catch (error) {
+                noteFormError.textContent = `Error: ${error.message}`;
+                noteFormError.style.display = 'block';
+            }
+        });
+    }
+
+
+    // ========================================================
     // ========== GENERIC DELETE CONFIRMATION =================
     // ========================================================
     const confirmationForm = document.getElementById('modalConfirmForm');
@@ -293,25 +429,24 @@ document.addEventListener('DOMContentLoaded', () => {
             const action = confirmationForm.action;
             const method = confirmationForm.dataset.method;
             const targetRowSelector = confirmationForm.dataset.targetRow;
-            const tableBody = document.querySelector(targetRowSelector)?.closest('tbody');
+            const itemToDelete = document.querySelector(targetRowSelector);
+            const container = itemToDelete?.parentElement;
 
             try {
                 const response = await fetch(action, { method: method });
                 if (!response.ok && response.status !== 204) throw new Error('Failed to delete');
 
-                const rowToDelete = document.querySelector(targetRowSelector);
-                if (rowToDelete) rowToDelete.remove();
+                if (itemToDelete) itemToDelete.remove();
 
-                if (tableBody && tableBody.rows.length === 0) {
-                    let emptyMessage = '';
-                    let colSpan = 5;
-                    if (tableBody.id === 'contacts-table-body') {
-                        emptyMessage = `<tr id="empty-contacts-message"><td colspan="${colSpan}" class="empty-state">No contacts found for this buyer.</td></tr>`;
-                    } else if (tableBody.id === 'locations-table-body') {
-                        colSpan = 4;
-                        emptyMessage = `<tr id="empty-locations-message"><td colspan="${colSpan}" class="empty-state">No locations found for this buyer.</td></tr>`;
+                if (container && container.children.length === 0) {
+                    if (container.id === 'contacts-table-body') {
+                        container.innerHTML = `<tr id="empty-contacts-message"><td colspan="5" class="empty-state">No contacts found for this buyer.</td></tr>`;
+                    } else if (container.id === 'locations-table-body') {
+                        container.innerHTML = `<tr id="empty-locations-message"><td colspan="4" class="empty-state">No locations found for this buyer.</td></tr>`;
+                    } else if (container.id === 'notes-list') {
+                        const cardBody = container.closest('.card-body');
+                        cardBody.innerHTML = `<div id="empty-notes-message"><p class="empty-state">No notes found for this buyer.</p></div><ul class="notes-list" id="notes-list" style="display: none;"></ul>`;
                     }
-                    tableBody.innerHTML = emptyMessage;
                 }
                 closeModal(document.getElementById('confirmationModal'));
             } catch (error) {

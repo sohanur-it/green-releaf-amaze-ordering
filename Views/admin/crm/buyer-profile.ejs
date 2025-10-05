@@ -136,23 +136,44 @@
         <div class="info-card">
             <div class="card-header">
                 <h3>Notes</h3>
-                <button class="btn btn-secondary btn-sm">Add Note</button>
+                <button class="btn btn-secondary btn-sm" id="addNoteBtn" data-buyer-id="<%= buyer.details.entry_id %>">
+                    Add Note
+                </button>
             </div>
             <div class="card-body">
                 <% if (buyer.notes.length > 0) { %>
-                    <ul class="notes-list">
+                    <ul class="notes-list" id="notes-list">
                         <% buyer.notes.forEach(note => { %>
-                            <li class="note-item">
+                            <li class="note-item" data-note-id="<%= note.entry_id %>">
                                 <div class="note-header">
                                     <strong><%= note.title || 'Note' %></strong>
-                                    <span class="note-date"><%= new Date(note.created_at).toLocaleString() %></span>
+                                    <div class="note-meta">
+                                        <span class="note-date"><%= new Date(note.created_at).toLocaleString() %></span>
+                                        <div class="note-actions">
+                                            <button class="action-btn" data-action="edit-note"
+                                                    data-note-id="<%= note.entry_id %>"
+                                                    data-note-title="<%= note.title || '' %>"
+                                                    data-note-text="<%= note.text || '' %>">
+                                                Edit
+                                            </button>
+                                            <button class="action-btn" data-action="delete-note"
+                                                    data-note-id="<%= note.entry_id %>"
+                                                    data-note-title="<%= note.title || 'Note' %>">
+                                                Delete
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
-                                <p class="note-text"><%= note.text %></p>
+                                <p class="note-text"><%- note.text.replace(/\r\n|\r|\n/g, '<br>') %></p>
                             </li>
                         <% }); %>
                     </ul>
                 <% } else { %>
-                    <p class="empty-state">No notes found for this buyer.</p>
+                    <div id="empty-notes-message">
+                        <p class="empty-state">No notes found for this buyer.</p>
+                    </div>
+                    <!-- Add an empty list for JS to populate -->
+                    <ul class="notes-list" id="notes-list" style="display: none;"></ul>
                 <% } %>
             </div>
         </div>
@@ -200,6 +221,9 @@
 
 <!-- Include the location modal partial -->
 <%- include('../../partials/location-modal') %>
+
+<!-- Include the note modal partial -->
+<%- include('../../partials/note-modal') %>
 
 <!-- Include the profile page's specific javascript -->
 <script src="/public/js/admin/buyer-profile.js"></script>

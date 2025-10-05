@@ -633,3 +633,49 @@ body {
     background-color: var(--bg-color);
     color: var(--primary-color);
 }
+
+/* -- Note Action Styles -- */
+.note-meta {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.note-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.note-item:not(:hover) .note-actions {
+    opacity: 0; /* Hide by default */
+}
+
+.note-item {
+    transition: background-color 0.2s ease;
+}
+
+.note-item:hover {
+    background-color: #f6f8fa; /* A subtle hover effect for the whole note */
+}
+
+.form-group textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 16px;
+    font-family: inherit;
+    background-color: #fff;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    resize: vertical;
+}
+
+.form-group textarea:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(3, 102, 214, 0.3);
+}
+
+.note-item:hover .action-btn {
+    opacity: 1;
+}

@@ -5,6 +5,7 @@ const router = express.Router();
 const buyerController = require('../../Controllers/crm/buyerController');
 const contactController = require('../../Controllers/crm/contactController');
 const locationController = require('../../Controllers/crm/locationController');
+const noteController = require('../../Controllers/crm/noteController');
 
 // this is where all our crm api routes will go. keeps it cleannn
 
@@ -43,6 +44,8 @@ router.patch('/contacts/:contactId', contactController.updateContact);
 // @access  Private
 router.delete('/contacts/:contactId', contactController.deleteContact);
 
+// --- Location Routes ---
+
 // @route   POST /api/crm/buyers/:buyerId/locations
 // @desc    Create a new location for a buyer
 router.post('/buyers/:buyerId/locations', locationController.createLocation);
@@ -54,6 +57,20 @@ router.patch('/locations/:locationId', locationController.updateLocation);
 // @route   DELETE /api/crm/locations/:locationId
 // @desc    Delete a location
 router.delete('/locations/:locationId', locationController.deleteLocation);
+
+// --- NOTE ROUTES ---
+
+// @route   POST /api/crm/buyers/:buyerId/notes
+// @desc    Create a new note for a buyer
+router.post('/buyers/:buyerId/notes', noteController.createNote);
+
+// @route   PATCH /api/crm/notes/:noteId
+// @desc    Update an existing note
+router.patch('/notes/:noteId', noteController.updateNote);
+
+// @route   DELETE /api/crm/notes/:noteId
+// @desc    Delete a note
+router.delete('/notes/:noteId', noteController.deleteNote);
 
 //just a placeholder so the app doesnt crash lol
 router.get('/', (req, res) => {
