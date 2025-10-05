@@ -5,44 +5,56 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Green Releaf - <%= title %></title>
-    <!-- lil bit of Google Fonts for that clean look. Lol -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Grid.js CSS for the fancy table -->
     <link href="https://unpkg.com/gridjs/dist/theme/mermaid.min.css" rel="stylesheet" />
-    <!-- Our custom stylesheet -->
     <link rel="stylesheet" href="/public/css/admin-style.css">
-
-    <!-- Grid.js for the table magic - MOVED TO HEAD -->
     <script src="https://unpkg.com/gridjs/dist/gridjs.umd.js"></script>
+    <script>
+        try {
+            if (localStorage.getItem('sidebarState') === 'collapsed') {
+                document.documentElement.classList.add('sidebar-is-collapsed');
+            }
+        } catch (e) {}
+    </script>
 </head>
 <body>
-<div class="app-container">
-    <!-- Sidebar -->
+<div class="app-container" id="app-container">
     <aside class="sidebar">
         <div class="sidebar-header">
-            <h2 class="sidebar-title">Green Releaf</h2>
+            <h2 class="sidebar-title">GR</h2>
+            <span class="sidebar-title-full">Green Releaf</span>
         </div>
         <nav class="sidebar-nav">
-            <!-- This logic was slightly off, corrected to use a variable -->
-            <a href="/admin" class="nav-link <%= title === 'Dashboard' ? 'active' : '' %>">Dashboard</a>
-            <a href="/admin/crm" class="nav-link <%= title.startsWith('CRM') ? 'active' : '' %>">CRM</a>
+            <a href="/admin" class="nav-link <%= title === 'Dashboard' ? 'active' : '' %>" title="Dashboard">
+                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                <span class="nav-link-text">Dashboard</span>
+            </a>
+            <a href="/admin/crm" class="nav-link <%= title.startsWith('CRM') ? 'active' : '' %>" title="CRM">
+                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                <span class="nav-link-text">CRM</span>
+            </a>
         </nav>
+        <div class="sidebar-footer">
+            <button class="nav-link sidebar-toggle" id="sidebar-toggle" title="Toggle Sidebar">
+                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
+            </button>
+        </div>
     </aside>
 
-    <!-- Main Content -->
     <main class="main-content">
         <header class="main-header">
             <h1><%= title %></h1>
         </header>
         <div class="content-body">
-            <%- body %> <!-- This is where the actual page content gets injected -->
+            <%- body %>
         </div>
     </main>
 </div>
-<%- include('../partials/confirmation-modal') %>
 
+<%- include('../partials/confirmation-modal') %>
 <script src="/public/js/shared/modal.js"></script>
+<script src="/public/js/shared/main.js"></script>
 </body>
 </html>
