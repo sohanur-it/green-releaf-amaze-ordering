@@ -1,43 +1,33 @@
+// Server/Middleware/error-handler.js
+
 const logger = require('../../Utilities/logger');
 
-//global error handler middleware
+// this thing catches any requests for routes that we haven't defined.
+// basically a "404 Not Found" message.
+const notFoundHandler = (req, res, next) => {
+    const error = new Error(`Not Found - ${req.originalUrl}`);
+    res.status(404);
+    next(error);
+};
 
-function errorHandler(err, req, res, next) {
-    //log the error
-    logger.error('Error caught by error handler:', {
+// this is the big one. if any other part of the app throws an error,
+//it lands here. keeps the server from crashing completely.
+const errorHandler = (err, req, res, next) => {
+    // Sometimes an error happens but the status code is still 200, which is stupid. Lol
+    // this makes sure we send back a real error code.
+    const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
+    res.status(statusCode);
+
+    logger.error(err.stack); // log the ugly error stack to the console
+
+    res.json({
         message: err.message,
-        stack: err.stack,
-        url: req.url,
-        method: req.method
+        // only show the stack trace if we're not in "production" mode?
+        stack: process.env.NODE_ENV === 'production' ? '🥞' : err.stack,
     });
-
-    //determine status code
-    const statusCode = err.statusCode || err.status || 500;
-
-    //dont leak error details in production
-    const isDevelopment = process.env.NODE_ENV !== 'production';
-
-    //send error response
-    res.status(statusCode).json({
-        error: {
-            message: err.message || 'An error occurred',
-            ...(isDevelopment && { stack: err.stack }),
-            ...(err.details && { details: err.details })
-        }
-    });
-}
-
-//404 handler
-function notFoundHandler(req, res, next) {
-    res.status(404).json({
-        error: {
-            message: 'Route not found',
-            url: req.url
-        }
-    });
-}
+};
 
 module.exports = {
+    notFoundHandler,
     errorHandler,
-    notFoundHandler
 };

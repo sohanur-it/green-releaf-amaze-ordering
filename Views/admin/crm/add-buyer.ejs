@@ -1,0 +1,64 @@
+<!-- Views/admin/crm/add-buyer.ejs -->
+
+<div class="form-container">
+    <div class="form-header">
+        <!-- Back button to go back to the main list -->
+        <a href="/admin/crm" class="back-link" title="Back to CRM list">&larr;</a>
+        <h2>Add New Buyer</h2>
+    </div>
+
+    <!-- The form will POST its data to /admin/crm/buyers -->
+    <form action="/admin/crm/buyers" method="POST" class="styled-form">
+        <div class="form-grid">
+            <!-- Buyer Name -->
+            <div class="form-group span-2">
+                <label for="name">Buyer Name</label>
+                <input type="text" id="name" name="name" required placeholder="e.g., Green Valley Dispensary">
+            </div>
+
+            <!-- Website URL -->
+            <div class="form-group span-2">
+                <label for="website_url">Website URL</label>
+                <input type="url" id="website_url" name="website_url" placeholder="https://example.com">
+            </div>
+
+            <!-- Buyer Type -->
+            <div class="form-group">
+                <label for="buyer_type">Buyer Type</label>
+                <select id="buyer_type" name="buyer_type">
+                    <option value="Dispensary">Dispensary</option>
+                    <option value="Wholesaler">Wholesaler</option>
+                    <option value="Distributor">Distributor</option>
+                    <option value="Other">Other</option>
+                </select>
+            </div>
+
+            <!-- Buyer Stage -->
+            <div class="form-group">
+                <label for="fk_stage_id">Stage</label>
+                <select id="fk_stage_id" name="fk_stage_id" required>
+                    <option value="" disabled selected>Select a stage...</option>
+                    <% stages.forEach(stage => { %>
+                        <option value="<%= stage.entry_id %>"><%= stage.name %></option>
+                    <% }); %>
+                </select>
+            </div>
+
+            <!-- Deal Flow -->
+            <div class="form-group span-2">
+                <label for="fk_deal_flow_id">Deal Flow</label>
+                <select id="fk_deal_flow_id" name="fk_deal_flow_id" required>
+                    <option value="" disabled selected>Select a deal flow...</option>
+                    <% dealFlows.forEach(flow => { %>
+                        <option value="<%= flow.entry_id %>"><%= flow.name %></option>
+                    <% }); %>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <a href="/admin/crm" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary">Save Buyer</button>
+        </div>
+    </form>
+</div>

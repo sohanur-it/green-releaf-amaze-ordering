@@ -1,0 +1,79 @@
+<!-- Views/admin/crm/edit-buyer.ejs -->
+
+<div class="form-container">
+    <div class="form-header">
+        <!-- This back link now goes to the specific buyer's profile -->
+        <a href="/admin/crm/buyers/<%= buyer.details.entry_id %>" class="back-link" title="Back to Profile">&larr;</a>
+        <h2>Edit <%= buyer.details.name %></h2>
+    </div>
+
+    <!-- The form will POST its data to /admin/crm/buyers/:id -->
+    <form action="/admin/crm/buyers/<%= buyer.details.entry_id %>" method="POST" class="styled-form">
+        <div class="form-grid">
+            <!-- Buyer Name -->
+            <div class="form-group span-2">
+                <label for="name">Buyer Name</label>
+                <input type="text" id="name" name="name" required value="<%= buyer.details.name %>">
+            </div>
+
+            <!-- Website URL -->
+            <div class="form-group span-2">
+                <label for="website_url">Website URL</label>
+                <input type="url" id="website_url" name="website_url" value="<%= buyer.details.website_url %>">
+            </div>
+
+            <!-- Buyer Type -->
+            <div class="form-group">
+                <label for="buyer_type">Buyer Type</label>
+                <select id="buyer_type" name="buyer_type">
+                    <% const types = ["Dispensary", "Wholesaler", "Distributor", "Other"]; %>
+                    <% types.forEach(type => { %>
+                        <option value="<%= type %>" <% if (type === buyer.details.buyer_type) { %>selected<% } %>>
+                            <%= type %>
+                        </option>
+                    <% }); %>
+                </select>
+            </div>
+
+            <!-- Buyer Stage -->
+            <div class="form-group">
+                <label for="fk_stage_id">Stage</label>
+                <select id="fk_stage_id" name="fk_stage_id" required>
+                    <% stages.forEach(stage => { %>
+                        <option value="<%= stage.entry_id %>" <% if (stage.entry_id === buyer.details.fk_stage_id) { %>selected<% } %>>
+                            <%= stage.name %>
+                        </option>
+                    <% }); %>
+                </select>
+            </div>
+
+            <!-- Deal Flow -->
+            <div class="form-group span-2">
+                <label for="fk_deal_flow_id">Deal Flow</label>
+                <select id="fk_deal_flow_id" name="fk_deal_flow_id" required>
+                    <% dealFlows.forEach(flow => { %>
+                        <option value="<%= flow.entry_id %>" <% if (flow.entry_id === buyer.details.fk_deal_flow_id) { %>selected<% } %>>
+                            <%= flow.name %>
+                        </option>
+                    <% }); %>
+                </select>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <div>
+                <button type="button" class="btn btn-danger"
+                        data-modal-target="#confirmationModal"
+                        data-modal-title="Delete Buyer?"
+                        data-modal-text="Are you sure you want to permanently delete <%= buyer.details.name %>? This action cannot be undone."
+                        data-modal-form-action="/admin/crm/buyers/<%= buyer.details.entry_id %>/delete">
+                    Delete Buyer
+                </button>
+            </div>
+            <div class="form-actions-right"> <!-- Added a wrapper for right-aligned buttons -->
+                <a href="/admin/crm/buyers/<%= buyer.details.entry_id %>" class="btn btn-secondary">Cancel</a>
+                <button type="submit" class="btn btn-primary">Save Changes</button>
+            </div>
+        </div>
+    </form>
+</div>

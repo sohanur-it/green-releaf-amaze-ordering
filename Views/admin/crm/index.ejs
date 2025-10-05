@@ -1,0 +1,62 @@
+<!-- Views/admin/crm/index.ejs -->
+
+<div class="page-header">
+    <p>A central place to manage all your buyer relationships.</p>
+    <a href="/admin/crm/buyers/new" class="btn btn-primary">Add New Buyer</a>
+</div>
+
+<!-- this is where our fancy table will live -->
+<div id="buyer-table-wrapper"></div>
+
+<!-- a little script to kick off the Grid.js table -->
+<script>
+    // wait for the page to load before doin stuff
+    document.addEventListener('DOMContentLoaded', function () {
+        // we're creating a new Grid.js table.
+        new gridjs.Grid({
+            columns: [
+                { name: 'Name', width: '25%' },
+                { name: 'Type', width: '15%' },
+                { name: 'Stage', width: '15%' },
+                { name: 'Contacts', width: '10%' },
+                { name: 'Tags', width: '25%' },
+                {
+                    name: 'Actions',
+                    width: '10%',
+                    formatter: (cell, row) => {
+                        // we'll make these buttons do stuff later
+                        // the entry_id is hidden in row.cells[5].data
+                        return gridjs.html(`<a href="/admin/crm/buyers/${row.cells[6].data}" class="table-action-link">View</a>`);
+                    }
+                },
+                { name: 'entry_id', hidden: true } // hide the id, we just need it for the link
+                // this is the 7th column, at index 6
+            ],
+            search: true, //turn on the search bar.
+            sort: true, //let them sort columns
+            pagination: {
+                limit: 15,
+                summary: true
+            },
+            resizable: true, //let users resize the columns.
+            className: {
+                table: 'custom-table', //for our own styling
+                thead: 'custom-thead',
+                tbody: 'custom-tbody',
+            },
+            //this is how we load the data from our api
+            server: {
+                url: '/api/crm/buyers',
+                then: data => data.map(buyer => [
+                    buyer.name,
+                    buyer.buyer_type,
+                    buyer.stage_name,
+                    buyer.contact_count,
+                    buyer.tags || 'None',
+                    null, // placeholder for Actions (index 5)
+                    buyer.entry_id //the actual ID (index 6)
+                ])
+            }
+        }).render(document.getElementById('buyer-table-wrapper'));
+    });
+</script>
