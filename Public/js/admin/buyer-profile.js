@@ -164,10 +164,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // === RENDER FUNCTION (Locations) ===
     const renderLocationRow = (location) => {
         const address = `${location.line_one}${location.line_two ? ', ' + location.line_two : ''}, ${location.city}, ${location.state} ${location.zip}`;
+        // just addin the new access code to the html string it spits out. easy.
         return `
             <td>${location.name || ''}</td>
             <td>${address}</td>
             <td>${location.state_license || 'N/A'}</td>
+            <td><code>${location.access_code || ''}</code></td>
             <td class="table-actions">
                 <button class="action-btn" data-action="edit-location"
                     data-location-id="${location.entry_id}"
@@ -442,7 +444,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (container.id === 'contacts-table-body') {
                         container.innerHTML = `<tr id="empty-contacts-message"><td colspan="5" class="empty-state">No contacts found for this buyer.</td></tr>`;
                     } else if (container.id === 'locations-table-body') {
-                        container.innerHTML = `<tr id="empty-locations-message"><td colspan="4" class="empty-state">No locations found for this buyer.</td></tr>`;
+                        // updated the colspan here too. cant forget the little things
+                        container.innerHTML = `<tr id="empty-locations-message"><td colspan="5" class="empty-state">No locations found for this buyer.</td></tr>`;
                     } else if (container.id === 'notes-list') {
                         const cardBody = container.closest('.card-body');
                         cardBody.innerHTML = `<div id="empty-notes-message"><p class="empty-state">No notes found for this buyer.</p></div><ul class="notes-list" id="notes-list" style="display: none;"></ul>`;

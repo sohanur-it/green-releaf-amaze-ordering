@@ -8,22 +8,27 @@ const Location = {
     // creates a new location for a specific buyer
     async create(buyerId, locationData) {
         const { name, line_one, line_two, city, state, zip, state_license } = locationData;
+
+        // generate a unique code for the url access thingy later.
+        const accessCode = crypto.randomUUID();
+
         const query = `
             INSERT INTO "ORDERS-buyer_locations"
-                (orders_buyer_id, name, line_one, line_two, city, state, zip, state_license, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+            (orders_buyer_id, name, line_one, line_two, city, state, zip, state_license, access_code, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
             RETURNING *;
         `;
         try {
-            const { rows } = await db.query(query, [buyerId, name, line_one, line_two, city, state, zip, state_license]);
+            const { rows } = await db.query(query, [buyerId, name, line_one, line_two, city, state, zip, state_license, accessCode]);
             return rows[0];
         } catch (err) {
-            console.error('Error creating location:', err);
-            throw err;
-        }
+        console.error('Error creating location:', err);
+        throw err;
+    }
     },
 
     //updates an existing location
+    // we dont touch the access_code here. It should never change. EVER.
     async update(locationId, locationData) {
         const { name, line_one, line_two, city, state, zip, state_license } = locationData;
         const query = `
