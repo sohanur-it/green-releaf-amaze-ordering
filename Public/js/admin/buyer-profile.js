@@ -422,6 +422,133 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // ========================================================
+    // ========== TAG CRUD FUNCTIONALITY ======================
+    // ========================================================
+
+    // === DOM SELECTORS (Tags) ===
+    const addTagBtn = document.getElementById('addTagBtn');
+    const tagModal = document.getElementById('tagModal');
+    const tagForm = document.getElementById('tagForm');
+    const tagsContainer = document.getElementById('tags-container');
+
+    // === MODAL & FORM FIELDS (Tags) ===
+    const tagModalTitle = document.getElementById('tagModalTitle');
+    const tagFormError = document.getElementById('tagFormError');
+    const tagIdField = document.getElementById('tagId');
+    const tagNameField = document.getElementById('tagName');
+    const tagColorField = document.getElementById('tagColor');
+    const tagBgColorField = document.getElementById('tagBackgroundColor');
+
+    // === RENDER FUNCTION (Tags) ===
+    const renderTagPill = (tag) => {
+        return `
+            <span class="tag-pill" style="background-color: ${tag.background_color || '#e1e4e8'}; color: ${tag.color || '#000'};">
+                ${tag.name}
+            </span>
+            <div class="tag-actions">
+                <button class="action-btn" data-action="edit-tag"
+                    data-tag-id="${tag.entry_id}"
+                    data-tag-name="${tag.name}"
+                    data-tag-color="${tag.color || '#000000'}"
+                    data-tag-background_color="${tag.background_color || '#e1e4e8'}">
+                    Edit
+                </button>
+                <button class="action-btn" data-action="delete-tag"
+                    data-tag-id="${tag.entry_id}"
+                    data-tag-name="${tag.name}">
+                    Del
+                </button>
+            </div>
+        `;
+    };
+
+    // === EVENT: Click "Add Tag" button ===
+    if (addTagBtn) {
+        addTagBtn.addEventListener('click', () => {
+            tagForm.reset();
+            tagModalTitle.textContent = 'Add New Tag';
+            tagForm.setAttribute('data-method', 'POST');
+            tagForm.setAttribute('data-action', `/api/crm/buyers/${addTagBtn.dataset.buyerId}/tags`);
+            tagIdField.value = '';
+            tagFormError.style.display = 'none';
+            openModal(tagModal);
+        });
+    }
+
+    // === EVENT DELEGATION: Clicks inside the tags container ===
+    if (tagsContainer) {
+        tagsContainer.addEventListener('click', (e) => {
+            const target = e.target.closest('[data-action]');
+            if (!target) return;
+
+            const action = target.dataset.action;
+            const tagId = target.dataset.tagId;
+
+            if (action === 'edit-tag') {
+                tagForm.reset();
+                tagModalTitle.textContent = `Edit ${target.dataset.tagName}`;
+                tagForm.setAttribute('data-method', 'PATCH');
+                tagForm.setAttribute('data-action', `/api/crm/tags/${tagId}`);
+                tagIdField.value = tagId;
+                tagNameField.value = target.dataset.tagName;
+                tagColorField.value = target.dataset.tagColor;
+                tagBgColorField.value = target.dataset.tagBackground_color;
+                tagFormError.style.display = 'none';
+                openModal(tagModal);
+            }
+
+            if (action === 'delete-tag') {
+                const confirmationModal = document.querySelector('#confirmationModal');
+                const modalForm = confirmationModal.querySelector('#modalConfirmForm');
+                confirmationModal.querySelector('#modalTitle').textContent = 'Delete Tag?';
+                confirmationModal.querySelector('#modalText').textContent = `Are you sure you want to remove the "${target.dataset.tagName}" tag?`;
+                modalForm.action = `/api/crm/tags/${tagId}`;
+                modalForm.setAttribute('data-method', 'DELETE');
+                modalForm.setAttribute('data-target-row', `[data-tag-id="${tagId}"]`);
+                openModal(confirmationModal);
+            }
+        });
+    }
+
+    // === EVENT: Submission of Add/Edit Tag Form ===
+    if (tagForm) {
+        tagForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const action = tagForm.getAttribute('data-action');
+            const method = tagForm.getAttribute('data-method');
+            const formData = new FormData(tagForm);
+            const tagData = Object.fromEntries(formData.entries());
+
+            try {
+                const response = await fetch(action, {
+                    method: method,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(tagData),
+                });
+                if (!response.ok) throw new Error((await response.json()).message);
+                const resultTag = await response.json();
+
+                if (method === 'POST') {
+                    document.getElementById('empty-tags-message')?.remove();
+                    const newPill = document.createElement('div');
+                    newPill.className = 'tag-pill-wrapper';
+                    newPill.dataset.tagId = resultTag.entry_id;
+                    newPill.innerHTML = renderTagPill(resultTag);
+                    tagsContainer.appendChild(newPill);
+                } else {
+                    const pillToUpdate = tagsContainer.querySelector(`[data-tag-id="${resultTag.entry_id}"]`);
+                    if (pillToUpdate) pillToUpdate.innerHTML = renderTagPill(resultTag);
+                }
+                closeModal(tagModal);
+            } catch (error) {
+                tagFormError.textContent = `Error: ${error.message}`;
+                tagFormError.style.display = 'block';
+            }
+        });
+    }
+
+
+    // ========================================================
     // ========== SALES REP CRUD FUNCTIONALITY ==============
     // ========================================================
 

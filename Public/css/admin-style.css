@@ -201,3 +201,36 @@ html.sidebar-is-collapsed .sidebar-title-full {
 .note-meta { display: flex; align-items: center; gap: 16px; }
 .note-actions { display: flex; gap: 4px; }
 .note-item:hover .action-btn { opacity: 1; }
+/* a little tweak for the color picker */
+.form-group input[type="color"] {
+    padding: 2px;
+    height: 40px;
+}
+
+/* -- STYLES FOR TAGS -- */
+.tag-pill-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+.tag-pill-wrapper:hover .tag-actions {
+    opacity: 1;
+}
+.tag-actions {
+    display: flex;
+    align-items: center;
+    position: absolute;
+    right: -4px;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    background: rgba(255,255,255,0.8);
+    backdrop-filter: blur(2px);
+    border-radius: 6px;
+    padding: 2px;
+}
+.tag-actions .action-btn {
+    padding: 2px 4px;
+    font-size: 11px;
+}

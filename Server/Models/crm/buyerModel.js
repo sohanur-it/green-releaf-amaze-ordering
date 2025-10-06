@@ -55,7 +55,9 @@ const Buyer = {
             const contactsQuery = 'SELECT * FROM "ORDERS-buyer_contacts" WHERE orders_buyer_id = $1 ORDER BY name;';
             const locationsQuery = 'SELECT * FROM "ORDERS-buyer_locations" WHERE orders_buyer_id = $1 ORDER BY name;';
             const notesQuery = 'SELECT * FROM "ORDERS-buyer_notes" WHERE orders_buyer_id = $1 ORDER BY created_at DESC;';
-            const tagsQuery = 'SELECT * FROM "ORDERS-buyer_tags" WHERE orders_buyer_id = $1 ORDER BY name;';
+
+            // WE GOTTA UPDATE THIS ONE to include the tag's id
+            const tagsQuery = 'SELECT entry_id, name, color, background_color FROM "ORDERS-buyer_tags" WHERE orders_buyer_id = $1 ORDER BY name;';
 
             // THIS IS THE ONE WE CHANGE. it now has to join through the assignment table.
             const salesRepsQuery = `
@@ -65,7 +67,7 @@ const Buyer = {
                     sr.email,
                     sr.phone
                 FROM "ORDERS-buyer_sales_rep_assignments" a
-                JOIN "ORDERS-sales_reps" sr ON a.fk_sales_rep_id = sr.entry_id
+                         JOIN "ORDERS-sales_reps" sr ON a.fk_sales_rep_id = sr.entry_id
                 WHERE a.fk_buyer_id = $1
                 ORDER BY sr.name;
             `;
@@ -77,14 +79,14 @@ const Buyer = {
                 locationsResult,
                 notesResult,
                 tagsResult,
-                salesRepsResult // dont forget to add it to the list
+                salesRepsResult
             ] = await Promise.all([
                 db.query(buyerQuery, [id]),
                 db.query(contactsQuery, [id]),
                 db.query(locationsQuery, [id]),
                 db.query(notesQuery, [id]),
                 db.query(tagsQuery, [id]),
-                db.query(salesRepsQuery, [id]) // and add it here too
+                db.query(salesRepsQuery, [id])
             ]);
 
             // if we didn't find a buyer, just return null
@@ -99,7 +101,7 @@ const Buyer = {
                 locations: locationsResult.rows,
                 notes: notesResult.rows,
                 tags: tagsResult.rows,
-                salesReps: salesRepsResult.rows // aaaaand here.
+                salesReps: salesRepsResult.rows
             };
 
         } catch (err) {
