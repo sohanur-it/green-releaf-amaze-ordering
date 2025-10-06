@@ -10,178 +10,174 @@
         </span>
     </div>
     <div class="profile-actions">
-        <a href="/admin/crm/buyers/<%= buyer.details.entry_id %>/edit" class="btn">Edit Buyer</a>
+        <!-- Added 'btn-secondary' class to make this look like a button -->
+        <a href="/admin/crm/buyers/<%= buyer.details.entry_id %>/edit" class="btn btn-secondary">Edit Buyer</a>
     </div>
 </div>
 
-<div class="profile-grid">
-    <!-- Main content column -->
-    <div class="profile-main">
+<!-- The two-column grid wrapper has been removed. The 'profile-main' div now controls the layout. -->
+<div class="profile-main">
 
-        <!-- Contacts Card -->
-        <div class="info-card">
-            <div class="card-header">
-                <h3>Contacts</h3>
-                <button class="btn btn-secondary btn-sm" id="addContactBtn"
-                        data-modal-target="#contactModal"
-                        data-buyer-id="<%= buyer.details.entry_id %>">
-                    Add Contact
-                </button>
-            </div>
-            <div class="card-body">
-                <table class="info-table">
-                    <thead>
-                    <tr>
-                        <th style="width: 25%;">Name</th>
-                        <th style="width: 25%;">Title</th>
-                        <th style="width: 25%;">Email</th>
-                        <th style="width: 20%;">Phone</th>
-                        <th style="width: 5%;"></th> <!-- Empty header for actions -->
-                    </tr>
-                    </thead>
-                    <tbody id="contacts-table-body">
-                    <% if (buyer.contacts.length > 0) { %>
-                        <% buyer.contacts.forEach(contact => { %>
-                            <!-- Add a data-contact-id to the row for easy targeting -->
-                            <tr data-contact-id="<%= contact.entry_id %>">
-                                <td><%= contact.name %></td>
-                                <td><%= contact.title || 'N/A' %></td>
-                                <td><%= contact.email || 'N/A' %></td>
-                                <td><%= contact.primary_phone || 'N/A' %></td>
-                                <td class="table-actions">
-                                    <!-- Edit Button -->
-                                    <button class="action-btn" data-action="edit"
-                                            data-contact-id="<%= contact.entry_id %>"
-                                            data-contact-name="<%= contact.name %>"
-                                            data-contact-title="<%= contact.title || '' %>"
-                                            data-contact-email="<%= contact.email || '' %>"
-                                            data-contact-phone="<%= contact.primary_phone || '' %>">
-                                        Edit
-                                    </button>
-                                    <!-- Delete Button -->
-                                    <button class="action-btn" data-action="delete"
-                                            data-contact-id="<%= contact.entry_id %>"
-                                            data-contact-name="<%= contact.name %>">
-                                        Delete
-                                    </button>
-                                </td>
-                            </tr>
-                        <% }); %>
-                    <% } else { %>
-                        <tr id="empty-contacts-message">
-                            <td colspan="5" class="empty-state">No contacts found for this buyer.</td>
-                        </tr>
-                    <% } %>
-                    </tbody>
-                </table>
-            </div>
+    <!-- Contacts Card -->
+    <div class="info-card">
+        <div class="card-header">
+            <h3>Contacts</h3>
+            <button class="btn btn-secondary btn-sm" id="addContactBtn"
+                    data-modal-target="#contactModal"
+                    data-buyer-id="<%= buyer.details.entry_id %>">
+                Add Contact
+            </button>
         </div>
-
-        <!-- Locations Card -->
-        <div class="info-card">
-            <div class="card-header">
-                <h3>Locations</h3>
-                <button class="btn btn-secondary btn-sm" id="addLocationBtn" data-buyer-id="<%= buyer.details.entry_id %>">
-                    Add Location
-                </button>
-            </div>
-            <div class="card-body">
-                <table class="info-table">
-                    <thead>
-                    <tr>
-                        <th style="width: 20%;">Name</th>
-                        <th style="width: 30%;">Address</th>
-                        <th style="width: 20%;">License</th>
-                        <th style="width: 25%;">Access Code</th>
-                        <th style="width: 5%;"></th> <!-- Actions -->
-                    </tr>
-                    </thead>
-                    <tbody id="locations-table-body">
-                    <% if (buyer.locations.length > 0) { %>
-                        <% buyer.locations.forEach(location => { %>
-                            <tr data-location-id="<%= location.entry_id %>">
-                                <td><%= location.name %></td>
-                                <td><%= `${location.line_one}${location.line_two ? ', ' + location.line_two : ''}, ${location.city}, ${location.state} ${location.zip}` %></td>
-                                <td><%= location.state_license || 'N/A' %></td>
-                                <!-- this is the UUID code thing -->
-                                <td><code><%= location.access_code %></code></td>
-                                <td class="table-actions">
-                                    <button class="action-btn" data-action="edit-location"
-                                            data-location-id="<%= location.entry_id %>"
-                                            data-location-name="<%= location.name %>"
-                                            data-location-line_one="<%= location.line_one %>"
-                                            data-location-line_two="<%= location.line_two || '' %>"
-                                            data-location-city="<%= location.city %>"
-                                            data-location-state="<%= location.state %>"
-                                            data-location-zip="<%= location.zip %>"
-                                            data-location-state_license="<%= location.state_license || '' %>">
-                                        Edit
-                                    </button>
-                                    <button class="action-btn" data-action="delete-location"
-                                            data-location-id="<%= location.entry_id %>"
-                                            data-location-name="<%= location.name %>">
-                                        Delete
-                                    </button>
-                                </td>
-                            </tr>
-                        <% }); %>
-                    <% } else { %>
-                        <tr id="empty-locations-message">
-                            <!-- gotta update the colspan to 5 lol -->
-                            <td colspan="5" class="empty-state">No locations found for this buyer.</td>
+        <div class="card-body">
+            <table class="info-table">
+                <thead>
+                <tr>
+                    <th style="width: 25%;">Name</th>
+                    <th style="width: 25%;">Title</th>
+                    <th style="width: 25%;">Email</th>
+                    <th style="width: 20%;">Phone</th>
+                    <th style="width: 5%;"></th> <!-- Empty header for actions -->
+                </tr>
+                </thead>
+                <tbody id="contacts-table-body">
+                <% if (buyer.contacts.length > 0) { %>
+                    <% buyer.contacts.forEach(contact => { %>
+                        <!-- Add a data-contact-id to the row for easy targeting -->
+                        <tr data-contact-id="<%= contact.entry_id %>">
+                            <td><%= contact.name %></td>
+                            <td><%= contact.title || 'N/A' %></td>
+                            <td><%= contact.email || 'N/A' %></td>
+                            <td><%= contact.primary_phone || 'N/A' %></td>
+                            <td class="table-actions">
+                                <!-- Edit Button -->
+                                <button class="action-btn" data-action="edit"
+                                        data-contact-id="<%= contact.entry_id %>"
+                                        data-contact-name="<%= contact.name %>"
+                                        data-contact-title="<%= contact.title || '' %>"
+                                        data-contact-email="<%= contact.email || '' %>"
+                                        data-contact-phone="<%= contact.primary_phone || '' %>">
+                                    Edit
+                                </button>
+                                <!-- Delete Button -->
+                                <button class="action-btn" data-action="delete"
+                                        data-contact-id="<%= contact.entry_id %>"
+                                        data-contact-name="<%= contact.name %>">
+                                    Delete
+                                </button>
+                            </td>
                         </tr>
-                    <% } %>
-                    </tbody>
-                </table>
-            </div>
+                    <% }); %>
+                <% } else { %>
+                    <tr id="empty-contacts-message">
+                        <td colspan="5" class="empty-state">No contacts found for this buyer.</td>
+                    </tr>
+                <% } %>
+                </tbody>
+            </table>
         </div>
+    </div>
 
-        <!-- Notes Card -->
-        <div class="info-card">
-            <div class="card-header">
-                <h3>Notes</h3>
-                <button class="btn btn-secondary btn-sm" id="addNoteBtn" data-buyer-id="<%= buyer.details.entry_id %>">
-                    Add Note
-                </button>
-            </div>
-            <div class="card-body">
-                <% if (buyer.notes.length > 0) { %>
-                    <ul class="notes-list" id="notes-list">
-                        <% buyer.notes.forEach(note => { %>
-                            <li class="note-item" data-note-id="<%= note.entry_id %>">
-                                <div class="note-header">
-                                    <strong><%= note.title || 'Note' %></strong>
-                                    <div class="note-meta">
-                                        <span class="note-date"><%= new Date(note.created_at).toLocaleString() %></span>
-                                        <div class="note-actions">
-                                            <button class="action-btn" data-action="edit-note"
-                                                    data-note-id="<%= note.entry_id %>"
-                                                    data-note-title="<%= note.title || '' %>"
-                                                    data-note-text="<%= note.text || '' %>">
-                                                Edit
-                                            </button>
-                                            <button class="action-btn" data-action="delete-note"
-                                                    data-note-id="<%= note.entry_id %>"
-                                                    data-note-title="<%= note.title || 'Note' %>">
-                                                Delete
-                                            </button>
-                                        </div>
+    <!-- Locations Card -->
+    <div class="info-card">
+        <div class="card-header">
+            <h3>Locations</h3>
+            <button class="btn btn-secondary btn-sm" id="addLocationBtn" data-buyer-id="<%= buyer.details.entry_id %>">
+                Add Location
+            </button>
+        </div>
+        <div class="card-body">
+            <table class="info-table">
+                <thead>
+                <tr>
+                    <th style="width: 20%;">Name</th>
+                    <th style="width: 30%;">Address</th>
+                    <th style="width: 20%;">License</th>
+                    <th style="width: 25%;">Access Code</th>
+                    <th style="width: 5%;"></th> <!-- Actions -->
+                </tr>
+                </thead>
+                <tbody id="locations-table-body">
+                <% if (buyer.locations.length > 0) { %>
+                    <% buyer.locations.forEach(location => { %>
+                        <tr data-location-id="<%= location.entry_id %>">
+                            <td><%= location.name %></td>
+                            <td><%= `${location.line_one}${location.line_two ? ', ' + location.line_two : ''}, ${location.city}, ${location.state} ${location.zip}` %></td>
+                            <td><%= location.state_license || 'N/A' %></td>
+                            <td><code><%= location.access_code %></code></td>
+                            <td class="table-actions">
+                                <button class="action-btn" data-action="edit-location"
+                                        data-location-id="<%= location.entry_id %>"
+                                        data-location-name="<%= location.name %>"
+                                        data-location-line_one="<%= location.line_one %>"
+                                        data-location-line_two="<%= location.line_two || '' %>"
+                                        data-location-city="<%= location.city %>"
+                                        data-location-state="<%= location.state %>"
+                                        data-location-zip="<%= location.zip %>"
+                                        data-location-state_license="<%= location.state_license || '' %>">
+                                    Edit
+                                </button>
+                                <button class="action-btn" data-action="delete-location"
+                                        data-location-id="<%= location.entry_id %>"
+                                        data-location-name="<%= location.name %>">
+                                    Delete
+                                </button>
+                            </td>
+                        </tr>
+                    <% }); %>
+                <% } else { %>
+                    <tr id="empty-locations-message">
+                        <td colspan="5" class="empty-state">No locations found for this buyer.</td>
+                    </tr>
+                <% } %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Notes Card -->
+    <div class="info-card">
+        <div class="card-header">
+            <h3>Notes</h3>
+            <button class="btn btn-secondary btn-sm" id="addNoteBtn" data-buyer-id="<%= buyer.details.entry_id %>">
+                Add Note
+            </button>
+        </div>
+        <div class="card-body">
+            <% if (buyer.notes.length > 0) { %>
+                <ul class="notes-list" id="notes-list">
+                    <% buyer.notes.forEach(note => { %>
+                        <li class="note-item" data-note-id="<%= note.entry_id %>">
+                            <div class="note-header">
+                                <strong><%= note.title || 'Note' %></strong>
+                                <div class="note-meta">
+                                    <span class="note-date"><%= new Date(note.created_at).toLocaleString() %></span>
+                                    <div class="note-actions">
+                                        <button class="action-btn" data-action="edit-note"
+                                                data-note-id="<%= note.entry_id %>"
+                                                data-note-title="<%= note.title || '' %>"
+                                                data-note-text="<%= note.text || '' %>">
+                                            Edit
+                                        </button>
+                                        <button class="action-btn" data-action="delete-note"
+                                                data-note-id="<%= note.entry_id %>"
+                                                data-note-title="<%= note.title || 'Note' %>">
+                                            Delete
+                                        </button>
                                     </div>
                                 </div>
-                                <p class="note-text"><%- note.text.replace(/\r\n|\r|\n/g, '<br>') %></p>
-                            </li>
-                        <% }); %>
-                    </ul>
-                <% } else { %>
-                    <div id="empty-notes-message">
-                        <p class="empty-state">No notes found for this buyer.</p>
-                    </div>
-                    <!-- Add an empty list for JS to populate -->
-                    <ul class="notes-list" id="notes-list" style="display: none;"></ul>
-                <% } %>
-            </div>
+                            </div>
+                            <p class="note-text"><%- note.text.replace(/\r\n|\r|\n/g, '<br>') %></p>
+                        </li>
+                    <% }); %>
+                </ul>
+            <% } else { %>
+                <div id="empty-notes-message">
+                    <p class="empty-state">No notes found for this buyer.</p>
+                </div>
+                <!-- Add an empty list for JS to populate -->
+                <ul class="notes-list" id="notes-list" style="display: none;"></ul>
+            <% } %>
         </div>
-
     </div>
 
     <!-- Sales Reps Card -->
@@ -227,69 +223,64 @@
             </table>
         </div>
     </div>
-</div>
 
-    <!-- Sidebar / Details column -->
-    <div class="profile-sidebar">
-        <div class="info-card">
-            <div class="card-header">
-                <h3>Details</h3>
-            </div>
-            <div class="card-body">
-                <ul class="details-list">
-                    <li><strong>Buyer Type:</strong> <span><%= buyer.details.buyer_type || 'N/A' %></span></li>
-                    <li><strong>Website:</strong> <span><a href="<%= buyer.details.website_url %>" target="_blank"><%= buyer.details.website_url %></a></span></li>
-                    <li><strong>Deal Flow:</strong> <span><%= buyer.details.deal_flow_name || 'N/A' %></span></li>
-                    <li><strong>Source:</strong> <span><%= buyer.details.source %></span></li>
-                </ul>
-            </div>
+    <!-- Details Card -->
+    <div class="info-card">
+        <div class="card-header">
+            <h3>Details</h3>
         </div>
-
-            <div class="info-card">
-                <div class="card-header">
-                    <h3>Tags</h3>
-                    <!-- The Add Tag button -->
-                    <button class="btn btn-secondary btn-sm" id="addTagBtn" data-buyer-id="<%= buyer.details.entry_id %>">
-                        Add Tag
-                    </button>
-                </div>
-                <div class="card-body">
-                    <% if(buyer.tags.length > 0) { %>
-                        <div class="tags-container" id="tags-container">
-                            <% buyer.tags.forEach(tag => { %>
-                                <!-- Reworked tag element to include buttons -->
-                                <div class="tag-pill-wrapper" data-tag-id="<%= tag.entry_id %>">
-                                <span class="tag-pill" style="background-color: <%= tag.background_color || '#e1e4e8' %>; color: <%= tag.color || '#000' %>;">
-                                    <%= tag.name %>
-                                </span>
-                                    <div class="tag-actions">
-                                        <button class="action-btn" data-action="edit-tag"
-                                                data-tag-id="<%= tag.entry_id %>"
-                                                data-tag-name="<%= tag.name %>"
-                                                data-tag-color="<%= tag.color || '#000000' %>"
-                                                data-tag-background_color="<%= tag.background_color || '#e1e4e8' %>">
-                                            Edit
-                                        </button>
-                                        <button class="action-btn" data-action="delete-tag"
-                                                data-tag-id="<%= tag.entry_id %>"
-                                                data-tag-name="<%= tag.name %>">
-                                            Del
-                                        </button>
-                                    </div>
-                                </div>
-                            <% }); %>
-                        </div>
-                    <% } else { %>
-                        <!-- Container for JS to add to -->
-                        <div class="tags-container" id="tags-container">
-                            <p class="empty-state" id="empty-tags-message">No tags.</p>
-                        </div>
-                    <% } %>
-                </div>
-            </div>
+        <div class="card-body">
+            <ul class="details-list">
+                <li><strong>Buyer Type:</strong> <span><%= buyer.details.buyer_type || 'N/A' %></span></li>
+                <li><strong>Website:</strong> <span><a href="<%= buyer.details.website_url %>" target="_blank"><%= buyer.details.website_url %></a></span></li>
+                <li><strong>Deal Flow:</strong> <span><%= buyer.details.deal_flow_name || 'N/A' %></span></li>
+                <li><strong>Source:</strong> <span><%= buyer.details.source %></span></li>
+            </ul>
         </div>
+    </div>
 
+    <!-- Tags Card -->
+    <div class="info-card">
+        <div class="card-header">
+            <h3>Tags</h3>
+            <button class="btn btn-secondary btn-sm" id="addTagBtn" data-buyer-id="<%= buyer.details.entry_id %>">
+                Add Tag
+            </button>
+        </div>
+        <div class="card-body">
+            <% if(buyer.tags.length > 0) { %>
+                <div class="tags-container" id="tags-container">
+                    <% buyer.tags.forEach(tag => { %>
+                        <div class="tag-pill-wrapper" data-tag-id="<%= tag.entry_id %>">
+                            <span class="tag-pill" style="background-color: <%= tag.background_color || '#e1e4e8' %>; color: <%= tag.color || '#000' %>;">
+                                <%= tag.name %>
+                            </span>
+                            <div class="tag-actions">
+                                <button class="action-btn" data-action="edit-tag"
+                                        data-tag-id="<%= tag.entry_id %>"
+                                        data-tag-name="<%= tag.name %>"
+                                        data-tag-color="<%= tag.color || '#000000' %>"
+                                        data-tag-background_color="<%= tag.background_color || '#e1e4e8' %>">
+                                    Edit
+                                </button>
+                                <button class="action-btn" data-action="delete-tag"
+                                        data-tag-id="<%= tag.entry_id %>"
+                                        data-tag-name="<%= tag.name %>">
+                                    Del
+                                </button>
+                            </div>
+                        </div>
+                    <% }); %>
+                </div>
+            <% } else { %>
+                <div class="tags-container" id="tags-container">
+                    <p class="empty-state" id="empty-tags-message">No tags.</p>
+                </div>
+            <% } %>
+        </div>
+    </div>
 
+</div> <!-- end .profile-main -->
 
 
 <!-- Include the contact modal partial -->
@@ -304,7 +295,7 @@
 <!-- Include the sales rep modal partial -->
 <%- include('../../partials/sales-rep-modal') %>
 
-<!-- Include the tag modal partial -->
+<!-- Include the new tag modal partial -->
 <%- include('../../partials/tag-modal') %>
 
 <!-- Include the profile page's specific javascript -->
