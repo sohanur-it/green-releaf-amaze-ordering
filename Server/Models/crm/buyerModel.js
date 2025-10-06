@@ -21,8 +21,8 @@ const Buyer = {
                 (SELECT COUNT(*) FROM "ORDERS-buyer_contacts" WHERE orders_buyer_id = b.entry_id) AS contact_count,
                 (SELECT string_agg(t.name, ', ') FROM "ORDERS-buyer_tags" t WHERE t.orders_buyer_id = b.entry_id) AS tags
             FROM "ORDERS-buyers" b
-            LEFT JOIN "ORDERS-buyer_stages" s ON b.fk_stage_id = s.entry_id
-            LEFT JOIN "ORDERS-deal_flows" df ON b.fk_deal_flow_id = df.entry_id
+                     LEFT JOIN "ORDERS-buyer_stages" s ON b.fk_stage_id = s.entry_id
+                     LEFT JOIN "ORDERS-deal_flows" df ON b.fk_deal_flow_id = df.entry_id
             ORDER BY b.name;
         `;
 
@@ -47,8 +47,8 @@ const Buyer = {
                     s.color AS stage_color,
                     df.name AS deal_flow_name
                 FROM "ORDERS-buyers" b
-                LEFT JOIN "ORDERS-buyer_stages" s ON b.fk_stage_id = s.entry_id
-                LEFT JOIN "ORDERS-deal_flows" df ON b.fk_deal_flow_id = df.entry_id
+                         LEFT JOIN "ORDERS-buyer_stages" s ON b.fk_stage_id = s.entry_id
+                         LEFT JOIN "ORDERS-deal_flows" df ON b.fk_deal_flow_id = df.entry_id
                 WHERE b.entry_id = $1;
             `;
 
@@ -57,19 +57,34 @@ const Buyer = {
             const notesQuery = 'SELECT * FROM "ORDERS-buyer_notes" WHERE orders_buyer_id = $1 ORDER BY created_at DESC;';
             const tagsQuery = 'SELECT * FROM "ORDERS-buyer_tags" WHERE orders_buyer_id = $1 ORDER BY name;';
 
+            // THIS IS THE ONE WE CHANGE. it now has to join through the assignment table.
+            const salesRepsQuery = `
+                SELECT
+                    a.entry_id AS assignment_id,
+                    sr.name,
+                    sr.email,
+                    sr.phone
+                FROM "ORDERS-buyer_sales_rep_assignments" a
+                JOIN "ORDERS-sales_reps" sr ON a.fk_sales_rep_id = sr.entry_id
+                WHERE a.fk_buyer_id = $1
+                ORDER BY sr.name;
+            `;
+
             // fire all the queries off at once!
             const [
                 buyerResult,
                 contactsResult,
                 locationsResult,
                 notesResult,
-                tagsResult
+                tagsResult,
+                salesRepsResult // dont forget to add it to the list
             ] = await Promise.all([
                 db.query(buyerQuery, [id]),
                 db.query(contactsQuery, [id]),
                 db.query(locationsQuery, [id]),
                 db.query(notesQuery, [id]),
-                db.query(tagsQuery, [id])
+                db.query(tagsQuery, [id]),
+                db.query(salesRepsQuery, [id]) // and add it here too
             ]);
 
             // if we didn't find a buyer, just return null
@@ -83,7 +98,8 @@ const Buyer = {
                 contacts: contactsResult.rows,
                 locations: locationsResult.rows,
                 notes: notesResult.rows,
-                tags: tagsResult.rows
+                tags: tagsResult.rows,
+                salesReps: salesRepsResult.rows // aaaaand here.
             };
 
         } catch (err) {
@@ -123,7 +139,7 @@ const Buyer = {
         // so we can redirect the user right to the new profile page.
         const query = `
             INSERT INTO "ORDERS-buyers"
-                (name, website_url, buyer_type, fk_stage_id, fk_deal_flow_id, source, created_at, updated_at)
+            (name, website_url, buyer_type, fk_stage_id, fk_deal_flow_id, source, created_at, updated_at)
             VALUES
                 ($1, $2, $3, $4, $5, 'INTERNAL', NOW(), NOW())
             RETURNING entry_id;
@@ -179,10 +195,10 @@ const Buyer = {
     }
 };
 
-    // we'll add more functions here later like...
-    // findById(id)
-    // create(buyerData)
-    // update(id, buyerData)
-    // delete(id)
+// we'll add more functions here later like...
+// findById(id)
+// create(buyerData)
+// update(id, buyerData)
+// delete(id)
 
 module.exports = Buyer;

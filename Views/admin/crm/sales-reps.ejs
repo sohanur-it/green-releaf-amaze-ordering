@@ -1,0 +1,59 @@
+<!-- Views/admin/crm/sales-reps.ejs -->
+
+<div class="page-header">
+    <div style="display: flex; align-items: center; gap: 16px;">
+        <a href="/admin/crm" class="back-link" title="Back to CRM List">&larr;</a>
+        <p style="margin: 0;" class="text-light">Manage all company sales representatives from this page.</p>
+    </div>
+    <button class="btn btn-primary" id="addRepBtn">Add New Rep</button>
+</div>
+
+<div id="reps-table-wrapper" class="info-card">
+    <div class="card-body">
+        <table class="info-table">
+            <thead>
+            <tr>
+                <th style="width: 35%;">Name</th>
+                <th style="width: 35%;">Email</th>
+                <th style="width: 25%;">Phone</th>
+                <th style="width: 5%;"></th> <!-- Actions -->
+            </tr>
+            </thead>
+            <tbody id="reps-table-body">
+            <% if (reps.length > 0) { %>
+                <% reps.forEach(rep => { %>
+                    <tr data-rep-id="<%= rep.entry_id %>">
+                        <td><%= rep.name %></td>
+                        <td><%= rep.email || 'N/A' %></td>
+                        <td><%= rep.phone || 'N/A' %></td>
+                        <td class="table-actions">
+                            <button class="action-btn" data-action="edit-rep"
+                                    data-rep-id="<%= rep.entry_id %>"
+                                    data-rep-name="<%= rep.name %>"
+                                    data-rep-email="<%= rep.email || '' %>"
+                                    data-rep-phone="<%= rep.phone || '' %>">
+                                Edit
+                            </button>
+                            <button class="action-btn" data-action="delete-rep"
+                                    data-rep-id="<%= rep.entry_id %>"
+                                    data-rep-name="<%= rep.name %>">
+                                Delete
+                            </button>
+                        </td>
+                    </tr>
+                <% }); %>
+            <% } else { %>
+                <tr id="empty-reps-message">
+                    <td colspan="4" class="empty-state">No sales reps found. Add one to get started.</td>
+                </tr>
+            <% } %>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Include the new sales rep crud modal -->
+<%- include('../../partials/sales-rep-crud-modal') %>
+
+<!-- Link to the new JS file for this page -->
+<script src="/public/js/admin/sales-reps.js"></script>

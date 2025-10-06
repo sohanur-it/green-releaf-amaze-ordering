@@ -1,7 +1,12 @@
 <!-- Views/admin/crm/index.ejs -->
 
 <div class="page-header">
-    <a href="/admin/crm/buyers/new" class="btn btn-primary">Add New Buyer</a>
+    <!-- this is just a simple wrapper to group the buttons -->
+    <div style="display: flex; gap: 12px;">
+        <a href="/admin/crm/buyers/new" class="btn btn-primary">Add New Buyer</a>
+        <!-- this is the new link to the reps page -->
+        <a href="/admin/crm/sales-reps" class="btn btn-secondary">Manage Sales Reps</a>
+    </div>
 </div>
 
 <!-- this is where our fancy table will live -->

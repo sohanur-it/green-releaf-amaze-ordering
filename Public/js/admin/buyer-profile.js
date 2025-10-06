@@ -422,6 +422,106 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     // ========================================================
+    // ========== SALES REP CRUD FUNCTIONALITY ==============
+    // ========================================================
+
+    // === DOM ELEMENT SELECTORS (Sales Reps) ===
+    const assignRepBtn = document.getElementById('assignRepBtn');
+    const salesRepModal = document.getElementById('salesRepModal');
+    const salesRepForm = document.getElementById('salesRepForm');
+    const salesRepsTableBody = document.getElementById('sales-reps-table-body');
+
+    // === MODAL & FORM ELEMENTS (Sales Reps) ===
+    const salesRepFormError = document.getElementById('salesRepFormError');
+
+    // === RENDER FUNCTION (Sales Reps) ===
+    const renderSalesRepRow = (rep) => {
+        // this rep object is the result from the API after assigning
+        return `
+            <td>${rep.name || ''}</td>
+            <td>${rep.email || 'N/A'}</td>
+            <td>${rep.phone || 'N/A'}</td>
+            <td class="table-actions">
+                <button class="action-btn" data-action="unassign-rep"
+                    data-assignment-id="${rep.assignment_id}"
+                    data-rep-name="${rep.name || ''}">
+                    Delete
+                </button>
+            </td>
+        `;
+    };
+
+    // === EVENT: Click "Assign Rep" button ===
+    if (assignRepBtn) {
+        assignRepBtn.addEventListener('click', () => {
+            salesRepForm.reset();
+            salesRepForm.setAttribute('data-action', `/api/crm/buyers/${assignRepBtn.dataset.buyerId}/sales-reps`);
+            salesRepFormError.style.display = 'none';
+            openModal(salesRepModal);
+        });
+    }
+
+    // === EVENT DELEGATION: Clicks inside the sales reps table ===
+    if (salesRepsTableBody) {
+        salesRepsTableBody.addEventListener('click', (e) => {
+            const target = e.target.closest('[data-action="unassign-rep"]');
+            if (!target) return;
+
+            const assignmentId = target.dataset.assignmentId;
+            const repName = target.dataset.repName;
+
+            const confirmationModal = document.querySelector('#confirmationModal');
+            const modalTitle = confirmationModal.querySelector('#modalTitle');
+            const modalText = confirmationModal.querySelector('#modalText');
+            const modalForm = confirmationModal.querySelector('#modalConfirmForm');
+
+            modalTitle.textContent = 'Unassign Sales Rep?';
+            modalText.textContent = `Are you sure you want to unassign ${repName} from this buyer?`;
+            modalForm.action = `/api/crm/sales-reps/assignments/${assignmentId}`;
+            modalForm.setAttribute('data-method', 'DELETE');
+            modalForm.setAttribute('data-target-row', `[data-assignment-id="${assignmentId}"]`);
+            openModal(confirmationModal);
+        });
+    }
+
+    // === EVENT: Submission of the Assign Rep Form ===
+    if (salesRepForm) {
+        salesRepForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const action = salesRepForm.getAttribute('data-action');
+            const formData = new FormData(salesRepForm);
+            const assignmentData = Object.fromEntries(formData.entries());
+
+            try {
+                const response = await fetch(action, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(assignmentData),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.message || 'Failed to assign rep.');
+                }
+
+                const newAssignment = await response.json();
+
+                const emptyMessage = document.getElementById('empty-reps-message');
+                if (emptyMessage) emptyMessage.remove();
+
+                const newRow = salesRepsTableBody.insertRow();
+                newRow.dataset.assignmentId = newAssignment.assignment_id;
+                newRow.innerHTML = renderSalesRepRow(newAssignment);
+
+                closeModal(salesRepModal);
+            } catch (error) {
+                salesRepFormError.textContent = `Error: ${error.message}`;
+                salesRepFormError.style.display = 'block';
+            }
+        });
+    }
+
+    // ========================================================
     // ========== GENERIC DELETE CONFIRMATION =================
     // ========================================================
     const confirmationForm = document.getElementById('modalConfirmForm');
@@ -444,8 +544,10 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (container.id === 'contacts-table-body') {
                         container.innerHTML = `<tr id="empty-contacts-message"><td colspan="5" class="empty-state">No contacts found for this buyer.</td></tr>`;
                     } else if (container.id === 'locations-table-body') {
-                        // updated the colspan here too. cant forget the little things
                         container.innerHTML = `<tr id="empty-locations-message"><td colspan="5" class="empty-state">No locations found for this buyer.</td></tr>`;
+                    } else if (container.id === 'sales-reps-table-body') {
+                        // gotta handle the empty state for reps too
+                        container.innerHTML = `<tr id="empty-reps-message"><td colspan="4" class="empty-state">No sales reps assigned.</td></tr>`;
                     } else if (container.id === 'notes-list') {
                         const cardBody = container.closest('.card-body');
                         cardBody.innerHTML = `<div id="empty-notes-message"><p class="empty-state">No notes found for this buyer.</p></div><ul class="notes-list" id="notes-list" style="display: none;"></ul>`;

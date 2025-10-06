@@ -184,6 +184,52 @@
 
     </div>
 
+    <!-- Sales Reps Card -->
+    <div class="info-card">
+        <div class="card-header">
+            <h3>Sales Reps</h3>
+            <button class="btn btn-secondary btn-sm" id="assignRepBtn" data-buyer-id="<%= buyer.details.entry_id %>">
+                Assign Rep
+            </button>
+        </div>
+        <div class="card-body">
+            <table class="info-table">
+                <thead>
+                <tr>
+                    <th style="width: 35%;">Name</th>
+                    <th style="width: 35%;">Email</th>
+                    <th style="width: 25%;">Phone</th>
+                    <th style="width: 5%;"></th> <!-- Actions -->
+                </tr>
+                </thead>
+                <tbody id="sales-reps-table-body">
+                <% if (buyer.salesReps.length > 0) { %>
+                    <% buyer.salesReps.forEach(rep => { %>
+                        <tr data-assignment-id="<%= rep.assignment_id %>">
+                            <td><%= rep.name %></td>
+                            <td><%= rep.email || 'N/A' %></td>
+                            <td><%= rep.phone || 'N/A' %></td>
+                            <td class="table-actions">
+                                <button class="action-btn" data-action="unassign-rep"
+                                        data-assignment-id="<%= rep.assignment_id %>"
+                                        data-rep-name="<%= rep.name %>">
+                                    Delete
+                                </button>
+                            </td>
+                        </tr>
+                    <% }); %>
+                <% } else { %>
+                    <tr id="empty-reps-message">
+                        <td colspan="4" class="empty-state">No sales reps assigned.</td>
+                    </tr>
+                <% } %>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+</div>
+
     <!-- Sidebar / Details column -->
     <div class="profile-sidebar">
         <div class="info-card">
@@ -228,6 +274,9 @@
 
 <!-- Include the note modal partial -->
 <%- include('../../partials/note-modal') %>
+
+<!-- Include the sales rep modal partial -->
+<%- include('../../partials/sales-rep-modal') %>
 
 <!-- Include the profile page's specific javascript -->
 <script src="/public/js/admin/buyer-profile.js"></script>

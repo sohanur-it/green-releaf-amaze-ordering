@@ -3,6 +3,7 @@
 const express = require('express');
 const router = express.Router();
 const buyerController = require('../Controllers/crm/buyerController');
+const salesRepController = require('../Controllers/crm/salesRepController');
 
 // Route to render the main admin dashboard
 router.get('/', (req, res) => {
@@ -14,6 +15,9 @@ router.get('/', (req, res) => {
 
 // Route to render the CRM page, handled by our controller
 router.get('/crm', buyerController.getAllBuyers);
+
+// The page to manage all sales reps
+router.get('/crm/sales-reps', salesRepController.showRepsPage);
 
 // otherwise the server will think "new" is an ID.
 router.get('/crm/buyers/new', buyerController.showAddBuyerForm);

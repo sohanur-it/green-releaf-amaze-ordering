@@ -6,6 +6,7 @@ const buyerController = require('../../Controllers/crm/buyerController');
 const contactController = require('../../Controllers/crm/contactController');
 const locationController = require('../../Controllers/crm/locationController');
 const noteController = require('../../Controllers/crm/noteController');
+const salesRepController = require('../../Controllers/crm/salesRepController');
 
 // this is where all our crm api routes will go. keeps it cleannn
 
@@ -71,6 +72,19 @@ router.patch('/notes/:noteId', noteController.updateNote);
 // @route   DELETE /api/crm/notes/:noteId
 // @desc    Delete a note
 router.delete('/notes/:noteId', noteController.deleteNote);
+
+// @route   POST /api/crm/buyers/:buyerId/sales-reps
+// @desc    Assign a sales rep to a buyer
+router.post('/buyers/:buyerId/sales-reps', salesRepController.assignRep);
+
+// @route   DELETE /api/crm/sales-reps/assignments/:assignmentId
+// @desc    Unassign a sales rep from a buyer
+router.delete('/sales-reps/assignments/:assignmentId', salesRepController.unassignRep);
+
+// --- SALES REP CRUD ROUTES (for the management page) ---
+router.post('/sales-reps', salesRepController.createRep);
+router.patch('/sales-reps/:repId', salesRepController.updateRep);
+router.delete('/sales-reps/:repId', salesRepController.deleteRep);
 
 //just a placeholder so the app doesnt crash lol
 router.get('/', (req, res) => {

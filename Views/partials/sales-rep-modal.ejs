@@ -1,0 +1,27 @@
+<!-- Views/partials/sales-rep-modal.ejs -->
+<div class="modal-overlay" id="salesRepModal" aria-hidden="true">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="salesRepModalTitle">
+        <form id="salesRepForm" class="styled-form" novalidate>
+            <div class="modal-header">
+                <h3 class="modal-title" id="salesRepModalTitle">Assign Sales Rep</h3>
+                <button type="button" class="modal-close-btn" data-close-modal>&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="salesRepId">Select a Sales Rep</label>
+                    <select id="salesRepId" name="salesRepId" required>
+                        <option value="" disabled selected>Choose a rep...</option>
+                        <% allSalesReps.forEach(rep => { %>
+                            <option value="<%= rep.entry_id %>"><%= rep.name %></option>
+                        <% }); %>
+                    </select>
+                </div>
+                <div id="salesRepFormError" class="form-error-message" style="display: none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
+                <button type="submit" class="btn btn-primary">Assign Rep</button>
+            </div>
+        </form>
+    </div>
+</div>

@@ -1,6 +1,7 @@
 // Server/Controllers/crm/buyerController.js
 
 const Buyer = require('../../Models/crm/buyerModel');
+const SalesRep = require('../../Models/crm/salesRepModel');
 
 //gets all buyers and sends em to the crm index page
 const getAllBuyers = async (req, res) => {
@@ -21,7 +22,12 @@ const getAllBuyers = async (req, res) => {
 const getBuyerById = async (req, res, next) => {
     try {
         const buyerId = req.params.id;
-        const buyerData = await Buyer.findById(buyerId);
+        // we gotta get the buyer data AND all the reps for the dropdown at the same time
+        const [buyerData, allSalesReps] = await Promise.all([
+            Buyer.findById(buyerId),
+            SalesRep.getAll()
+        ]);
+
 
         //if the model returns null, it means no buyer was found.
         // so we'll just show a 404 page.
@@ -35,6 +41,7 @@ const getBuyerById = async (req, res, next) => {
         res.render('admin/crm/buyer-profile', {
             title: `CRM - ${buyerData.details.name}`,
             buyer: buyerData, // the view will get an object with details, contacts, notes, etc.
+            allSalesReps: allSalesReps, // pass the list of all reps to the view
             layout: 'layouts/main'
         });
 
@@ -145,7 +152,6 @@ const deleteBuyer = async (req, res, next) => {
         next(err);
     }
 };
-
 
 module.exports = {
     getAllBuyers,
