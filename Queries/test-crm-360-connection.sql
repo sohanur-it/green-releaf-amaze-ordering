@@ -42,7 +42,7 @@ SELECT
                             'email', sr.email,
                             'phone', sr.phone
                     ) ORDER BY sr.name
-            ) FROM "ORDERS-buyer_sales_reps" AS sr WHERE sr.orders_buyer_id = b.entry_id) AS sales_reps,
+            ) FROM "ORDERS-buyer_sales_reps_assignments" AS sr WHERE sr.orders_buyer_id = b.entry_id) AS sales_reps,
 
     (SELECT JSON_AGG(
                     JSON_BUILD_OBJECT(
