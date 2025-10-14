@@ -1,7 +1,6 @@
 // Server/Controllers/authController.js
 
 const UserModel = require('../Models/userModel');
-const { v4: uuidv4 } = require('uuid');
 
 class AuthController {
     /**
