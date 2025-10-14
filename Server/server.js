@@ -3,6 +3,7 @@
 const express = require('express');
 const path = require('path');
 const expressLayouts = require('express-ejs-layouts');
+const session = require('express-session');
 require('dotenv').config({ path: path.join(__dirname, '../.ENV') });
 
 const logger = require('../Utilities/logger');
@@ -11,6 +12,7 @@ const { errorHandler, notFoundHandler } = require('./Middleware/error-handler');
 //import routes
 const adminRoutes = require('./Routes/admin-routes');
 const crmApiRoutes = require('./Routes/crm/api');
+const authRoutes = require('./Routes/auth-routes');
 
 //create express app
 const app = express();
@@ -25,6 +27,18 @@ app.set('views', path.join(__dirname, '../Views'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+//session middleware
+app.use(session({
+    secret: process.env.SESSION_SECRET || 'green-releaf-secret-key-change-in-production',
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+        secure: process.env.NODE_ENV === 'production', // Only use secure cookies in production
+        httpOnly: true,
+        maxAge: 24 * 60 * 60 * 1000 // 24 hours
+    }
+}));
+
 //static files
 app.use('/public', express.static(path.join(__dirname, '../Public')));
 app.use('/photos', express.static(path.join(__dirname, '../Photos')));
@@ -36,6 +50,7 @@ app.use((req, res, next) => {
 });
 
 //routes
+app.use('/auth', authRoutes);
 app.use('/admin', adminRoutes);
 app.use('/api/crm', crmApiRoutes); // our CRM API routes are handled here
 

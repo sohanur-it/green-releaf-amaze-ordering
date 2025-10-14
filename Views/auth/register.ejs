@@ -1,0 +1,41 @@
+<form method="POST" action="/auth/register">
+    <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" required autofocus>
+    </div>
+    
+    <div class="form-group">
+        <label for="firstname">First Name</label>
+        <input type="text" id="firstname" name="firstname" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="lastname">Last Name</label>
+        <input type="text" id="lastname" name="lastname" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" required minlength="8">
+        <small style="color: #718096; font-size: 12px; margin-top: 4px; display: block;">
+            Must be at least 8 characters long
+        </small>
+    </div>
+    
+    <div class="form-group">
+        <label for="confirmPassword">Confirm Password</label>
+        <input type="password" id="confirmPassword" name="confirmPassword" required>
+    </div>
+    
+    <button type="submit" class="btn">Create Account</button>
+    
+    <div class="auth-footer">
+        <a href="/auth/login">Already have an account? Sign In</a>
+    </div>
+</form>
+
