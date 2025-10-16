@@ -1,0 +1,61 @@
+{
+  "timestamp": "2025-10-16T13:28:57.739Z",
+  "config": {
+    "hostname": "mo.metrc.com",
+    "username": "AGT007392",
+    "licenseNumber": "CUL000063"
+  },
+  "results": {
+    "authentication": {
+      "status": "success",
+      "details": {
+        "accessToken": "eyJhbGciOiJIUzI1NiIs...",
+        "refreshToken": null
+      }
+    },
+    "endpoints": {
+      "Active Packages": {
+        "statusCode": 200,
+        "success": true,
+        "dataCount": 10,
+        "totalRecords": 5653,
+        "error": null
+      },
+      "Transferred Packages": {
+        "statusCode": 200,
+        "success": true,
+        "dataCount": 10,
+        "totalRecords": 123818,
+        "error": null
+      },
+      "In-Transit Packages": {
+        "statusCode": 200,
+        "success": true,
+        "dataCount": 10,
+        "totalRecords": 281,
+        "error": null
+      },
+      "Outgoing Transfers": {
+        "statusCode": 200,
+        "success": true,
+        "dataCount": 10,
+        "totalRecords": 25,
+        "error": null
+      },
+      "Items": {
+        "statusCode": 200,
+        "success": true,
+        "dataCount": 10,
+        "totalRecords": 1541,
+        "error": null
+      },
+      "Strains": {
+        "statusCode": 200,
+        "success": true,
+        "dataCount": 10,
+        "totalRecords": 651,
+        "error": null
+      }
+    }
+  }
+}

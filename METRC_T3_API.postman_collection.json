@@ -1,0 +1,622 @@
+{
+  "info": {
+    "name": "METRC T3 API - Green Releaf",
+    "description": "Complete API collection for testing METRC T3 endpoints required for Module 2 implementation",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{accessToken}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://api.trackandtrace.tools/v2",
+      "type": "string"
+    },
+    {
+      "key": "licenseNumber",
+      "value": "CUL000063",
+      "type": "string"
+    },
+    {
+      "key": "hostname",
+      "value": "mo.metrc.com",
+      "type": "string"
+    },
+    {
+      "key": "username",
+      "value": "AGT007392",
+      "type": "string"
+    },
+    {
+      "key": "password",
+      "value": "Metalhead4!",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "refreshToken",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Get Access Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('accessToken', response.accessToken);",
+                  "    pm.collectionVariables.set('refreshToken', response.refreshToken);",
+                  "    console.log('Access token saved:', response.accessToken);",
+                  "} else {",
+                  "    console.log('Authentication failed:', pm.response.text());",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"hostname\": \"{{hostname}}\",\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/auth/credentials",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "credentials"]
+            }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    pm.collectionVariables.set('accessToken', response.accessToken);",
+                  "    pm.collectionVariables.set('refreshToken', response.refreshToken);",
+                  "    console.log('Token refreshed:', response.accessToken);",
+                  "} else {",
+                  "    console.log('Token refresh failed:', pm.response.text());",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{refreshToken}}"
+              },
+              {
+                "key": "accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/auth/refresh",
+              "host": ["{{baseUrl}}"],
+              "path": ["auth", "refresh"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Packages",
+      "item": [
+        {
+          "name": "Active Packages",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    console.log('Active packages count:', response.data ? response.data.length : 0);",
+                  "    console.log('Total records:', response.total || 0);",
+                  "    console.log('Page:', response.page || 1);",
+                  "} else {",
+                  "    console.log('Active packages request failed:', pm.response.text());",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/packages/active?licenseNumber={{licenseNumber}}&strictPagination=true&pageSize=500&page=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["packages", "active"],
+              "query": [
+                {
+                  "key": "licenseNumber",
+                  "value": "{{licenseNumber}}"
+                },
+                {
+                  "key": "strictPagination",
+                  "value": "true"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "500"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Transferred Packages",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    console.log('Transferred packages count:', response.data ? response.data.length : 0);",
+                  "    console.log('Total records:', response.total || 0);",
+                  "} else {",
+                  "    console.log('Transferred packages request failed:', pm.response.text());",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/packages/transferred?licenseNumber={{licenseNumber}}&strictPagination=true&pageSize=500&page=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["packages", "transferred"],
+              "query": [
+                {
+                  "key": "licenseNumber",
+                  "value": "{{licenseNumber}}"
+                },
+                {
+                  "key": "strictPagination",
+                  "value": "true"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "500"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "In-Transit Packages",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    console.log('In-transit packages count:', response.data ? response.data.length : 0);",
+                  "    console.log('Total records:', response.total || 0);",
+                  "} else {",
+                  "    console.log('In-transit packages request failed:', pm.response.text());",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/packages/intransit?licenseNumber={{licenseNumber}}&strictPagination=true&pageSize=500&page=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["packages", "intransit"],
+              "query": [
+                {
+                  "key": "licenseNumber",
+                  "value": "{{licenseNumber}}"
+                },
+                {
+                  "key": "strictPagination",
+                  "value": "true"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "500"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Transfers",
+      "item": [
+        {
+          "name": "Outgoing Transfers",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    console.log('Outgoing transfers count:', response.data ? response.data.length : 0);",
+                  "    console.log('Total records:', response.total || 0);",
+                  "} else {",
+                  "    console.log('Outgoing transfers request failed:', pm.response.text());",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/transfers/outgoing/active?licenseNumber={{licenseNumber}}&strictPagination=true&pageSize=500&page=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["transfers", "outgoing", "active"],
+              "query": [
+                {
+                  "key": "licenseNumber",
+                  "value": "{{licenseNumber}}"
+                },
+                {
+                  "key": "strictPagination",
+                  "value": "true"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "500"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reference Data",
+      "item": [
+        {
+          "name": "Items",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    console.log('Items count:', response.data ? response.data.length : 0);",
+                  "    console.log('Total records:', response.total || 0);",
+                  "} else {",
+                  "    console.log('Items request failed:', pm.response.text());",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/items?licenseNumber={{licenseNumber}}&strictPagination=true&pageSize=500&page=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["items"],
+              "query": [
+                {
+                  "key": "licenseNumber",
+                  "value": "{{licenseNumber}}"
+                },
+                {
+                  "key": "strictPagination",
+                  "value": "true"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "500"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Strains",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    console.log('Strains count:', response.data ? response.data.length : 0);",
+                  "    console.log('Total records:', response.total || 0);",
+                  "} else {",
+                  "    console.log('Strains request failed:', pm.response.text());",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "accept",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/strains?licenseNumber={{licenseNumber}}&strictPagination=true&pageSize=500&page=1",
+              "host": ["{{baseUrl}}"],
+              "path": ["strains"],
+              "query": [
+                {
+                  "key": "licenseNumber",
+                  "value": "{{licenseNumber}}"
+                },
+                {
+                  "key": "strictPagination",
+                  "value": "true"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "500"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Testing Scenarios",
+      "item": [
+        {
+          "name": "Test Pagination",
+          "item": [
+            {
+              "name": "Page 1 (Small)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/packages/active?licenseNumber={{licenseNumber}}&strictPagination=true&pageSize=10&page=1",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["packages", "active"],
+                  "query": [
+                    {
+                      "key": "licenseNumber",
+                      "value": "{{licenseNumber}}"
+                    },
+                    {
+                      "key": "strictPagination",
+                      "value": "true"
+                    },
+                    {
+                      "key": "pageSize",
+                      "value": "10"
+                    },
+                    {
+                      "key": "page",
+                      "value": "1"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Page 2 (Small)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/packages/active?licenseNumber={{licenseNumber}}&strictPagination=true&pageSize=10&page=2",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["packages", "active"],
+                  "query": [
+                    {
+                      "key": "licenseNumber",
+                      "value": "{{licenseNumber}}"
+                    },
+                    {
+                      "key": "strictPagination",
+                      "value": "true"
+                    },
+                    {
+                      "key": "pageSize",
+                      "value": "10"
+                    },
+                    {
+                      "key": "page",
+                      "value": "2"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "Test Error Handling",
+          "item": [
+            {
+              "name": "Invalid Token",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer invalid_token"
+                  },
+                  {
+                    "key": "accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/packages/active?licenseNumber={{licenseNumber}}",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["packages", "active"],
+                  "query": [
+                    {
+                      "key": "licenseNumber",
+                      "value": "{{licenseNumber}}"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "name": "Invalid License",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "accept",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/packages/active?licenseNumber=INVALID123",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["packages", "active"],
+                  "query": [
+                    {
+                      "key": "licenseNumber",
+                      "value": "INVALID123"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Auto-refresh token if needed",
+          "const accessToken = pm.collectionVariables.get('accessToken');",
+          "if (!accessToken) {",
+          "    console.log('No access token found. Please run \"Get Access Token\" first.');",
+          "}"
+        ]
+      }
+    }
+  ]
+}
