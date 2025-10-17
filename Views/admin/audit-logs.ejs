@@ -1,0 +1,412 @@
+<!-- Views/admin/audit-logs.ejs -->
+<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
+    <h1 class="h2">Audit Logs</h1>
+    <div class="btn-toolbar mb-2 mb-md-0">
+        <div class="btn-group me-2">
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshLogs()">
+                <i class="fas fa-sync"></i> Refresh
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Audit Logs Content -->
+<div class="row">
+    <div class="col-12">
+        <!-- Statistics Cards -->
+        <div class="row mb-4" id="statsCards">
+            <!-- Stats will be loaded here -->
+        </div>
+
+        <!-- Filters -->
+        <div class="card mb-3">
+            <div class="card-header">
+                <h5 class="mb-0">Filters</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3">
+                        <label for="filterAction" class="form-label">Action</label>
+                        <select class="form-select" id="filterAction">
+                            <option value="">All Actions</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="filterResource" class="form-label">Resource Type</label>
+                        <select class="form-select" id="filterResource">
+                            <option value="">All Resources</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="filterStatus" class="form-label">Status</label>
+                        <select class="form-select" id="filterStatus">
+                            <option value="">All Statuses</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label for="filterUser" class="form-label">User</label>
+                        <select class="form-select" id="filterUser">
+                            <option value="">All Users</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-md-6">
+                        <label for="filterDateFrom" class="form-label">From Date</label>
+                        <input type="date" class="form-control" id="filterDateFrom">
+                    </div>
+                    <div class="col-md-6">
+                        <label for="filterDateTo" class="form-label">To Date</label>
+                        <input type="date" class="form-control" id="filterDateTo">
+                    </div>
+                </div>
+                <div class="row mt-3">
+                    <div class="col-12">
+                        <button type="button" class="btn btn-primary" onclick="applyFilters()">
+                            <i class="fas fa-filter"></i> Apply Filters
+                        </button>
+                        <button type="button" class="btn btn-secondary ms-2" onclick="clearFilters()">
+                            <i class="fas fa-times"></i> Clear Filters
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audit Logs Table -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Audit Logs</h5>
+                <div class="btn-group" role="group">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="changePageSize(25)">25</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="changePageSize(50)">50</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="changePageSize(100)">100</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover" id="auditLogsTable">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>User</th>
+                                <th>Action</th>
+                                <th>Resource</th>
+                                <th>Status</th>
+                                <th>Details</th>
+                                <th>IP Address</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Logs will be loaded here -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- Pagination -->
+                <nav aria-label="Audit logs pagination">
+                    <ul class="pagination justify-content-center" id="pagination">
+                        <!-- Pagination will be loaded here -->
+                    </ul>
+                </nav>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Audit Logs JavaScript
+let currentPage = 1;
+let pageSize = 50;
+let totalPages = 1;
+let filterOptions = {};
+
+// Load data on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadStats();
+    loadFilterOptions();
+    loadLogs();
+});
+
+async function loadStats() {
+    try {
+        const response = await fetch('/api/v1/admin/audit-logs/stats');
+        const data = await response.json();
+        
+        if (data.success) {
+            renderStats(data.data || data.stats);
+        } else {
+            showAlert('Error loading stats: ' + data.error, 'danger');
+        }
+    } catch (error) {
+        showAlert('Error loading stats: ' + error.message, 'danger');
+    }
+}
+
+async function loadFilterOptions() {
+    try {
+        const response = await fetch('/api/v1/admin/audit-logs/filters');
+        const data = await response.json();
+        
+        if (data.success) {
+            filterOptions = data.data || data.filters;
+            populateFilters();
+        } else {
+            showAlert('Error loading filter options: ' + data.error, 'danger');
+        }
+    } catch (error) {
+        showAlert('Error loading filter options: ' + error.message, 'danger');
+    }
+}
+
+async function loadLogs() {
+    try {
+        const params = new URLSearchParams({
+            page: currentPage,
+            limit: pageSize,
+            ...getActiveFilters()
+        });
+        
+        const response = await fetch(`/api/v1/admin/audit-logs?${params}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            renderLogs(data.data?.logs || data.logs);
+            renderPagination(data.data?.pagination || data.pagination);
+        } else {
+            showAlert('Error loading logs: ' + data.error, 'danger');
+        }
+    } catch (error) {
+        showAlert('Error loading logs: ' + error.message, 'danger');
+    }
+}
+
+function renderStats(stats) {
+    const container = document.getElementById('statsCards');
+    
+    // Extract values from the actual API response structure
+    const total = stats.totalLogs || stats.total || 0;
+    const successCount = stats.statusBreakdown?.find(s => s.status === 'success')?.count || stats.byStatus?.success || 0;
+    const failureCount = stats.statusBreakdown?.find(s => s.status === 'failure')?.count || stats.byStatus?.failure || 0;
+    const todayCount = stats.dailyActivity?.find(d => {
+        const today = new Date().toISOString().split('T')[0];
+        return d.date?.startsWith(today);
+    })?.count || stats.dailyActivity?.today || 0;
+    
+    container.innerHTML = `
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h5 class="card-title text-primary">${total}</h5>
+                    <p class="card-text">Total Logs</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h5 class="card-title text-success">${successCount}</h5>
+                    <p class="card-text">Successful</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h5 class="card-title text-danger">${failureCount}</h5>
+                    <p class="card-text">Failed</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h5 class="card-title text-info">${todayCount}</h5>
+                    <p class="card-text">Today</p>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function populateFilters() {
+    // Populate action filter
+    const actionSelect = document.getElementById('filterAction');
+    actionSelect.innerHTML = '<option value="">All Actions</option>';
+    filterOptions.actions.forEach(action => {
+        const option = document.createElement('option');
+        option.value = action;
+        option.textContent = action;
+        actionSelect.appendChild(option);
+    });
+    
+    // Populate resource filter
+    const resourceSelect = document.getElementById('filterResource');
+    resourceSelect.innerHTML = '<option value="">All Resources</option>';
+    filterOptions.resourceTypes.forEach(resource => {
+        const option = document.createElement('option');
+        option.value = resource;
+        option.textContent = resource;
+        resourceSelect.appendChild(option);
+    });
+    
+    // Populate status filter
+    const statusSelect = document.getElementById('filterStatus');
+    statusSelect.innerHTML = '<option value="">All Statuses</option>';
+    filterOptions.statuses.forEach(status => {
+        const option = document.createElement('option');
+        option.value = status;
+        option.textContent = status;
+        statusSelect.appendChild(option);
+    });
+    
+    // Populate user filter
+    const userSelect = document.getElementById('filterUser');
+    userSelect.innerHTML = '<option value="">All Users</option>';
+    filterOptions.users.forEach(user => {
+        const option = document.createElement('option');
+        option.value = user.id;
+        option.textContent = user.fullName || user.username;
+        userSelect.appendChild(option);
+    });
+}
+
+function renderLogs(logs) {
+    const tbody = document.querySelector('#auditLogsTable tbody');
+    tbody.innerHTML = '';
+    
+    logs.forEach(log => {
+        const row = document.createElement('tr');
+        
+        const statusBadge = log.status === 'success' ? 
+            '<span class="badge bg-success">Success</span>' : 
+            '<span class="badge bg-danger">Failure</span>';
+        
+        const detailsHtml = log.details ? 
+            `<button class="btn btn-sm btn-outline-info" onclick="showDetails('${log.id}')">View Details</button>` : 
+            '<span class="text-muted">No details</span>';
+        
+        row.innerHTML = `
+            <td>${new Date(log.timestamp).toLocaleString()}</td>
+            <td>${log.userFullName || log.username || 'System'}</td>
+            <td><code>${log.action}</code></td>
+            <td>${log.resourceType || '-'}</td>
+            <td>${statusBadge}</td>
+            <td>${detailsHtml}</td>
+            <td>${log.sourceIp || '-'}</td>
+        `;
+        
+        tbody.appendChild(row);
+    });
+}
+
+function renderPagination(pagination) {
+    const container = document.getElementById('pagination');
+    container.innerHTML = '';
+    
+    totalPages = pagination.totalPages;
+    
+    // Previous button
+    const prevLi = document.createElement('li');
+    prevLi.className = `page-item ${currentPage === 1 ? 'disabled' : ''}`;
+    prevLi.innerHTML = `<a class="page-link" href="#" onclick="changePage(${currentPage - 1})">Previous</a>`;
+    container.appendChild(prevLi);
+    
+    // Page numbers
+    const startPage = Math.max(1, currentPage - 2);
+    const endPage = Math.min(totalPages, currentPage + 2);
+    
+    for (let i = startPage; i <= endPage; i++) {
+        const li = document.createElement('li');
+        li.className = `page-item ${i === currentPage ? 'active' : ''}`;
+        li.innerHTML = `<a class="page-link" href="#" onclick="changePage(${i})">${i}</a>`;
+        container.appendChild(li);
+    }
+    
+    // Next button
+    const nextLi = document.createElement('li');
+    nextLi.className = `page-item ${currentPage === totalPages ? 'disabled' : ''}`;
+    nextLi.innerHTML = `<a class="page-link" href="#" onclick="changePage(${currentPage + 1})">Next</a>`;
+    container.appendChild(nextLi);
+}
+
+function getActiveFilters() {
+    const filters = {};
+    
+    const action = document.getElementById('filterAction').value;
+    if (action) filters.action = action;
+    
+    const resource = document.getElementById('filterResource').value;
+    if (resource) filters.resourceType = resource;
+    
+    const status = document.getElementById('filterStatus').value;
+    if (status) filters.status = status;
+    
+    const user = document.getElementById('filterUser').value;
+    if (user) filters.userId = user;
+    
+    const dateFrom = document.getElementById('filterDateFrom').value;
+    if (dateFrom) filters.dateFrom = dateFrom;
+    
+    const dateTo = document.getElementById('filterDateTo').value;
+    if (dateTo) filters.dateTo = dateTo;
+    
+    return filters;
+}
+
+function applyFilters() {
+    currentPage = 1;
+    loadLogs();
+}
+
+function clearFilters() {
+    document.getElementById('filterAction').value = '';
+    document.getElementById('filterResource').value = '';
+    document.getElementById('filterStatus').value = '';
+    document.getElementById('filterUser').value = '';
+    document.getElementById('filterDateFrom').value = '';
+    document.getElementById('filterDateTo').value = '';
+    
+    currentPage = 1;
+    loadLogs();
+}
+
+function changePage(page) {
+    if (page >= 1 && page <= totalPages) {
+        currentPage = page;
+        loadLogs();
+    }
+}
+
+function changePageSize(size) {
+    pageSize = size;
+    currentPage = 1;
+    loadLogs();
+}
+
+function refreshLogs() {
+    loadStats();
+    loadLogs();
+}
+
+function showDetails(logId) {
+    // This would open a modal with detailed information
+    alert('Details for log ID: ' + logId);
+}
+
+function showAlert(message, type) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+    alertDiv.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    const container = document.querySelector('.content-body');
+    container.insertBefore(alertDiv, container.firstChild);
+    
+    setTimeout(() => {
+        alertDiv.remove();
+    }, 5000);
+}
+</script>

@@ -4,9 +4,14 @@ const express = require('express');
 const router = express.Router();
 const buyerController = require('../Controllers/crm/buyerController');
 const salesRepController = require('../Controllers/crm/salesRepController');
+const UserModel = require('../Models/userModel');
+const { requireAuth, requirePermission } = require('../Middleware/auth');
+
+// Apply authentication to all admin routes
+router.use(requireAuth);
 
 // Route to render the main admin dashboard
-router.get('/', (req, res) => {
+router.get('/', requirePermission('admin', 'dashboard'), (req, res) => {
     res.render('admin/dashboard', {
         title: 'Dashboard',
         layout: 'layouts/main'
@@ -37,5 +42,23 @@ router.post('/crm/buyers/:id/delete', buyerController.deleteBuyer);
 //route to display a single buyer's profile page.
 // The ':id' part is a placeholder for the actual buyer's entry_id
 router.get('/crm/buyers/:id', buyerController.getBuyerById);
+
+// User management page
+router.get('/users', requirePermission('admin', 'user'), (req, res) => {
+    res.render('admin/user-management', { 
+        title: 'User Management',
+        layout: 'layouts/main',
+        user: req.session.user 
+    });
+});
+
+// Audit logs page
+router.get('/audit-logs', requirePermission('admin', 'audit'), (req, res) => {
+    res.render('admin/audit-logs', { 
+        title: 'Audit Logs',
+        layout: 'layouts/main',
+        user: req.session.user 
+    });
+});
 
 module.exports = router;

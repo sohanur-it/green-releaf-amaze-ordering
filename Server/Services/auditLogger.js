@@ -248,8 +248,8 @@ class AuditLogger {
                     al.id,
                     al.user_id,
                     u.username,
-                    u.firstname,
-                    u.lastname,
+                    u.first_name as firstname,
+                    u.last_name as lastname,
                     al.action,
                     al.resource_type,
                     al.resource_id,
@@ -333,6 +333,289 @@ class AuditLogger {
     async close() {
         await this.pool.end();
     }
+
+    /**
+     * Get audit logs with filtering and pagination
+     */
+    async getLogs(filters = {}) {
+        const client = await this.pool.connect();
+        
+        try {
+            let query = `
+                SELECT 
+                    al.id,
+                    al.user_id,
+                    u.username,
+                    u.first_name as firstname,
+                    u.last_name as lastname,
+                    al.action,
+                    al.resource_type,
+                    al.resource_id,
+                    al.details,
+                    al.status,
+                    al.source_ip,
+                    al.timestamp
+                FROM "ORDERS-audit_log" al
+                LEFT JOIN users u ON al.user_id = u.id
+                WHERE 1=1
+            `;
+            
+            const values = [];
+            let paramCount = 0;
+            
+            // Add filters
+            if (filters.userId) {
+                paramCount++;
+                query += ` AND al.user_id = $${paramCount}`;
+                values.push(filters.userId);
+            }
+            
+            if (filters.action) {
+                paramCount++;
+                query += ` AND al.action = $${paramCount}`;
+                values.push(filters.action);
+            }
+            
+            if (filters.resourceType) {
+                paramCount++;
+                query += ` AND al.resource_type = $${paramCount}`;
+                values.push(filters.resourceType);
+            }
+            
+            if (filters.status) {
+                paramCount++;
+                query += ` AND al.status = $${paramCount}`;
+                values.push(filters.status);
+            }
+            
+            if (filters.startDate) {
+                paramCount++;
+                query += ` AND al.timestamp >= $${paramCount}`;
+                values.push(filters.startDate);
+            }
+            
+            if (filters.endDate) {
+                paramCount++;
+                query += ` AND al.timestamp <= $${paramCount}`;
+                values.push(filters.endDate);
+            }
+            
+            // Add ordering and pagination
+            query += ` ORDER BY al.timestamp DESC`;
+            
+            if (filters.limit) {
+                paramCount++;
+                query += ` LIMIT $${paramCount}`;
+                values.push(filters.limit);
+            }
+            
+            if (filters.offset) {
+                paramCount++;
+                query += ` OFFSET $${paramCount}`;
+                values.push(filters.offset);
+            }
+            
+            const result = await client.query(query, values);
+            
+            return result.rows.map(row => ({
+                id: row.id,
+                userId: row.user_id,
+                username: row.username,
+                userFullName: row.firstname && row.lastname ? `${row.firstname} ${row.lastname}` : null,
+                action: row.action,
+                resourceType: row.resource_type,
+                resourceId: row.resource_id,
+                details: row.details ? (typeof row.details === 'string' ? JSON.parse(row.details) : row.details) : null,
+                status: row.status,
+                sourceIp: row.source_ip,
+                timestamp: row.timestamp
+            }));
+            
+        } catch (error) {
+            console.error('❌ Failed to get audit logs:', error.message);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Get total count of audit logs with filters
+     */
+    async getLogCount(filters = {}) {
+        const client = await this.pool.connect();
+        
+        try {
+            let query = `SELECT COUNT(*) FROM "ORDERS-audit_log" WHERE 1=1`;
+            const values = [];
+            let paramCount = 0;
+            
+            // Add same filters as getLogs
+            if (filters.userId) {
+                paramCount++;
+                query += ` AND user_id = $${paramCount}`;
+                values.push(filters.userId);
+            }
+            
+            if (filters.action) {
+                paramCount++;
+                query += ` AND action = $${paramCount}`;
+                values.push(filters.action);
+            }
+            
+            if (filters.resourceType) {
+                paramCount++;
+                query += ` AND resource_type = $${paramCount}`;
+                values.push(filters.resourceType);
+            }
+            
+            if (filters.status) {
+                paramCount++;
+                query += ` AND status = $${paramCount}`;
+                values.push(filters.status);
+            }
+            
+            if (filters.startDate) {
+                paramCount++;
+                query += ` AND timestamp >= $${paramCount}`;
+                values.push(filters.startDate);
+            }
+            
+            if (filters.endDate) {
+                paramCount++;
+                query += ` AND timestamp <= $${paramCount}`;
+                values.push(filters.endDate);
+            }
+            
+            const result = await client.query(query, values);
+            return parseInt(result.rows[0].count);
+            
+        } catch (error) {
+            console.error('❌ Failed to get audit log count:', error.message);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Get audit log statistics
+     */
+    async getStats() {
+        const client = await this.pool.connect();
+        
+        try {
+            // Total logs
+            const totalResult = await client.query('SELECT COUNT(*) FROM "ORDERS-audit_log"');
+            const totalLogs = parseInt(totalResult.rows[0].count);
+            
+            // Logs by status
+            const statusResult = await client.query(`
+                SELECT status, COUNT(*) as count 
+                FROM "ORDERS-audit_log" 
+                GROUP BY status
+            `);
+            
+            // Logs by action (top 10)
+            const actionResult = await client.query(`
+                SELECT action, COUNT(*) as count 
+                FROM "ORDERS-audit_log" 
+                GROUP BY action 
+                ORDER BY count DESC 
+                LIMIT 10
+            `);
+            
+            // Logs by user (top 10)
+            const userResult = await client.query(`
+                SELECT u.username, u.first_name as firstname, u.last_name as lastname, COUNT(*) as count 
+                FROM "ORDERS-audit_log" al
+                LEFT JOIN users u ON al.user_id = u.id
+                GROUP BY u.username, u.first_name, u.last_name
+                ORDER BY count DESC 
+                LIMIT 10
+            `);
+            
+            // Logs by day (last 30 days)
+            const dailyResult = await client.query(`
+                SELECT DATE(timestamp) as date, COUNT(*) as count 
+                FROM "ORDERS-audit_log" 
+                WHERE timestamp >= NOW() - INTERVAL '30 days'
+                GROUP BY DATE(timestamp) 
+                ORDER BY date DESC
+            `);
+            
+            return {
+                totalLogs,
+                statusBreakdown: statusResult.rows,
+                topActions: actionResult.rows,
+                topUsers: userResult.rows,
+                dailyActivity: dailyResult.rows
+            };
+            
+        } catch (error) {
+            console.error('❌ Failed to get audit stats:', error.message);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Get filter options for the UI
+     */
+    async getFilterOptions() {
+        const client = await this.pool.connect();
+        
+        try {
+            // Get unique actions
+            const actionResult = await client.query(`
+                SELECT DISTINCT action 
+                FROM "ORDERS-audit_log" 
+                ORDER BY action
+            `);
+            
+            // Get unique resource types
+            const resourceResult = await client.query(`
+                SELECT DISTINCT resource_type 
+                FROM "ORDERS-audit_log" 
+                WHERE resource_type IS NOT NULL
+                ORDER BY resource_type
+            `);
+            
+            // Get unique statuses
+            const statusResult = await client.query(`
+                SELECT DISTINCT status 
+                FROM "ORDERS-audit_log" 
+                ORDER BY status
+            `);
+            
+            // Get users who have performed actions
+            const userResult = await client.query(`
+                SELECT DISTINCT u.id, u.username, u.first_name as firstname, u.last_name as lastname
+                FROM "ORDERS-audit_log" al
+                JOIN users u ON al.user_id = u.id
+                ORDER BY u.username
+            `);
+            
+            return {
+                actions: actionResult.rows.map(r => r.action),
+                resourceTypes: resourceResult.rows.map(r => r.resource_type),
+                statuses: statusResult.rows.map(r => r.status),
+                users: userResult.rows.map(r => ({
+                    id: r.id,
+                    username: r.username,
+                    fullName: r.firstname && r.lastname ? `${r.firstname} ${r.lastname}` : r.username
+                }))
+            };
+            
+        } catch (error) {
+            console.error('❌ Failed to get filter options:', error.message);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
 }
 
 // Export singleton instance

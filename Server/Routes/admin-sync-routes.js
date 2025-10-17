@@ -3,6 +3,7 @@ const router = express.Router();
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const swaggerAuth = require('../Middleware/swagger-auth');
+const masterScheduler = require('../Services/masterScheduler');
 
 const execAsync = promisify(exec);
 
@@ -48,73 +49,12 @@ router.use(swaggerAuth);
  */
 router.get('/status', async (req, res) => {
   try {
-    // Return a mock scheduler status since we don't have a real scheduler running
-    const statusData = {
-      status: "running",
-      runningJobs: 0,
-      recentJobs: [],
-      schedules: [
-        {
-          name: "activePackages",
-          description: "Active Packages Sync (Full Mirror)",
-          schedule: "every 10 minutes during business hours",
-          script: "sync:active:prod",
-          lastRun: null,
-          nextRun: null,
-          enabled: true
-        },
-        {
-          name: "outgoingTransfers", 
-          description: "Outgoing Transfers Sync (Incremental)",
-          schedule: "every 5 minutes during business hours",
-          script: "sync:outgoing:prod",
-          lastRun: null,
-          nextRun: null,
-          enabled: true
-        },
-        {
-          name: "strains",
-          description: "Strains Sync (Incremental)",
-          schedule: "every 60 minutes during business hours", 
-          script: "sync:strains:prod",
-          lastRun: null,
-          nextRun: null,
-          enabled: true
-        },
-        {
-          name: "items",
-          description: "Items Sync (Incremental)",
-          schedule: "every 60 minutes during business hours",
-          script: "sync:items:prod", 
-          lastRun: null,
-          nextRun: null,
-          enabled: true
-        },
-        {
-          name: "transferredPackages",
-          description: "Transferred Packages Sync (Incremental)",
-          schedule: "every 10 minutes during business hours",
-          script: "sync:transferred:prod",
-          lastRun: null,
-          nextRun: null,
-          enabled: true
-        },
-        {
-          name: "intransitPackages",
-          description: "In-Transit Packages Sync (Full Mirror)",
-          schedule: "every 5 minutes during business hours",
-          script: "sync:intransit:prod",
-          lastRun: null,
-          nextRun: null,
-          enabled: true
-        }
-      ]
-    };
+    // Get real scheduler status
+    const statusData = masterScheduler.getStatus();
     
     res.json({
       success: true,
-      ...statusData,
-      timestamp: new Date().toISOString()
+      ...statusData
     });
   } catch (error) {
     console.error('Error getting sync status:', error);
@@ -555,5 +495,87 @@ function extractSyncDetails(lines) {
   
   return details;
 }
+
+/**
+ * @swagger
+ * /api/v1/swagger/sync/scheduler/start:
+ *   post:
+ *     summary: Start the master scheduler
+ *     description: Start the master scheduler to begin automatic sync operations
+ *     tags: [Scheduler Control]
+ *     responses:
+ *       200:
+ *         description: Scheduler started successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SyncResponse'
+ *       500:
+ *         description: Failed to start scheduler
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post('/scheduler/start', async (req, res) => {
+  try {
+    await masterScheduler.start();
+    
+    res.json({
+      success: true,
+      message: 'Master scheduler started successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error starting scheduler:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to start scheduler',
+      timestamp: new Date().toISOString(),
+      details: { message: error.message }
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/v1/swagger/sync/scheduler/stop:
+ *   post:
+ *     summary: Stop the master scheduler
+ *     description: Stop the master scheduler to halt automatic sync operations
+ *     tags: [Scheduler Control]
+ *     responses:
+ *       200:
+ *         description: Scheduler stopped successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SyncResponse'
+ *       500:
+ *         description: Failed to stop scheduler
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post('/scheduler/stop', async (req, res) => {
+  try {
+    await masterScheduler.stop();
+    
+    res.json({
+      success: true,
+      message: 'Master scheduler stopped successfully',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error stopping scheduler:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to stop scheduler',
+      timestamp: new Date().toISOString(),
+      details: { message: error.message }
+    });
+  }
+});
 
 module.exports = router;

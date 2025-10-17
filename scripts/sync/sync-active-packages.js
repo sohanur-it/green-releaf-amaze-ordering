@@ -67,10 +67,10 @@ async function authenticateWithMetrc() {
             tokenExpiry = new Date(Date.now() + (24 * 60 * 60 * 1000)); // 24 hours from now
             console.log('✅ Authentication successful');
             return true;
-        } else {
+            } else {
             throw new Error('Invalid authentication response');
         }
-    } catch (error) {
+        } catch (error) {
         console.error('❌ Authentication failed:', error.message);
         if (error.response) {
             console.error('Response status:', error.response.status);
@@ -364,13 +364,13 @@ async function main() {
         console.error('❌ Enhanced active packages sync failed:', error.message);
         process.exit(1);
     } finally {
-        await pool.end();
+            await pool.end();
     }
 }
 
 // Run if called directly
 if (require.main === module) {
-    main();
+main();
 }
 
 module.exports = {

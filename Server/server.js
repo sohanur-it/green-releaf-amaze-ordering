@@ -26,6 +26,11 @@ const authRoutes = require('./Routes/auth-routes');
 const syncRoutes = require('./Routes/sync-routes');
 const manifestRoutes = require('./Routes/manifest-routes');
 const adminSyncRoutes = require('./Routes/admin-sync-routes');
+const userManagementRoutes = require('./Routes/user-management-routes');
+const auditLogRoutes = require('./Routes/audit-log-routes');
+
+//import services
+const masterScheduler = require('./Services/masterScheduler');
 
 //create express app
 const app = express();
@@ -46,7 +51,7 @@ app.use(session({
     resave: false,
     saveUninitialized: false,
     cookie: {
-        secure: process.env.NODE_ENV === 'production', // Only use secure cookies in production
+        secure: false, // Set to false for local development and testing
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000 // 24 hours
     }
@@ -78,6 +83,8 @@ app.use('/api/crm', crmApiRoutes); // our CRM API routes are handled here
 app.use('/api/v1/admin/sync', syncRoutes); // sync management API routes
 app.use('/api/v1/swagger/sync', adminSyncRoutes); // admin sync API routes with Swagger docs
 app.use('/api/v1/manifests', manifestRoutes); // manifest creation API routes
+app.use('/api/v1/admin/users', userManagementRoutes); // user management API routes
+app.use('/api/v1/admin/audit-logs', auditLogRoutes); // audit log API routes
 
 //root redirect
 app.get('/', (req, res) => {
@@ -91,11 +98,21 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 //start server
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
     logger.info(`🚀 Server started on port ${PORT}`);
     logger.info(`📝 Admin panel: http://localhost:${PORT}/admin`);
     logger.info(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
     logger.info(`💚 Green Releaf Amaze Ordering System`);
+    
+    // Start the master scheduler in production
+    if (process.env.NODE_ENV === 'production') {
+        try {
+            await masterScheduler.start();
+            logger.info(`⏰ Master scheduler started successfully`);
+        } catch (error) {
+            logger.error(`❌ Failed to start master scheduler: ${error.message}`);
+        }
+    }
 });
 
 module.exports = app;

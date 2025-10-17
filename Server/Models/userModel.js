@@ -1,6 +1,6 @@
 // Server/Models/userModel.js
 
-const { query } = require('../config/database');
+const { query, pool } = require('../config/database');
 const bcrypt = require('bcrypt');
 
 class UserModel {
@@ -15,13 +15,19 @@ class UserModel {
         // Hash the password
         const password_hash = await bcrypt.hash(password, 10);
         
+        // Convert status to is_active boolean
+        const is_active = status === 'active';
+        const is_admin = is_superuser;
+        
         const sql = `
-            INSERT INTO users (username, firstname, lastname, email, password_hash, status, is_superuser)
+            INSERT INTO users (username, first_name, last_name, email, password_hash, is_active, is_admin)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING id, username, firstname, lastname, email, status, is_superuser, created_at
+            RETURNING id, username, first_name as firstname, last_name as lastname, email, 
+                     CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status, 
+                     is_admin as is_superuser, created_at
         `;
         
-        const result = await query(sql, [username, firstname, lastname, email, password_hash, status, is_superuser]);
+        const result = await query(sql, [username, firstname, lastname, email, password_hash, is_active, is_admin]);
         return result.rows[0];
     }
 
@@ -78,12 +84,27 @@ class UserModel {
      * @returns {Promise<Array>} Array of users
      */
     static async getAll(status = null) {
-        let sql = 'SELECT id, username, firstname, lastname, email, status, is_superuser, created_at, last_login FROM users';
+        let sql = `
+            SELECT 
+                id, 
+                username, 
+                first_name as firstname, 
+                last_name as lastname, 
+                email, 
+                CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status,
+                is_admin as is_superuser, 
+                created_at, 
+                last_login 
+            FROM users
+        `;
         const params = [];
         
         if (status) {
-            sql += ' WHERE status = $1';
-            params.push(status);
+            if (status === 'active') {
+                sql += ' WHERE is_active = true';
+            } else if (status === 'inactive') {
+                sql += ' WHERE is_active = false';
+            }
         }
         
         sql += ' ORDER BY created_at DESC';
@@ -97,7 +118,23 @@ class UserModel {
      * @returns {Promise<Array>} Array of pending users
      */
     static async getPending() {
-        return this.getAll('pending');
+        const sql = `
+            SELECT 
+                id, 
+                username, 
+                first_name as firstname, 
+                last_name as lastname, 
+                email, 
+                CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status,
+                is_admin as is_superuser, 
+                created_at, 
+                last_login 
+            FROM users 
+            WHERE is_active = false
+            ORDER BY created_at DESC
+        `;
+        const result = await query(sql);
+        return result.rows;
     }
 
     /**
@@ -115,14 +152,19 @@ class UserModel {
      * @returns {Promise<Object>} Updated user
      */
     static async updateStatus(id, status) {
+        // Convert status string to is_active boolean
+        const is_active = status === 'active';
+        
         const sql = `
             UPDATE users 
-            SET status = $1, updated_at = NOW()
+            SET is_active = $1, updated_at = NOW()
             WHERE id = $2
-            RETURNING id, username, firstname, lastname, email, status, is_superuser
+            RETURNING id, username, first_name as firstname, last_name as lastname, email, 
+                     CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status, 
+                     is_admin as is_superuser
         `;
         
-        const result = await query(sql, [status, id]);
+        const result = await query(sql, [is_active, id]);
         return result.rows[0];
     }
 
@@ -155,9 +197,11 @@ class UserModel {
         
         const sql = `
             UPDATE users 
-            SET firstname = $1, lastname = $2, email = $3, updated_at = NOW()
+            SET first_name = $1, last_name = $2, email = $3, updated_at = NOW()
             WHERE id = $4
-            RETURNING id, username, firstname, lastname, email, status, is_superuser
+            RETURNING id, username, first_name as firstname, last_name as lastname, email, 
+                     CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status, 
+                     is_admin as is_superuser
         `;
         
         const result = await query(sql, [firstname, lastname, email, id]);
@@ -295,9 +339,9 @@ class UserModel {
      * @returns {Promise<boolean>} True if user is superuser
      */
     static async isSuperuser(userId) {
-        const sql = 'SELECT is_superuser FROM users WHERE id = $1';
+        const sql = 'SELECT is_admin FROM users WHERE id = $1';
         const result = await query(sql, [userId]);
-        return result.rows[0]?.is_superuser || false;
+        return result.rows[0]?.is_admin || false;
     }
 
     /**
@@ -326,6 +370,125 @@ class UserModel {
             roles,
             permissions: permissions.map(p => p.permission)
         };
+    }
+
+    /**
+     * Get all roles
+     */
+    static async getAllRoles() {
+        const sql = `
+            SELECT id, name
+            FROM roles
+            ORDER BY name
+        `;
+        
+        try {
+            const result = await query(sql);
+            return result.rows;
+        } catch (error) {
+            console.error('Database query error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Assign role to user
+     */
+    static async assignRole(userId, roleId, assignedBy = null) {
+        const query = `
+            INSERT INTO user_roles (user_id, role_id, assigned_by)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, role_id) DO NOTHING
+            RETURNING *
+        `;
+        
+        try {
+            const result = await pool.query(query, [userId, roleId, assignedBy]);
+            return result.rows[0];
+        } catch (error) {
+            console.error('Database query error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Remove role from user
+     */
+    static async removeRole(userId, roleId) {
+        const query = `
+            DELETE FROM user_roles
+            WHERE user_id = $1 AND role_id = $2
+            RETURNING *
+        `;
+        
+        try {
+            const result = await pool.query(query, [userId, roleId]);
+            return result.rows[0];
+        } catch (error) {
+            console.error('Database query error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get user roles
+     */
+    static async getUserRoles(userId) {
+        const query = `
+            SELECT r.id, r.name, r.description, ur.assigned_at
+            FROM user_roles ur
+            JOIN roles r ON ur.role_id = r.id
+            WHERE ur.user_id = $1
+            ORDER BY r.name
+        `;
+        
+        try {
+            const result = await pool.query(query, [userId]);
+            return result.rows;
+        } catch (error) {
+            console.error('Database query error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Approve user
+     */
+    static async approve(userId) {
+        const query = `
+            UPDATE users
+            SET status = 'active', updated_at = NOW()
+            WHERE id = $1 AND status = 'pending'
+            RETURNING *
+        `;
+        
+        try {
+            const result = await pool.query(query, [userId]);
+            return result.rows[0];
+        } catch (error) {
+            console.error('Database query error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Revoke user
+     */
+    static async revoke(userId) {
+        const query = `
+            UPDATE users
+            SET status = 'revoked', updated_at = NOW()
+            WHERE id = $1 AND status IN ('active', 'pending')
+            RETURNING *
+        `;
+        
+        try {
+            const result = await pool.query(query, [userId]);
+            return result.rows[0];
+        } catch (error) {
+            console.error('Database query error:', error);
+            throw error;
+        }
     }
 }
 
