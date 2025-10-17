@@ -43,6 +43,26 @@ router.get('/roles',
 );
 
 /**
+ * GET /api/v1/admin/users/:userId/permissions
+ * Get permissions for a specific user
+ * Requires: admin.user.read permission
+ */
+router.get('/:userId/permissions',
+    requirePermission('admin.user.read'),
+    userManagementController.getUserPermissions
+);
+
+/**
+ * GET /api/v1/admin/roles/:roleId/permissions
+ * Get permissions for a specific role
+ * Requires: admin.user.read permission
+ */
+router.get('/roles/:roleId/permissions',
+    requirePermission('admin.user.read'),
+    userManagementController.getRolePermissions
+);
+
+/**
  * POST /api/v1/admin/users/:userId/approve
  * Approve a pending user
  * Requires: admin.user.approve permission

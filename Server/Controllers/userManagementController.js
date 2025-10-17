@@ -16,20 +16,22 @@ class UserManagementController {
         try {
             const users = await UserModel.getAll();
             
-            // Get roles for each user
-            const usersWithRoles = await Promise.all(
+            // Get roles and permissions for each user
+            const usersWithRolesAndPermissions = await Promise.all(
                 users.map(async (user) => {
                     const roles = await UserModel.getUserRoles(user.id);
+                    const permissions = await UserModel.getUserPermissions(user.id);
                     return {
                         ...user,
-                        roles: roles
+                        roles: roles,
+                        permissions: permissions
                     };
                 })
             );
             
             res.json({
                 success: true,
-                data: usersWithRoles,
+                data: usersWithRolesAndPermissions,
                 timestamp: new Date().toISOString()
             });
             
@@ -357,6 +359,56 @@ class UserManagementController {
             res.status(500).json({
                 success: false,
                 error: 'Failed to get roles',
+                message: error.message
+            });
+        }
+    }
+
+    /**
+     * Get permissions for a specific user
+     * GET /api/v1/admin/users/:userId/permissions
+     */
+    async getUserPermissions(req, res) {
+        try {
+            const { userId } = req.params;
+            const permissions = await UserModel.getUserPermissions(userId);
+            
+            res.json({
+                success: true,
+                data: permissions,
+                timestamp: new Date().toISOString()
+            });
+            
+        } catch (error) {
+            console.error('Error getting user permissions:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to get user permissions',
+                message: error.message
+            });
+        }
+    }
+
+    /**
+     * Get permissions for a specific role
+     * GET /api/v1/admin/users/roles/:roleId/permissions
+     */
+    async getRolePermissions(req, res) {
+        try {
+            const { roleId } = req.params;
+            const permissions = await UserModel.getRolePermissions(roleId);
+            
+            res.json({
+                success: true,
+                data: permissions,
+                timestamp: new Date().toISOString()
+            });
+            
+        } catch (error) {
+            console.error('Error getting role permissions:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to get role permissions',
                 message: error.message
             });
         }

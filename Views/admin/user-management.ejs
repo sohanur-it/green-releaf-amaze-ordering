@@ -1,6 +1,30 @@
 <!-- Views/admin/user-management.ejs -->
+<style>
+.permissions-display {
+    max-width: 300px;
+    max-height: 100px;
+    overflow-y: auto;
+    font-size: 0.8em;
+}
+
+.permissions-display .badge {
+    font-size: 0.7em;
+    margin: 1px;
+    display: inline-block;
+}
+
+.role-badges .badge {
+    font-size: 0.8em;
+    margin: 1px;
+}
+
+.table td {
+    vertical-align: middle;
+}
+</style>
+
 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-    <h1 class="h2">User Management</h1>
+    <!-- <h1 class="h2">User Management</h1> -->
     <div class="btn-toolbar mb-2 mb-md-0">
         <div class="btn-group me-2">
             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="refreshUsers()">
@@ -47,6 +71,7 @@
                                         <th>Email</th>
                                         <th>Status</th>
                                         <th>Roles</th>
+                                        <th>Permissions</th>
                                         <th>Created</th>
                                         <th>Actions</th>
                                     </tr>
@@ -96,6 +121,7 @@
                                         <th>Name</th>
                                         <th>Email</th>
                                         <th>Roles</th>
+                                        <th>Permissions</th>
                                         <th>Last Login</th>
                                         <th>Actions</th>
                                     </tr>
@@ -125,9 +151,15 @@
                     <input type="hidden" id="userId" name="userId">
                     <div class="mb-3">
                         <label for="availableRoles" class="form-label">Available Roles</label>
-                        <select class="form-select" id="availableRoles" name="roleId">
+                        <select class="form-select" id="availableRoles" name="roleId" onchange="loadRolePermissions()">
                             <option value="">Select a role...</option>
                         </select>
+                    </div>
+                    <div class="mb-3" id="permissionsSection" style="display: none;">
+                        <label class="form-label">Role Permissions</label>
+                        <div id="rolePermissions" class="border rounded p-3" style="max-height: 200px; overflow-y: auto;">
+                            <!-- Permissions will be loaded here -->
+                        </div>
                     </div>
                 </form>
             </div>
@@ -159,7 +191,7 @@ async function loadUsers() {
         
         if (data.success) {
             allUsers = data.data || data.users || [];
-            pendingUsers = allUsers.filter(user => user.status === 'inactive');
+            pendingUsers = allUsers.filter(user => user.status === 'pending');
             activeUsers = allUsers.filter(user => user.status === 'active');
             
             renderUsers();
@@ -246,10 +278,15 @@ function createUserRow(user, showRoles = true) {
         `<div class="role-badges">${user.roles ? user.roles.map(role => `<span class="badge bg-primary me-1">${role.name}</span>`).join('') : '<span class="text-muted">No roles</span>'}</div>` : 
         '';
     
-    const actionsHtml = user.status === 'inactive' ? 
+    // Create permissions display
+    const permissionsHtml = showRoles ? 
+        `<div class="permissions-display">${user.permissions ? user.permissions.map(perm => `<span class="badge bg-secondary me-1" title="${perm.resource}: ${perm.action}">${perm.permission}</span>`).join('') : '<span class="text-muted">No permissions</span>'}</div>` : 
+        '';
+    
+    const actionsHtml = user.status === 'pending' ? 
         `<button class="btn btn-sm btn-success me-1" onclick="approveUser(${user.id})">Approve</button>
          <button class="btn btn-sm btn-danger" onclick="revokeUser(${user.id})">Reject</button>` :
-        `<button class="btn btn-sm btn-primary me-1" onclick="openRoleModal(${user.id})">Assign Role</button>
+        `<button class="btn btn-sm btn-primary me-1 mb-2" onclick="openRoleModal(${user.id})">Assign Role</button>
          <button class="btn btn-sm btn-warning me-1" onclick="revokeUser(${user.id})">Revoke</button>`;
     
     row.innerHTML = `
@@ -258,6 +295,7 @@ function createUserRow(user, showRoles = true) {
         <td>${user.email}</td>
         ${showRoles ? `<td>${statusBadge}</td>` : ''}
         ${showRoles ? `<td>${rolesHtml}</td>` : ''}
+        ${showRoles ? `<td>${permissionsHtml}</td>` : ''}
         <td>${new Date(user.created_at).toLocaleDateString()}</td>
         <td>${actionsHtml}</td>
     `;
@@ -334,7 +372,7 @@ async function assignRole() {
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ roleId: parseInt(roleId) })
+            body: JSON.stringify({ roles: [parseInt(roleId)] })
         });
         
         const data = await response.json();
@@ -348,6 +386,58 @@ async function assignRole() {
         }
     } catch (error) {
         showAlert('Error assigning role: ' + error.message, 'danger');
+    }
+}
+
+async function loadRolePermissions() {
+    const roleId = document.getElementById('availableRoles').value;
+    const permissionsSection = document.getElementById('permissionsSection');
+    const rolePermissions = document.getElementById('rolePermissions');
+    
+    if (!roleId) {
+        permissionsSection.style.display = 'none';
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/v1/admin/users/roles/${roleId}/permissions`);
+        const data = await response.json();
+        
+        if (data.success) {
+            const permissions = data.data || [];
+            
+            if (permissions.length > 0) {
+                // Group permissions by resource
+                const groupedPermissions = permissions.reduce((acc, perm) => {
+                    if (!acc[perm.resource]) {
+                        acc[perm.resource] = [];
+                    }
+                    acc[perm.resource].push(perm.action);
+                    return acc;
+                }, {});
+                
+                let html = '<div class="row">';
+                Object.keys(groupedPermissions).forEach(resource => {
+                    html += `
+                        <div class="col-md-6 mb-2">
+                            <strong>${resource}:</strong><br>
+                            <small class="text-muted">${groupedPermissions[resource].join(', ')}</small>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                
+                rolePermissions.innerHTML = html;
+                permissionsSection.style.display = 'block';
+            } else {
+                rolePermissions.innerHTML = '<p class="text-muted">No permissions assigned to this role.</p>';
+                permissionsSection.style.display = 'block';
+            }
+        } else {
+            showAlert('Error loading role permissions: ' + data.error, 'danger');
+        }
+    } catch (error) {
+        showAlert('Error loading role permissions: ' + error.message, 'danger');
     }
 }
 

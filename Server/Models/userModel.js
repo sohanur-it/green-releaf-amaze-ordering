@@ -15,19 +15,22 @@ class UserModel {
         // Hash the password
         const password_hash = await bcrypt.hash(password, 10);
         
+        // Hash the email for the email_hash field
+        const email_hash = await bcrypt.hash(email, 10);
+        
         // Convert status to is_active boolean
         const is_active = status === 'active';
         const is_admin = is_superuser;
         
         const sql = `
-            INSERT INTO users (username, first_name, last_name, email, password_hash, is_active, is_admin)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO users (username, first_name, last_name, email, email_hash, password_hash, is_active, is_admin, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
             RETURNING id, username, first_name as firstname, last_name as lastname, email, 
                      CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status, 
                      is_admin as is_superuser, created_at
         `;
         
-        const result = await query(sql, [username, firstname, lastname, email, password_hash, is_active, is_admin]);
+        const result = await query(sql, [username, firstname, lastname, email, email_hash, password_hash, is_active, is_admin]);
         return result.rows[0];
     }
 
@@ -40,7 +43,11 @@ class UserModel {
         const sql = `
             SELECT id, username, first_name as firstname, last_name as lastname, 
                    email, password_hash, 
-                   CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status,
+                   CASE 
+                       WHEN is_active = true THEN 'active'
+                       WHEN is_active = false THEN 'pending'
+                       ELSE 'inactive'
+                   END as status,
                    is_admin as is_superuser, 
                    created_at, last_login, updated_at
             FROM users WHERE id = $1
@@ -58,7 +65,11 @@ class UserModel {
         const sql = `
             SELECT id, username, first_name as firstname, last_name as lastname, 
                    email, password_hash, 
-                   CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status,
+                   CASE 
+                       WHEN is_active = true THEN 'active'
+                       WHEN is_active = false THEN 'pending'
+                       ELSE 'inactive'
+                   END as status,
                    is_admin as is_superuser, 
                    created_at, last_login, updated_at
             FROM users WHERE username = $1
@@ -91,7 +102,11 @@ class UserModel {
                 first_name as firstname, 
                 last_name as lastname, 
                 email, 
-                CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status,
+                CASE 
+                    WHEN is_active = true THEN 'active'
+                    WHEN is_active = false THEN 'pending'
+                    ELSE 'inactive'
+                END as status,
                 is_admin as is_superuser, 
                 created_at, 
                 last_login 
@@ -102,6 +117,8 @@ class UserModel {
         if (status) {
             if (status === 'active') {
                 sql += ' WHERE is_active = true';
+            } else if (status === 'pending') {
+                sql += ' WHERE is_active = false';
             } else if (status === 'inactive') {
                 sql += ' WHERE is_active = false';
             }
@@ -125,7 +142,11 @@ class UserModel {
                 first_name as firstname, 
                 last_name as lastname, 
                 email, 
-                CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status,
+                CASE 
+                    WHEN is_active = true THEN 'active'
+                    WHEN is_active = false THEN 'pending'
+                    ELSE 'inactive'
+                END as status,
                 is_admin as is_superuser, 
                 created_at, 
                 last_login 
@@ -294,6 +315,24 @@ class UserModel {
     }
 
     /**
+     * Get permissions for a specific role
+     * @param {number} roleId - Role ID
+     * @returns {Promise<Array>} Array of permissions
+     */
+    static async getRolePermissions(roleId) {
+        const sql = `
+            SELECT DISTINCT p.action, p.resource, CONCAT(p.action, ':', p.resource) AS permission
+            FROM permissions p
+            JOIN role_permissions rp ON p.id = rp.permission_id
+            WHERE rp.role_id = $1
+            ORDER BY p.resource, p.action
+        `;
+        
+        const result = await query(sql, [roleId]);
+        return result.rows;
+    }
+
+    /**
      * Get user permissions
      * @param {number} userId - User ID
      * @returns {Promise<Array>} Array of permissions
@@ -455,15 +494,17 @@ class UserModel {
      * Approve user
      */
     static async approve(userId) {
-        const query = `
+        const sql = `
             UPDATE users
-            SET status = 'active', updated_at = NOW()
-            WHERE id = $1 AND status = 'pending'
-            RETURNING *
+            SET is_active = true, updated_at = NOW()
+            WHERE id = $1 AND is_active = false
+            RETURNING id, username, first_name as firstname, last_name as lastname, email, 
+                     CASE WHEN is_active = true THEN 'active' ELSE 'pending' END as status, 
+                     is_admin as is_superuser, created_at
         `;
         
         try {
-            const result = await pool.query(query, [userId]);
+            const result = await query(sql, [userId]);
             return result.rows[0];
         } catch (error) {
             console.error('Database query error:', error);
@@ -475,15 +516,17 @@ class UserModel {
      * Revoke user
      */
     static async revoke(userId) {
-        const query = `
+        const sql = `
             UPDATE users
-            SET status = 'revoked', updated_at = NOW()
-            WHERE id = $1 AND status IN ('active', 'pending')
-            RETURNING *
+            SET is_active = false, updated_at = NOW()
+            WHERE id = $1 AND is_active = true
+            RETURNING id, username, first_name as firstname, last_name as lastname, email, 
+                     CASE WHEN is_active = true THEN 'active' ELSE 'pending' END as status, 
+                     is_admin as is_superuser, created_at
         `;
         
         try {
-            const result = await pool.query(query, [userId]);
+            const result = await query(sql, [userId]);
             return result.rows[0];
         } catch (error) {
             console.error('Database query error:', error);

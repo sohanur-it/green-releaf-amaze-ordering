@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node Server/server.js",
     "dev": "nodemon Server/server.js",
+    "dev:prod": "NODE_ENV=production nodemon Server/server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
