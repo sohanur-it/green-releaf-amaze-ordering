@@ -1,0 +1,258 @@
+const swaggerJSDoc = require('swagger-jsdoc');
+const swaggerUi = require('swagger-ui-express');
+
+// Swagger configuration options
+const swaggerOptions = {
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'Green Releaf Amaze Ordering - Admin Sync API',
+      version: '1.0.0',
+      description: 'API documentation for METRC sync services and admin operations',
+      contact: {
+        name: 'Green Releaf Amaze Ordering',
+        email: 'admin@greenreleaf.com'
+      },
+      license: {
+        name: 'MIT',
+        url: 'https://opensource.org/licenses/MIT'
+      }
+    },
+    servers: [
+      {
+        url: 'http://localhost:3000',
+        description: 'Development server'
+      },
+      {
+        url: 'https://your-production-domain.com',
+        description: 'Production server'
+      }
+    ],
+    components: {
+      schemas: {
+        SyncStatus: {
+          type: 'object',
+          properties: {
+            status: {
+              type: 'string',
+              enum: ['running', 'stopped', 'error'],
+              description: 'Current scheduler status'
+            },
+            timestamp: {
+              type: 'string',
+              format: 'date-time',
+              description: 'Last status update timestamp'
+            },
+            runningJobs: {
+              type: 'integer',
+              description: 'Number of currently running sync jobs'
+            },
+            recentJobs: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  status: { type: 'string' },
+                  timestamp: { type: 'string', format: 'date-time' },
+                  duration: { type: 'integer' }
+                }
+              },
+              description: 'List of recently executed jobs'
+            },
+            schedules: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  description: { type: 'string' },
+                  schedule: { type: 'string' },
+                  script: { type: 'string' }
+                }
+              },
+              description: 'Configured sync schedules'
+            }
+          }
+        },
+        SyncResponse: {
+          type: 'object',
+          properties: {
+            success: {
+              type: 'boolean',
+              description: 'Whether the sync operation was successful'
+            },
+            message: {
+              type: 'string',
+              description: 'Human-readable status message'
+            },
+            serviceName: {
+              type: 'string',
+              description: 'Name of the sync service that was executed'
+            },
+            timestamp: {
+              type: 'string',
+              format: 'date-time',
+              description: 'When the sync was executed'
+            },
+            recordsProcessed: {
+              type: 'integer',
+              description: 'Number of records processed during sync'
+            },
+            executionTime: {
+              type: 'integer',
+              description: 'Execution time in milliseconds'
+            },
+            details: {
+              type: 'object',
+              description: 'Additional sync details and statistics'
+            }
+          }
+        },
+        ErrorResponse: {
+          type: 'object',
+          properties: {
+            success: {
+              type: 'boolean',
+              example: false
+            },
+            error: {
+              type: 'string',
+              description: 'Error message'
+            },
+            timestamp: {
+              type: 'string',
+              format: 'date-time'
+            },
+            details: {
+              type: 'object',
+              description: 'Additional error details'
+            }
+          }
+        }
+      }
+    },
+    tags: [
+      {
+        name: 'Sync Services',
+        description: 'METRC data synchronization services'
+      },
+      {
+        name: 'Admin',
+        description: 'Administrative operations and monitoring'
+      }
+    ]
+  },
+  apis: [
+    './Server/Routes/*.js',
+    './Server/Controllers/*.js',
+    './Server/Middleware/*.js'
+  ]
+};
+
+// Generate Swagger specification
+const swaggerSpec = swaggerJSDoc(swaggerOptions);
+
+// Swagger UI options
+const swaggerUiOptions = {
+  customCss: `
+    .swagger-ui .topbar { display: none }
+    .swagger-ui .info .title { color: #2c5530; }
+    .swagger-ui .scheme-container { background: #f8f9fa; padding: 20px; border-radius: 8px; }
+    .swagger-ui .auth-container { background: #e8f5e8; padding: 15px; border-radius: 8px; margin: 20px 0; }
+    .swagger-ui .auth-container h4 { color: #2c5530; margin: 0 0 10px 0; }
+    .swagger-ui .auth-container p { margin: 5px 0; color: #4a5568; }
+  `,
+  customSiteTitle: 'Green Releaf Amaze - Admin Sync API',
+  customfavIcon: '/favicon.svg',
+  swaggerOptions: {
+    persistAuthorization: true,
+    displayRequestDuration: true,
+    filter: true,
+    tryItOutEnabled: true,
+    requestInterceptor: (req) => {
+      // Add session cookie to requests
+      if (req.url.includes('/api/v1/swagger/sync/')) {
+        // Get the session cookie from browser's document.cookie
+        const cookies = document.cookie.split(';');
+        let sessionCookie = '';
+        
+        for (let cookie of cookies) {
+          const trimmedCookie = cookie.trim();
+          if (trimmedCookie.startsWith('connect.sid=')) {
+            sessionCookie = trimmedCookie;
+            break;
+          }
+        }
+        
+        if (sessionCookie) {
+          req.headers['Cookie'] = sessionCookie;
+        } else {
+          console.warn('No session cookie found. Please login first.');
+        }
+      }
+      return req;
+    },
+    onComplete: () => {
+      // Add authentication notice
+      const authNotice = document.createElement('div');
+      authNotice.className = 'auth-container';
+      authNotice.innerHTML = `
+        <h4>🔐 Authentication Required</h4>
+        <p><strong>⚠️ IMPORTANT:</strong> You must login through the web interface first!</p>
+        <p><strong>Step 1:</strong> <a href="/auth/login" target="_blank" style="background: #667eea; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none;">🔑 Login Here</a></p>
+        <p><strong>Step 2:</strong> Use your browser session to test the API endpoints below</p>
+        <p><strong>Credentials:</strong> <code>admin</code> / <code>admin123</code></p>
+        <p><strong>Note:</strong> No API keys needed - your browser session will be used automatically</p>
+        <div id="session-status" style="background: #f0f0f0; padding: 10px; border-radius: 4px; margin-top: 10px; font-family: monospace; font-size: 12px;">
+          <strong>Session Status:</strong> <span id="session-info">Checking...</span>
+        </div>
+      `;
+      
+      // Check session status
+      const checkSession = () => {
+        const cookies = document.cookie.split(';');
+        let sessionCookie = '';
+        
+        for (let cookie of cookies) {
+          const trimmedCookie = cookie.trim();
+          if (trimmedCookie.startsWith('connect.sid=')) {
+            sessionCookie = trimmedCookie;
+            break;
+          }
+        }
+        
+        const sessionInfo = document.getElementById('session-info');
+        if (sessionCookie) {
+          sessionInfo.innerHTML = '✅ <span style="color: green;">Logged in</span> - Session cookie found';
+          sessionInfo.parentElement.style.background = '#e8f5e8';
+        } else {
+          sessionInfo.innerHTML = '❌ <span style="color: red;">Not logged in</span> - No session cookie found';
+          sessionInfo.parentElement.style.background = '#ffe8e8';
+        }
+      };
+      
+      // Check session status immediately and every 2 seconds
+      checkSession();
+      setInterval(checkSession, 2000);
+      
+      // Insert at the top of the info section
+      const infoSection = document.querySelector('.swagger-ui .info');
+      if (infoSection) {
+        infoSection.insertBefore(authNotice, infoSection.firstChild);
+      }
+      
+      // Hide the security section completely
+      const securitySection = document.querySelector('.swagger-ui .auth-container');
+      if (securitySection) {
+        securitySection.style.display = 'none';
+      }
+    }
+  }
+};
+
+module.exports = {
+  swaggerSpec,
+  swaggerUi,
+  swaggerUiOptions
+};

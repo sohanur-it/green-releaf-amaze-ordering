@@ -4,15 +4,28 @@ const express = require('express');
 const path = require('path');
 const expressLayouts = require('express-ejs-layouts');
 const session = require('express-session');
-require('dotenv').config({ path: path.join(__dirname, '../.ENV') });
+
+// Load environment variables based on NODE_ENV
+if (process.env.NODE_ENV === 'production') {
+    require('dotenv').config({ path: path.join(__dirname, '../config/production.env') });
+} else {
+    require('dotenv').config({ path: path.join(__dirname, '../config/local.env') });
+}
 
 const logger = require('../Utilities/logger');
 const { errorHandler, notFoundHandler } = require('./Middleware/error-handler');
+const swaggerAuth = require('./Middleware/swagger-auth');
+
+// Swagger configuration
+const { swaggerSpec, swaggerUi, swaggerUiOptions } = require('./config/swagger');
 
 //import routes
 const adminRoutes = require('./Routes/admin-routes');
 const crmApiRoutes = require('./Routes/crm/api');
 const authRoutes = require('./Routes/auth-routes');
+const syncRoutes = require('./Routes/sync-routes');
+const manifestRoutes = require('./Routes/manifest-routes');
+const adminSyncRoutes = require('./Routes/admin-sync-routes');
 
 //create express app
 const app = express();
@@ -49,10 +62,22 @@ app.use((req, res, next) => {
     next();
 });
 
+// Swagger API documentation
+app.use('/api-docs', swaggerAuth, swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions));
+
+// Serve Swagger JSON spec
+app.get('/api-docs.json', swaggerAuth, (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(swaggerSpec);
+});
+
 //routes
 app.use('/auth', authRoutes);
 app.use('/admin', adminRoutes);
 app.use('/api/crm', crmApiRoutes); // our CRM API routes are handled here
+app.use('/api/v1/admin/sync', syncRoutes); // sync management API routes
+app.use('/api/v1/swagger/sync', adminSyncRoutes); // admin sync API routes with Swagger docs
+app.use('/api/v1/manifests', manifestRoutes); // manifest creation API routes
 
 //root redirect
 app.get('/', (req, res) => {
@@ -69,6 +94,7 @@ app.use(errorHandler);
 app.listen(PORT, () => {
     logger.info(`🚀 Server started on port ${PORT}`);
     logger.info(`📝 Admin panel: http://localhost:${PORT}/admin`);
+    logger.info(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
     logger.info(`💚 Green Releaf Amaze Ordering System`);
 });
 
