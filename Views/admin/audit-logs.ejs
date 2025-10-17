@@ -76,11 +76,11 @@
         <!-- Audit Logs Table -->
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Audit Logs</h5>
+                <!-- <h5 class="mb-0">Audit Logs</h5> -->
                 <div class="btn-group" role="group">
                     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="changePageSize(25)">25</button>
                     <button type="button" class="btn btn-sm btn-outline-secondary" onclick="changePageSize(50)">50</button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="changePageSize(100)">100</button>
+                    <button type="button" class="b tn btn-sm btn-outline-secondary" onclick="changePageSize(100)">100</button>
                 </div>
             </div>
             <div class="card-body">
@@ -109,6 +109,24 @@
                         <!-- Pagination will be loaded here -->
                     </ul>
                 </nav>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Audit Log Details Modal -->
+<div class="modal fade" id="auditLogModal" tabindex="-1" aria-labelledby="auditLogModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="auditLogModalLabel">Audit Log Details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="auditLogModalBody">
+                <!-- Details will be loaded here -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
             </div>
         </div>
     </div>
@@ -389,9 +407,83 @@ function refreshLogs() {
     loadLogs();
 }
 
-function showDetails(logId) {
-    // This would open a modal with detailed information
-    alert('Details for log ID: ' + logId);
+async function showDetails(logId) {
+    try {
+        const response = await fetch(`/api/v1/admin/audit-logs/${logId}`);
+        const data = await response.json();
+        
+        if (data.success) {
+            const log = data.data;
+            const modalBody = document.getElementById('auditLogModalBody');
+            
+            // Format details JSON for display
+            let detailsHtml = '';
+            if (log.details) {
+                if (typeof log.details === 'object') {
+                    detailsHtml = `<pre class="bg-light p-3 rounded"><code>${JSON.stringify(log.details, null, 2)}</code></pre>`;
+                } else {
+                    detailsHtml = `<pre class="bg-light p-3 rounded"><code>${log.details}</code></pre>`;
+                }
+            } else {
+                detailsHtml = '<p class="text-muted">No additional details available</p>';
+            }
+            
+            modalBody.innerHTML = `
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Basic Information</h6>
+                        <table class="table table-sm">
+                            <tr>
+                                <td><strong>ID:</strong></td>
+                                <td>${log.id}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Timestamp:</strong></td>
+                                <td>${new Date(log.timestamp).toLocaleString()}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>User:</strong></td>
+                                <td>${log.userFullName || log.username || 'System'}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Action:</strong></td>
+                                <td><code>${log.action}</code></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Resource Type:</strong></td>
+                                <td>${log.resourceType || '-'}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Resource ID:</strong></td>
+                                <td>${log.resourceId || '-'}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Status:</strong></td>
+                                <td><span class="badge ${log.status === 'success' ? 'bg-success' : 'bg-danger'}">${log.status}</span></td>
+                            </tr>
+                            <tr>
+                                <td><strong>IP Address:</strong></td>
+                                <td><code>${log.sourceIp || '-'}</code></td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Additional Details</h6>
+                        ${detailsHtml}
+                    </div>
+                </div>
+            `;
+            
+            // Show the modal
+            const modal = new bootstrap.Modal(document.getElementById('auditLogModal'));
+            modal.show();
+            
+        } else {
+            showAlert('Error loading log details: ' + data.error, 'danger');
+        }
+    } catch (error) {
+        showAlert('Error loading log details: ' + error.message, 'danger');
+    }
 }
 
 function showAlert(message, type) {

@@ -140,7 +140,16 @@ class AuditLogger {
      */
     async logApiRequest(req, res, action, beforeData = null, afterData = null, status = 'success') {
         const userId = req.session?.userId || null;
-        const sourceIp = req.ip || req.connection.remoteAddress;
+        
+        // Enhanced IP address extraction
+        const sourceIp = req.ip || 
+                        req.connection?.remoteAddress || 
+                        req.socket?.remoteAddress ||
+                        (req.connection?.socket ? req.connection.socket.remoteAddress : null) ||
+                        req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+                        req.headers['x-real-ip'] ||
+                        req.headers['x-client-ip'] ||
+                        'unknown';
         
         // Extract resource info from request
         const resourceType = this.extractResourceType(req.path);
@@ -610,6 +619,61 @@ class AuditLogger {
             
         } catch (error) {
             console.error('❌ Failed to get filter options:', error.message);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Get individual audit log details by ID
+     */
+    async getLogById(logId) {
+        const client = await this.pool.connect();
+        
+        try {
+            const query = `
+                SELECT 
+                    al.id,
+                    al.user_id,
+                    u.username,
+                    u.first_name as firstname,
+                    u.last_name as lastname,
+                    al.action,
+                    al.resource_type,
+                    al.resource_id,
+                    al.details,
+                    al.status,
+                    al.source_ip,
+                    al.timestamp
+                FROM "ORDERS-audit_log" al
+                LEFT JOIN users u ON al.user_id = u.id
+                WHERE al.id = $1
+            `;
+            
+            const result = await client.query(query, [logId]);
+            
+            if (result.rows.length === 0) {
+                return null;
+            }
+            
+            const row = result.rows[0];
+            return {
+                id: row.id,
+                userId: row.user_id,
+                username: row.username,
+                userFullName: row.firstname && row.lastname ? `${row.firstname} ${row.lastname}` : null,
+                action: row.action,
+                resourceType: row.resource_type,
+                resourceId: row.resource_id,
+                details: row.details ? (typeof row.details === 'string' ? JSON.parse(row.details) : row.details) : null,
+                status: row.status,
+                sourceIp: row.source_ip,
+                timestamp: row.timestamp
+            };
+            
+        } catch (error) {
+            console.error('❌ Failed to get audit log by ID:', error.message);
             throw error;
         } finally {
             client.release();

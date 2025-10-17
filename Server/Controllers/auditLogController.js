@@ -117,6 +117,38 @@ class AuditLogController {
             });
         }
     }
+
+    /**
+     * Get individual audit log details
+     * GET /api/v1/admin/audit-logs/:id
+     */
+    async getLogDetails(req, res) {
+        try {
+            const { id } = req.params;
+            const log = await auditLogger.getLogById(id);
+            
+            if (!log) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Audit log not found'
+                });
+            }
+            
+            res.json({
+                success: true,
+                data: log,
+                timestamp: new Date().toISOString()
+            });
+            
+        } catch (error) {
+            console.error('Error getting log details:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to get log details',
+                message: error.message
+            });
+        }
+    }
 }
 
 module.exports = new AuditLogController();

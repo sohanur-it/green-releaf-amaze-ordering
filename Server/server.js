@@ -36,6 +36,9 @@ const masterScheduler = require('./Services/masterScheduler');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Trust proxy for proper IP address extraction
+app.set('trust proxy', true);
+
 //view engine setup
 app.set('view engine', 'ejs');
 app.use(expressLayouts);

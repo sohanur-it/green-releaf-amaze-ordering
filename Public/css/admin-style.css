@@ -54,8 +54,25 @@ body {
 .nav-link.active { background-color: var(--primary-color); color: #fff; font-weight: 600; }
 .nav-icon { flex-shrink: 0; }
 .nav-link-text { white-space: nowrap; opacity: 1; transition: opacity 0.2s ease, width 0.2s ease; }
-.sidebar-footer { margin-top: auto; }
+.sidebar-footer { 
+    margin-top: auto; 
+    display: flex; 
+    flex-direction: column; 
+    gap: 8px; 
+}
 .sidebar-toggle { width: 100%; justify-content: center; }
+.logout-link { 
+    color: #dc3545 !important; 
+    border: 1px solid #dc3545; 
+    background-color: transparent;
+}
+.logout-link:hover { 
+    background-color: #dc3545 !important; 
+    color: #fff !important; 
+}
+.logout-link .nav-icon { 
+    color: inherit; 
+}
 
 /* -- Pre-emptive styles to prevent flash on load -- */
 /* This rule applies instantly if the pre-loader script adds the class to the HTML tag */

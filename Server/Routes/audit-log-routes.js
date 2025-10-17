@@ -42,4 +42,14 @@ router.get('/filters',
     auditLogController.getFilterOptions
 );
 
+/**
+ * GET /api/v1/admin/audit-logs/:id
+ * Get individual audit log details
+ * Requires: admin.audit.read permission
+ */
+router.get('/:id',
+    requirePermission('admin.audit.read'),
+    auditLogController.getLogDetails
+);
+
 module.exports = router;
