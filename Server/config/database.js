@@ -1,7 +1,14 @@
 // Server/config/database.js
 
 const { Pool } = require('pg');
-require('dotenv').config();
+const path = require('path');
+
+// Load environment variables based on NODE_ENV (same as server.js)
+if (process.env.NODE_ENV === 'production') {
+    require('dotenv').config({ path: path.join(__dirname, '../../config/production.env') });
+} else {
+    require('dotenv').config({ path: path.join(__dirname, '../../config/local.env') });
+}
 
 // Database configuration with support for both local development and production
 const isDevelopment = process.env.NODE_ENV === 'development';

@@ -92,6 +92,7 @@
                                 <th>User</th>
                                 <th>Action</th>
                                 <th>Resource</th>
+                                <th>Resource ID</th>
                                 <th>Status</th>
                                 <th>Details</th>
                                 <th>IP Address</th>
@@ -116,13 +117,13 @@
 
 <!-- Audit Log Details Modal -->
 <div class="modal fade" id="auditLogModal" tabindex="-1" aria-labelledby="auditLogModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-fullscreen">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="auditLogModalLabel">Audit Log Details</h5>
+                <h4 class="modal-title" id="auditLogModalLabel">Audit Log Details</h4>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <div class="modal-body" id="auditLogModalBody">
+            <div class="modal-body" id="auditLogModalBody" style="padding: 2rem; font-size: 1.1rem;">
                 <!-- Details will be loaded here -->
             </div>
             <div class="modal-footer">
@@ -309,9 +310,10 @@ function renderLogs(logs) {
             <td>${log.userFullName || log.username || 'System'}</td>
             <td><code>${log.action}</code></td>
             <td>${log.resourceType || '-'}</td>
+            <td><code>${log.resourceId || '-'}</code></td>
             <td>${statusBadge}</td>
             <td>${detailsHtml}</td>
-            <td>${log.sourceIp || '-'}</td>
+            <td><code>${log.sourceIp || '-'}</code></td>
         `;
         
         tbody.appendChild(row);
@@ -418,9 +420,87 @@ async function showDetails(logId) {
             
             // Format details JSON for display
             let detailsHtml = '';
+            let syncSummaryHtml = '';
+            
             if (log.details) {
                 if (typeof log.details === 'object') {
-                    detailsHtml = `<pre class="bg-light p-3 rounded"><code>${JSON.stringify(log.details, null, 2)}</code></pre>`;
+                    // Check if this is a sync operation
+                    if (log.action === 'sync_job_completed' && log.details.syncDetails) {
+                        const syncDetails = log.details.syncDetails;
+                        const summary = log.details.summary || 'Sync completed';
+                        
+                        syncSummaryHtml = `
+                            <div class="alert alert-info mb-4" style="padding: 1.5rem; font-size: 1.2rem;">
+                                <h5 class="mb-3"><i class="fas fa-sync"></i> Sync Summary</h5>
+                                <p class="mb-0 fs-5"><strong>${summary}</strong></p>
+                            </div>
+                        `;
+                        
+                        detailsHtml = `
+                            <div class="row g-4">
+                                <div class="col-lg-4">
+                                    <div class="card h-100">
+                                        <div class="card-header bg-primary text-white">
+                                            <h5 class="mb-0"><i class="fas fa-chart-bar"></i> Sync Statistics</h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <table class="table table-borderless">
+                                                <tr><td class="fw-bold">Records Inserted:</td><td><span class="badge bg-success fs-6">${syncDetails.inserted || 0}</span></td></tr>
+                                                <tr><td class="fw-bold">Records Updated:</td><td><span class="badge bg-warning fs-6">${syncDetails.updated || 0}</span></td></tr>
+                                                <tr><td class="fw-bold">Records Deleted:</td><td><span class="badge bg-danger fs-6">${syncDetails.deleted || 0}</span></td></tr>
+                                                <tr><td class="fw-bold">Records Processed:</td><td><span class="badge bg-info fs-6">${syncDetails.processed || 0}</span></td></tr>
+                                                <tr><td class="fw-bold">Total Records:</td><td><span class="badge bg-primary fs-6">${syncDetails.records || 0}</span></td></tr>
+                                                <tr><td class="fw-bold">Chunks:</td><td><span class="badge bg-secondary fs-6">${syncDetails.chunks || 0}</span></td></tr>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-lg-4">
+                                    <div class="card h-100">
+                                        <div class="card-header bg-success text-white">
+                                            <h5 class="mb-0"><i class="fas fa-cog"></i> Execution Details</h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <table class="table table-borderless">
+                                                <tr><td class="fw-bold">Duration:</td><td class="fs-6">${log.details.duration ? (log.details.duration / 1000).toFixed(2) + 's' : '-'}</td></tr>
+                                                <tr><td class="fw-bold">Script:</td><td><code class="fs-6">${log.details.script || '-'}</code></td></tr>
+                                                <tr><td class="fw-bold">Records Processed:</td><td class="fs-6">${log.details.recordsProcessed || 0}</td></tr>
+                                                <tr><td class="fw-bold">Status:</td><td><span class="badge ${log.status === 'success' ? 'bg-success' : 'bg-danger'} fs-6">${log.status}</span></td></tr>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-lg-4">
+                                    <div class="card h-100">
+                                        <div class="card-header bg-info text-white">
+                                            <h5 class="mb-0"><i class="fas fa-info-circle"></i> Additional Info</h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <strong>Resource Type:</strong><br>
+                                                <span class="fs-6">${log.resourceType || '-'}</span>
+                                            </div>
+                                            <div class="mb-3">
+                                                <strong>Resource ID:</strong><br>
+                                                <code class="fs-6">${log.resourceId || '-'}</code>
+                                            </div>
+                                            <div class="mb-3">
+                                                <strong>IP Address:</strong><br>
+                                                <code class="fs-6">${log.sourceIp || '-'}</code>
+                                            </div>
+                                            <div class="mb-0">
+                                                <strong>Timestamp:</strong><br>
+                                                <span class="fs-6">${new Date(log.timestamp).toLocaleString()}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        // Regular details display
+                        detailsHtml = `<pre class="bg-light p-3 rounded"><code>${JSON.stringify(log.details, null, 2)}</code></pre>`;
+                    }
                 } else {
                     detailsHtml = `<pre class="bg-light p-3 rounded"><code>${log.details}</code></pre>`;
                 }
@@ -429,46 +509,55 @@ async function showDetails(logId) {
             }
             
             modalBody.innerHTML = `
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6>Basic Information</h6>
-                        <table class="table table-sm">
-                            <tr>
-                                <td><strong>ID:</strong></td>
-                                <td>${log.id}</td>
-                            </tr>
-                            <tr>
-                                <td><strong>Timestamp:</strong></td>
-                                <td>${new Date(log.timestamp).toLocaleString()}</td>
-                            </tr>
-                            <tr>
-                                <td><strong>User:</strong></td>
-                                <td>${log.userFullName || log.username || 'System'}</td>
-                            </tr>
-                            <tr>
-                                <td><strong>Action:</strong></td>
-                                <td><code>${log.action}</code></td>
-                            </tr>
-                            <tr>
-                                <td><strong>Resource Type:</strong></td>
-                                <td>${log.resourceType || '-'}</td>
-                            </tr>
-                            <tr>
-                                <td><strong>Resource ID:</strong></td>
-                                <td>${log.resourceId || '-'}</td>
-                            </tr>
-                            <tr>
-                                <td><strong>Status:</strong></td>
-                                <td><span class="badge ${log.status === 'success' ? 'bg-success' : 'bg-danger'}">${log.status}</span></td>
-                            </tr>
-                            <tr>
-                                <td><strong>IP Address:</strong></td>
-                                <td><code>${log.sourceIp || '-'}</code></td>
-                            </tr>
-                        </table>
+                ${syncSummaryHtml}
+                <div class="row mb-4">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header bg-secondary text-white">
+                                <h5 class="mb-0"><i class="fas fa-info"></i> Basic Information</h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-3">
+                                    <div class="col-md-3">
+                                        <div class="p-3 bg-light rounded">
+                                            <strong>ID:</strong><br>
+                                            <span class="fs-5">${log.id}</span>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="p-3 bg-light rounded">
+                                            <strong>User:</strong><br>
+                                            <span class="fs-5">${log.userFullName || log.username || 'System'}</span>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="p-3 bg-light rounded">
+                                            <strong>Action:</strong><br>
+                                            <code class="fs-5">${log.action}</code>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-3">
+                                        <div class="p-3 bg-light rounded">
+                                            <strong>Status:</strong><br>
+                                            <span class="badge ${log.status === 'success' ? 'bg-success' : 'bg-danger'} fs-6">${log.status}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="row mt-3">
+                                    <div class="col-12">
+                                        <div class="p-3 bg-light rounded">
+                                            <strong>Timestamp:</strong><br>
+                                            <span class="fs-5">${new Date(log.timestamp).toLocaleString()}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="col-md-6">
-                        <h6>Additional Details</h6>
+                </div>
+                <div class="row">
+                    <div class="col-12">
+                        <h5 class="mb-3"><i class="fas fa-list"></i> Detailed Information</h5>
                         ${detailsHtml}
                     </div>
                 </div>

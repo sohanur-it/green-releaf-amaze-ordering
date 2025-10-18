@@ -474,7 +474,7 @@ class UserModel {
      */
     static async getUserRoles(userId) {
         const query = `
-            SELECT r.id, r.name, r.description, ur.assigned_at
+            SELECT r.id, r.name, ur.assigned_at
             FROM user_roles ur
             JOIN roles r ON ur.role_id = r.id
             WHERE ur.user_id = $1

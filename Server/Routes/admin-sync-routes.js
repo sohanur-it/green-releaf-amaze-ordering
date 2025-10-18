@@ -578,4 +578,58 @@ router.post('/scheduler/stop', async (req, res) => {
   }
 });
 
+/**
+ * @swagger
+ * /api/v1/swagger/sync/scheduler/trigger/{jobName}:
+ *   post:
+ *     summary: Trigger a specific sync job manually
+ *     description: Manually trigger a specific sync job to run immediately
+ *     tags: [Scheduler Control]
+ *     parameters:
+ *       - in: path
+ *         name: jobName
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Name of the job to trigger
+ *     responses:
+ *       200:
+ *         description: Job triggered successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SyncResponse'
+ *       404:
+ *         description: Job not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ *       500:
+ *         description: Failed to trigger job
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ErrorResponse'
+ */
+router.post('/scheduler/trigger/:jobName', async (req, res) => {
+  try {
+    const { jobName } = req.params;
+    await masterScheduler.triggerJob(jobName);
+    
+    res.json({
+      success: true,
+      message: `Job ${jobName} triggered successfully`,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error triggering job:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to trigger job',
+      message: error.message
+    });
+  }
+});
+
 module.exports = router;

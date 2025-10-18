@@ -200,8 +200,9 @@ class MasterScheduler {
             const endTime = new Date();
             const duration = endTime - startTime;
             
-            // Parse output to get record count
+            // Parse output to get record count and detailed sync information
             const recordsProcessed = this.parseRecordCount(stdout);
+            const syncDetails = this.parseSyncDetails(stdout);
             
             // Update job status
             job.status = 'completed';
@@ -220,7 +221,7 @@ class MasterScheduler {
             
             console.log(`✅ Job completed: ${job.name} (${duration}ms, ${recordsProcessed} records)`);
             
-            // Log system action
+            // Log system action with detailed sync information
             await auditLogger.logSystemAction(
                 'sync_job_completed',
                 'SyncJob',
@@ -228,7 +229,9 @@ class MasterScheduler {
                 {
                     duration,
                     recordsProcessed,
-                    script: job.script
+                    script: job.script,
+                    syncDetails,
+                    summary: this.generateSyncSummary(syncDetails)
                 },
                 'success'
             );
@@ -282,6 +285,85 @@ class MasterScheduler {
             return recordMatch ? parseInt(recordMatch[1]) : 0;
         } catch (error) {
             return 0;
+        }
+    }
+
+    /**
+     * Parse detailed sync information from script output
+     */
+    parseSyncDetails(output) {
+        const details = {
+            inserted: 0,
+            updated: 0,
+            deleted: 0,
+            processed: 0,
+            chunks: 0,
+            records: 0
+        };
+
+        try {
+            const lines = output.split('\n');
+            
+            for (const line of lines) {
+                // Parse "Enhanced sync completed: X inserted, Y updated, Z deleted"
+                const syncMatch = line.match(/Enhanced sync completed:\s*(\d+)\s*inserted,\s*(\d+)\s*updated,\s*(\d+)\s*deleted/i);
+                if (syncMatch) {
+                    details.inserted = parseInt(syncMatch[1]);
+                    details.updated = parseInt(syncMatch[2]);
+                    details.deleted = parseInt(syncMatch[3]);
+                }
+
+                // Parse "X records processed"
+                const processedMatch = line.match(/(\d+)\s*records?\s*processed/i);
+                if (processedMatch) {
+                    details.processed = parseInt(processedMatch[1]);
+                }
+
+                // Parse "Processing X records"
+                const processingMatch = line.match(/Processing\s*(\d+)\s*records?/i);
+                if (processingMatch) {
+                    details.records = parseInt(processingMatch[1]);
+                }
+
+                // Parse chunk information
+                const chunkMatch = line.match(/(\d+)\s*chunks?/i);
+                if (chunkMatch) {
+                    details.chunks = parseInt(chunkMatch[1]);
+                }
+            }
+        } catch (error) {
+            console.error('Error parsing sync details:', error.message);
+        }
+
+        return details;
+    }
+
+    /**
+     * Generate a human-readable summary of sync details
+     */
+    generateSyncSummary(syncDetails) {
+        const parts = [];
+        
+        if (syncDetails.inserted > 0) {
+            parts.push(`${syncDetails.inserted} inserted`);
+        }
+        if (syncDetails.updated > 0) {
+            parts.push(`${syncDetails.updated} updated`);
+        }
+        if (syncDetails.deleted > 0) {
+            parts.push(`${syncDetails.deleted} deleted`);
+        }
+        if (syncDetails.processed > 0) {
+            parts.push(`${syncDetails.processed} processed`);
+        }
+        if (syncDetails.records > 0) {
+            parts.push(`${syncDetails.records} records`);
+        }
+
+        if (parts.length > 0) {
+            return `Enhanced sync completed: ${parts.join(', ')}`;
+        } else {
+            return 'Sync completed successfully';
         }
     }
 

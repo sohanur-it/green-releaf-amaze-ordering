@@ -14,20 +14,20 @@ async function populateProductionRBAC() {
         // 1. Insert all 6 required roles
         console.log('📝 Creating all required roles...');
         const roles = [
-            { name: 'Sales Representative', description: 'Can create and manage their own orders, view assigned clients' },
-            { name: 'Sales Admin', description: 'All Sales Rep permissions plus invoice approval, client assignment' },
-            { name: 'Fulfillment Team', description: 'Can view approved orders, accept orders, create manifests' },
-            { name: 'Inventory Manager', description: 'Can link products to METRC, update batch statuses' },
-            { name: 'Accounting/Finance', description: 'Can view all invoices, mark as paid, override pricing' },
-            { name: 'Administrator', description: 'Full system access including user management and role assignment' }
+            { name: 'Sales Representative' },
+            { name: 'Sales Admin' },
+            { name: 'Fulfillment Team' },
+            { name: 'Inventory Manager' },
+            { name: 'Accounting/Finance' },
+            { name: 'Administrator' }
         ];
         
         for (const role of roles) {
             await query(`
-                INSERT INTO roles (name, description) 
-                VALUES ($1, $2) 
+                INSERT INTO roles (name) 
+                VALUES ($1) 
                 ON CONFLICT (name) DO NOTHING
-            `, [role.name, role.description]);
+            `, [role.name]);
             console.log(`   ✅ ${role.name}`);
         }
         
