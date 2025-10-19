@@ -90,8 +90,6 @@ router.get('/status', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get sync status',
-      username: userInfo.username,
-        timestamp: new Date().toISOString(),
       details: { message: error.message }
     });
   }
@@ -592,16 +590,13 @@ router.post('/scheduler/start', async (req, res) => {
     res.json({
       success: true,
       message: 'Master scheduler started successfully',
-      username: userInfo.username,
-        timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('Error starting scheduler:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to start scheduler',
-      username: userInfo.username,
-        timestamp: new Date().toISOString(),
       details: { message: error.message }
     });
   }
@@ -635,16 +630,13 @@ router.post('/scheduler/stop', async (req, res) => {
     res.json({
       success: true,
       message: 'Master scheduler stopped successfully',
-      username: userInfo.username,
-        timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('Error stopping scheduler:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to stop scheduler',
-      username: userInfo.username,
-        timestamp: new Date().toISOString(),
       details: { message: error.message }
     });
   }
@@ -692,8 +684,7 @@ router.post('/scheduler/trigger/:jobName', async (req, res) => {
     res.json({
       success: true,
       message: `Job ${jobName} triggered successfully`,
-      username: userInfo.username,
-        timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('Error triggering job:', error);

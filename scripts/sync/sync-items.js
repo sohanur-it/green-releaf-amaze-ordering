@@ -9,7 +9,6 @@
  * Usage: node scripts/sync/sync-items.js
  */
 
-const axios = require('axios');
 const { Pool } = require('pg');
 const path = require('path');
 
@@ -19,6 +18,9 @@ if (process.env.NODE_ENV === 'production') {
 } else {
     require('dotenv').config({ path: path.join(__dirname, '../../config/local.env') });
 }
+
+// Import centralized METRC authentication service
+const metrcAuth = require('../../Server/Services/metrcAuth');
 
 // Database configuration
 const DB_CONFIG = {
@@ -30,15 +32,6 @@ const DB_CONFIG = {
     max: 20,
     idleTimeoutMillis: 30000,
     connectionTimeoutMillis: 2000,
-};
-
-// METRC API configuration
-const METRC_CONFIG = {
-    baseURL: process.env.T3_API_BASE_URL || 'https://api.trackandtrace.tools/v2',
-    hostname: process.env.T3_HOSTNAME || 'mo.metrc.com',
-    username: process.env.T3_USERNAME,
-    password: process.env.T3_PASSWORD,
-    licenseNumber: process.env.T3_LICENSE_NUMBER || 'CUL000063'
 };
 
 // Field mapping for items (production schema - simplified)
@@ -61,69 +54,18 @@ const ITEM_FIELDS = {
 // Create database pool
 const pool = new Pool(DB_CONFIG);
 
-// Authentication token cache
-let authToken = null;
-let tokenExpiry = null;
-
-/**
- * Authenticate with METRC T3 API
- */
-async function authenticateWithMetrc() {
-    try {
-        console.log('🔐 Authenticating with METRC T3 API...');
-        
-        const response = await axios.post(`${METRC_CONFIG.baseURL}/auth/credentials`, {
-            username: METRC_CONFIG.username,
-            password: METRC_CONFIG.password,
-            hostname: METRC_CONFIG.hostname
-        });
-
-        if (response.data && response.data.accessToken) {
-            authToken = response.data.accessToken;
-            tokenExpiry = new Date(Date.now() + (24 * 60 * 60 * 1000)); // 24 hours from now
-            console.log('✅ Authentication successful');
-            return true;
-        } else {
-            throw new Error('Invalid authentication response');
-        }
-    } catch (error) {
-        console.error('❌ Authentication failed:', error.message);
-        if (error.response) {
-            console.error('Response status:', error.response.status);
-            console.error('Response data:', error.response.data);
-        }
-        return false;
-    }
-}
-
-/**
- * Check if authentication token is valid
- */
-function isTokenValid() {
-    return authToken && tokenExpiry && new Date() < tokenExpiry;
-}
-
 /**
  * Fetch items from METRC API
  */
 async function fetchItems() {
     try {
-        if (!isTokenValid()) {
-            const authSuccess = await authenticateWithMetrc();
-            if (!authSuccess) {
-                throw new Error('Failed to authenticate');
-            }
-        }
-
         console.log('📡 Fetching items from METRC API...');
         
-        const response = await axios.get(`${METRC_CONFIG.baseURL}/items`, {
-            headers: {
-                'Authorization': `Bearer ${authToken}`,
-                'Content-Type': 'application/json'
-            },
+        const response = await metrcAuth.makeAuthenticatedRequest({
+            method: 'GET',
+            url: `${metrcAuth.apiBaseUrl}/items`,
             params: {
-                licenseNumber: METRC_CONFIG.licenseNumber
+                licenseNumber: metrcAuth.licenseNumber
             }
         });
 
@@ -212,7 +154,7 @@ async function performBulkUpsert(client, records) {
     records.forEach(record => {
         fields.forEach(field => {
             if (field === 'sync_license') {
-                values.push(METRC_CONFIG.licenseNumber);
+                values.push(metrcAuth.licenseNumber);
             } else {
                 const apiField = ITEM_FIELDS[field];
                 values.push(prepareValue(record[apiField], field));
@@ -376,8 +318,8 @@ async function syncItems() {
         
         // Create tracking entries
         const userId = process.env.SYNC_USER_ID ? parseInt(process.env.SYNC_USER_ID) : null;
-        jobId = await createSyncJob(client, 'sync-items.js', METRC_CONFIG.licenseNumber, userId);
-        historyId = await createSyncHistory(client, 'items', METRC_CONFIG.licenseNumber, userId, 'sync-items.js');
+        jobId = await createSyncJob(client, 'sync-items.js', metrcAuth.licenseNumber, userId);
+        historyId = await createSyncHistory(client, 'items', metrcAuth.licenseNumber, userId, 'sync-items.js');
         batchId = await createSyncBatchHistory(client, 'items', userId);
         
         // Fetch data from API
@@ -391,7 +333,7 @@ async function syncItems() {
             await updateSyncJob(client, jobId, 'completed', scriptOutput);
             await updateSyncHistory(client, historyId, 'completed', Date.now() - startTime, scriptOutput);
             await updateSyncBatchHistory(client, batchId, 'completed', Date.now() - startTime);
-            await updateSyncProgress(client, 'items', METRC_CONFIG.licenseNumber, new Date());
+            await updateSyncProgress(client, 'items', metrcAuth.licenseNumber, new Date());
             
             return;
         }
@@ -408,7 +350,7 @@ async function syncItems() {
         await updateSyncJob(client, jobId, 'completed', scriptOutput);
         await updateSyncHistory(client, historyId, 'completed', duration, scriptOutput);
         await updateSyncBatchHistory(client, batchId, 'completed', duration);
-        await updateSyncProgress(client, 'items', METRC_CONFIG.licenseNumber, new Date());
+        await updateSyncProgress(client, 'items', metrcAuth.licenseNumber, new Date());
         
         console.log(`✅ Items sync completed: ${items.length} records processed`);
         
@@ -436,7 +378,7 @@ async function main() {
     try {
         console.log('🚀 Starting METRC Items Sync');
         console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-        console.log(`🏢 License: ${METRC_CONFIG.licenseNumber}`);
+        console.log(`🏢 License: ${metrcAuth.licenseNumber}`);
         
         await syncItems();
         
@@ -457,6 +399,5 @@ if (require.main === module) {
 
 module.exports = {
     syncItems,
-    fetchItems,
-    authenticateWithMetrc
+    fetchItems
 };
