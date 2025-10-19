@@ -6,9 +6,9 @@ const swaggerOptions = {
   definition: {
     openapi: '3.0.0',
     info: {
-      title: 'Green Releaf Amaze Ordering - Admin Sync API',
+      title: 'Green Releaf Amaze Ordering - API Documentation',
       version: '1.0.0',
-      description: 'API documentation for METRC sync services and admin operations',
+      description: 'Complete API documentation for METRC sync services, JWT authentication, and admin operations',
       contact: {
         name: 'Green Releaf Amaze Ordering',
         email: 'admin@greenreleaf.com'
@@ -29,7 +29,137 @@ const swaggerOptions = {
       }
     ],
     components: {
+      securitySchemes: {
+        BearerAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          bearerFormat: 'JWT',
+          description: 'JWT token for API authentication. Get token from /api/v1/auth/token endpoint.'
+        }
+      },
       schemas: {
+        // JWT Authentication Schemas
+        TokenRequest: {
+          type: 'object',
+          required: ['username', 'password'],
+          properties: {
+            username: {
+              type: 'string',
+              description: 'Username for authentication',
+              example: 'admin'
+            },
+            password: {
+              type: 'string',
+              description: 'Password for authentication',
+              example: 'admin123'
+            }
+          }
+        },
+        TokenResponse: {
+          type: 'object',
+          properties: {
+            success: {
+              type: 'boolean',
+              example: true
+            },
+            message: {
+              type: 'string',
+              example: 'Token generated successfully'
+            },
+            data: {
+              type: 'object',
+              properties: {
+                success: {
+                  type: 'boolean',
+                  example: true
+                },
+                token: {
+                  type: 'string',
+                  description: 'JWT token for API authentication',
+                  example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+                },
+                user: {
+                  type: 'object',
+                  properties: {
+                    id: {
+                      type: 'integer',
+                      example: 21
+                    },
+                    username: {
+                      type: 'string',
+                      example: 'admin'
+                    },
+                    email: {
+                      type: 'string',
+                      example: 'admin@greenreleaf.com'
+                    },
+                    isAdmin: {
+                      type: 'boolean',
+                      example: false
+                    },
+                    isSuperuser: {
+                      type: 'boolean',
+                      example: true
+                    }
+                  }
+                },
+                expiresIn: {
+                  type: 'string',
+                  example: '24h'
+                }
+              }
+            }
+          }
+        },
+        ValidationResponse: {
+          type: 'object',
+          properties: {
+            success: {
+              type: 'boolean',
+              example: true
+            },
+            message: {
+              type: 'string',
+              example: 'Token is valid'
+            },
+            data: {
+              type: 'object',
+              properties: {
+                user: {
+                  type: 'object',
+                  properties: {
+                    id: {
+                      type: 'integer',
+                      example: 21
+                    },
+                    username: {
+                      type: 'string',
+                      example: 'admin'
+                    },
+                    email: {
+                      type: 'string',
+                      example: 'admin@greenreleaf.com'
+                    },
+                    isAdmin: {
+                      type: 'boolean',
+                      example: false
+                    },
+                    isSuperuser: {
+                      type: 'boolean',
+                      example: true
+                    }
+                  }
+                },
+                token: {
+                  type: 'string',
+                  description: 'Partial token for security',
+                  example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+                }
+              }
+            }
+          }
+        },
+        // Existing Sync Schemas
         SyncStatus: {
           type: 'object',
           properties: {
@@ -133,6 +263,10 @@ const swaggerOptions = {
       }
     },
     tags: [
+      {
+        name: 'Authentication',
+        description: 'JWT token generation and validation endpoints'
+      },
       {
         name: 'Sync Services',
         description: 'METRC data synchronization services'

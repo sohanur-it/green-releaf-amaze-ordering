@@ -23,6 +23,7 @@ const { swaggerSpec, swaggerUi, swaggerUiOptions } = require('./config/swagger')
 const adminRoutes = require('./Routes/admin-routes');
 const crmApiRoutes = require('./Routes/crm/api');
 const authRoutes = require('./Routes/auth-routes');
+const tokenRoutes = require('./Routes/token-routes');
 const syncRoutes = require('./Routes/sync-routes');
 const manifestRoutes = require('./Routes/manifest-routes');
 const adminSyncRoutes = require('./Routes/admin-sync-routes');
@@ -81,6 +82,7 @@ app.get('/api-docs.json', swaggerAuth, (req, res) => {
 
 //routes
 app.use('/auth', authRoutes);
+app.use('/api/v1/auth', tokenRoutes); // JWT token routes
 app.use('/admin', adminRoutes);
 app.use('/api/crm', crmApiRoutes); // our CRM API routes are handled here
 app.use('/api/v1/admin/sync', syncRoutes); // sync management API routes

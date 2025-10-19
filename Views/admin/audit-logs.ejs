@@ -117,17 +117,21 @@
 
 <!-- Audit Log Details Modal -->
 <div class="modal fade" id="auditLogModal" tabindex="-1" aria-labelledby="auditLogModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-fullscreen">
+    <div class="modal-dialog" style="width: 70%; max-width: none;">
         <div class="modal-content">
-            <div class="modal-header">
-                <h4 class="modal-title" id="auditLogModalLabel">Audit Log Details</h4>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            <div class="modal-header bg-primary text-white">
+                <h4 class="modal-title" id="auditLogModalLabel">
+                    <i class="fas fa-clipboard-list me-2"></i>Audit Log Details
+                </h4>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
-            <div class="modal-body" id="auditLogModalBody" style="padding: 2rem; font-size: 1.1rem;">
+            <div class="modal-body" id="auditLogModalBody" style="padding: 1.5rem; font-size: 1rem; max-height: 80vh; overflow-y: auto;">
                 <!-- Details will be loaded here -->
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                    <i class="fas fa-times me-1"></i>Close
+                </button>
             </div>
         </div>
     </div>
@@ -437,60 +441,86 @@ async function showDetails(logId) {
                         `;
                         
                         detailsHtml = `
-                            <div class="row g-4">
+                            <div class="row g-3">
                                 <div class="col-lg-4">
-                                    <div class="card h-100">
+                                    <div class="card h-100 shadow-sm">
                                         <div class="card-header bg-primary text-white">
-                                            <h5 class="mb-0"><i class="fas fa-chart-bar"></i> Sync Statistics</h5>
+                                            <h6 class="mb-0"><i class="fas fa-chart-bar me-2"></i>Sync Statistics</h6>
                                         </div>
                                         <div class="card-body">
-                                            <table class="table table-borderless">
-                                                <tr><td class="fw-bold">Records Inserted:</td><td><span class="badge bg-success fs-6">${syncDetails.inserted || 0}</span></td></tr>
-                                                <tr><td class="fw-bold">Records Updated:</td><td><span class="badge bg-warning fs-6">${syncDetails.updated || 0}</span></td></tr>
-                                                <tr><td class="fw-bold">Records Deleted:</td><td><span class="badge bg-danger fs-6">${syncDetails.deleted || 0}</span></td></tr>
-                                                <tr><td class="fw-bold">Records Processed:</td><td><span class="badge bg-info fs-6">${syncDetails.processed || 0}</span></td></tr>
-                                                <tr><td class="fw-bold">Total Records:</td><td><span class="badge bg-primary fs-6">${syncDetails.records || 0}</span></td></tr>
-                                                <tr><td class="fw-bold">Chunks:</td><td><span class="badge bg-secondary fs-6">${syncDetails.chunks || 0}</span></td></tr>
-                                            </table>
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <span class="fw-bold">Records Inserted:</span>
+                                                <span class="badge bg-success">${syncDetails.inserted || 0}</span>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <span class="fw-bold">Records Updated:</span>
+                                                <span class="badge bg-warning">${syncDetails.updated || 0}</span>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <span class="fw-bold">Records Deleted:</span>
+                                                <span class="badge bg-danger">${syncDetails.deleted || 0}</span>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <span class="fw-bold">Records Processed:</span>
+                                                <span class="badge bg-info">${syncDetails.processed || 0}</span>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <span class="fw-bold">Total Records:</span>
+                                                <span class="badge bg-primary">${syncDetails.records || 0}</span>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <span class="fw-bold">Chunks:</span>
+                                                <span class="badge bg-secondary">${syncDetails.chunks || 0}</span>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                                 <div class="col-lg-4">
-                                    <div class="card h-100">
+                                    <div class="card h-100 shadow-sm">
                                         <div class="card-header bg-success text-white">
-                                            <h5 class="mb-0"><i class="fas fa-cog"></i> Execution Details</h5>
-                                        </div>
-                                        <div class="card-body">
-                                            <table class="table table-borderless">
-                                                <tr><td class="fw-bold">Duration:</td><td class="fs-6">${log.details.duration ? (log.details.duration / 1000).toFixed(2) + 's' : '-'}</td></tr>
-                                                <tr><td class="fw-bold">Script:</td><td><code class="fs-6">${log.details.script || '-'}</code></td></tr>
-                                                <tr><td class="fw-bold">Records Processed:</td><td class="fs-6">${log.details.recordsProcessed || 0}</td></tr>
-                                                <tr><td class="fw-bold">Status:</td><td><span class="badge ${log.status === 'success' ? 'bg-success' : 'bg-danger'} fs-6">${log.status}</span></td></tr>
-                                            </table>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="col-lg-4">
-                                    <div class="card h-100">
-                                        <div class="card-header bg-info text-white">
-                                            <h5 class="mb-0"><i class="fas fa-info-circle"></i> Additional Info</h5>
+                                            <h6 class="mb-0"><i class="fas fa-cog me-2"></i>Execution Details</h6>
                                         </div>
                                         <div class="card-body">
                                             <div class="mb-3">
-                                                <strong>Resource Type:</strong><br>
-                                                <span class="fs-6">${log.resourceType || '-'}</span>
+                                                <span class="fw-bold">Duration:</span><br>
+                                                <span class="text-muted">${log.details.duration ? (log.details.duration / 1000).toFixed(2) + 's' : '-'}</span>
                                             </div>
                                             <div class="mb-3">
-                                                <strong>Resource ID:</strong><br>
-                                                <code class="fs-6">${log.resourceId || '-'}</code>
+                                                <span class="fw-bold">Script:</span><br>
+                                                <code class="text-primary">${log.details.script || '-'}</code>
                                             </div>
                                             <div class="mb-3">
-                                                <strong>IP Address:</strong><br>
-                                                <code class="fs-6">${log.sourceIp || '-'}</code>
+                                                <span class="fw-bold">Records Processed:</span><br>
+                                                <span class="text-muted">${log.details.recordsProcessed || 0}</span>
                                             </div>
                                             <div class="mb-0">
-                                                <strong>Timestamp:</strong><br>
-                                                <span class="fs-6">${new Date(log.timestamp).toLocaleString()}</span>
+                                                <span class="fw-bold">Status:</span><br>
+                                                <span class="badge ${log.status === 'success' ? 'bg-success' : 'bg-danger'}">${log.status}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-lg-4">
+                                    <div class="card h-100 shadow-sm">
+                                        <div class="card-header bg-info text-white">
+                                            <h6 class="mb-0"><i class="fas fa-info-circle me-2"></i>Additional Info</h6>
+                                        </div>
+                                        <div class="card-body">
+                                            <div class="mb-3">
+                                                <span class="fw-bold">Resource Type:</span><br>
+                                                <span class="text-muted">${log.resourceType || '-'}</span>
+                                            </div>
+                                            <div class="mb-3">
+                                                <span class="fw-bold">Resource ID:</span><br>
+                                                <code class="text-primary">${log.resourceId || '-'}</code>
+                                            </div>
+                                            <div class="mb-3">
+                                                <span class="fw-bold">IP Address:</span><br>
+                                                <code class="text-primary">${log.sourceIp || '-'}</code>
+                                            </div>
+                                            <div class="mb-0">
+                                                <span class="fw-bold">Timestamp:</span><br>
+                                                <span class="text-muted">${new Date(log.timestamp).toLocaleString()}</span>
                                             </div>
                                         </div>
                                     </div>
@@ -512,42 +542,42 @@ async function showDetails(logId) {
                 ${syncSummaryHtml}
                 <div class="row mb-4">
                     <div class="col-12">
-                        <div class="card">
+                        <div class="card shadow-sm">
                             <div class="card-header bg-secondary text-white">
-                                <h5 class="mb-0"><i class="fas fa-info"></i> Basic Information</h5>
+                                <h6 class="mb-0"><i class="fas fa-info me-2"></i>Basic Information</h6>
                             </div>
                             <div class="card-body">
                                 <div class="row g-3">
                                     <div class="col-md-3">
-                                        <div class="p-3 bg-light rounded">
-                                            <strong>ID:</strong><br>
-                                            <span class="fs-5">${log.id}</span>
+                                        <div class="p-3 bg-light rounded border">
+                                            <div class="fw-bold text-muted small">ID</div>
+                                            <div class="fs-5">${log.id}</div>
                                         </div>
                                     </div>
                                     <div class="col-md-3">
-                                        <div class="p-3 bg-light rounded">
-                                            <strong>User:</strong><br>
-                                            <span class="fs-5">${log.userFullName || log.username || 'System'}</span>
+                                        <div class="p-3 bg-light rounded border">
+                                            <div class="fw-bold text-muted small">User</div>
+                                            <div class="fs-5">${log.userFullName || log.username || 'System'}</div>
                                         </div>
                                     </div>
                                     <div class="col-md-3">
-                                        <div class="p-3 bg-light rounded">
-                                            <strong>Action:</strong><br>
-                                            <code class="fs-5">${log.action}</code>
+                                        <div class="p-3 bg-light rounded border">
+                                            <div class="fw-bold text-muted small">Action</div>
+                                            <div class="fs-5"><code class="text-primary">${log.action}</code></div>
                                         </div>
                                     </div>
                                     <div class="col-md-3">
-                                        <div class="p-3 bg-light rounded">
-                                            <strong>Status:</strong><br>
-                                            <span class="badge ${log.status === 'success' ? 'bg-success' : 'bg-danger'} fs-6">${log.status}</span>
+                                        <div class="p-3 bg-light rounded border">
+                                            <div class="fw-bold text-muted small">Status</div>
+                                            <div class="fs-5"><span class="badge ${log.status === 'success' ? 'bg-success' : 'bg-danger'}">${log.status}</span></div>
                                         </div>
                                     </div>
                                 </div>
                                 <div class="row mt-3">
                                     <div class="col-12">
-                                        <div class="p-3 bg-light rounded">
-                                            <strong>Timestamp:</strong><br>
-                                            <span class="fs-5">${new Date(log.timestamp).toLocaleString()}</span>
+                                        <div class="p-3 bg-light rounded border">
+                                            <div class="fw-bold text-muted small">Timestamp</div>
+                                            <div class="fs-5">${new Date(log.timestamp).toLocaleString()}</div>
                                         </div>
                                     </div>
                                 </div>
@@ -557,7 +587,7 @@ async function showDetails(logId) {
                 </div>
                 <div class="row">
                     <div class="col-12">
-                        <h5 class="mb-3"><i class="fas fa-list"></i> Detailed Information</h5>
+                        <h6 class="mb-3"><i class="fas fa-list me-2"></i>Detailed Information</h6>
                         ${detailsHtml}
                     </div>
                 </div>

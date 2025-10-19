@@ -4,8 +4,35 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const swaggerAuth = require('../Middleware/swagger-auth');
 const masterScheduler = require('../Services/masterScheduler');
+const auditLogger = require('../Services/auditLogger');
+const backgroundSyncService = require('../Services/backgroundSyncService');
 
 const execAsync = promisify(exec);
+
+// Helper function to get user info for audit logging
+function getUserInfoForAudit(req) {
+  // Priority: JWT token user > session user > SYSTEM
+  let userId = 'SYSTEM';
+  let triggeredBy = 'swagger_api';
+  
+  // Check if user is authenticated via JWT token
+  if (req.user && req.user.id && req.user.id !== 'SYSTEM') {
+    userId = req.user.id;
+    triggeredBy = 'jwt_api';
+  }
+  // Check if user is authenticated via session
+  else if (req.session?.userId && typeof req.session.userId === 'number') {
+    userId = req.session.userId;
+    triggeredBy = 'session_api';
+  }
+  
+  return {
+    userId: userId === 'SYSTEM' ? null : userId, // Use null for SYSTEM operations
+    triggeredBy: triggeredBy,
+    userIdString: userId,
+    username: req.user?.username || req.session?.username || 'system'
+  };
+}
 
 // Apply authentication middleware to all routes
 router.use(swaggerAuth);
@@ -17,6 +44,8 @@ router.use(swaggerAuth);
  *     summary: Get sync scheduler status
  *     description: Retrieve the current status of the METRC sync scheduler and all configured jobs
  *     tags: [Admin]
+ *     security:
+ *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Scheduler status retrieved successfully
@@ -61,7 +90,8 @@ router.get('/status', async (req, res) => {
     res.status(500).json({
       success: false,
       error: 'Failed to get sync status',
-      timestamp: new Date().toISOString(),
+      username: userInfo.username,
+        timestamp: new Date().toISOString(),
       details: { message: error.message }
     });
   }
@@ -107,36 +137,23 @@ router.get('/status', async (req, res) => {
  */
 router.post('/active-packages', async (req, res) => {
   try {
-
-    const startTime = Date.now();
+    const userInfo = getUserInfoForAudit(req);
     
-    // Execute the sync command
-    const { stdout, stderr } = await execAsync('npm run sync:active:prod', { timeout: 60000 });
+    // Queue the sync job for background processing
+    const jobResult = await backgroundSyncService.queueSyncJob('active-packages', userInfo, req);
     
-    const executionTime = Date.now() - startTime;
-    
-    // Parse the output to extract key information
-    const lines = stdout.split('\n');
-    const recordsProcessed = extractRecordsProcessed(lines);
-    const details = extractSyncDetails(lines);
-    
-    res.json({
+    res.status(202).json({
       success: true,
-      message: 'Active packages sync completed successfully',
-      serviceName: 'active-packages',
-      timestamp: new Date().toISOString(),
-      recordsProcessed,
-      executionTime,
-      details,
-      output: stdout.substring(0, 500) // First 500 chars for debugging
+      message: 'Active packages sync queued for background processing',
+      data: jobResult
     });
+    
   } catch (error) {
     console.error('Active packages sync error:', error);
     res.status(500).json({
       success: false,
-      error: 'Active packages sync failed',
-      timestamp: new Date().toISOString(),
-      details: { message: error.message, stderr: error.stderr }
+      message: 'Failed to queue active packages sync',
+      error: error.message
     });
   }
 });
@@ -180,32 +197,23 @@ router.post('/active-packages', async (req, res) => {
  */
 router.post('/outgoing-transfers', async (req, res) => {
   try {
-
-    const startTime = Date.now();
-    const { stdout, stderr } = await execAsync('npm run sync:outgoing:prod', { timeout: 60000 });
-    const executionTime = Date.now() - startTime;
+    const userInfo = getUserInfoForAudit(req);
     
-    const lines = stdout.split('\n');
-    const recordsProcessed = extractRecordsProcessed(lines);
-    const details = extractSyncDetails(lines);
+    // Queue the sync job for background processing
+    const jobResult = await backgroundSyncService.queueSyncJob('outgoing-transfers', userInfo, req);
     
-    res.json({
+    res.status(202).json({
       success: true,
-      message: 'Outgoing transfers sync completed successfully',
-      serviceName: 'outgoing-transfers',
-      timestamp: new Date().toISOString(),
-      recordsProcessed,
-      executionTime,
-      details,
-      output: stdout.substring(0, 500)
+      message: 'Outgoing transfers sync queued for background processing',
+      data: jobResult
     });
+    
   } catch (error) {
     console.error('Outgoing transfers sync error:', error);
     res.status(500).json({
       success: false,
-      error: 'Outgoing transfers sync failed',
-      timestamp: new Date().toISOString(),
-      details: { message: error.message, stderr: error.stderr }
+      message: 'Failed to queue outgoing transfers sync',
+      error: error.message
     });
   }
 });
@@ -249,32 +257,119 @@ router.post('/outgoing-transfers', async (req, res) => {
  */
 router.post('/strains', async (req, res) => {
   try {
-
-    const startTime = Date.now();
-    const { stdout, stderr } = await execAsync('npm run sync:strains:prod', { timeout: 60000 });
-    const executionTime = Date.now() - startTime;
+    const userInfo = getUserInfoForAudit(req);
     
-    const lines = stdout.split('\n');
-    const recordsProcessed = extractRecordsProcessed(lines);
-    const details = extractSyncDetails(lines);
+    // Queue the sync job for background processing
+    const jobResult = await backgroundSyncService.queueSyncJob('strains', userInfo, req);
     
-    res.json({
+    res.status(202).json({
       success: true,
-      message: 'Strains sync completed successfully',
-      serviceName: 'strains',
-      timestamp: new Date().toISOString(),
-      recordsProcessed,
-      executionTime,
-      details,
-      output: stdout.substring(0, 500)
+      message: 'Strains sync queued for background processing',
+      data: jobResult
     });
+    
   } catch (error) {
     console.error('Strains sync error:', error);
     res.status(500).json({
       success: false,
-      error: 'Strains sync failed',
-      timestamp: new Date().toISOString(),
-      details: { message: error.message, stderr: error.stderr }
+      message: 'Failed to queue strains sync',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/v1/swagger/sync/status/{jobId}:
+ *   get:
+ *     summary: Get sync job status
+ *     description: Check the status of a background sync job
+ *     tags: [Sync Services]
+ *     parameters:
+ *       - in: path
+ *         name: jobId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: The job ID returned when queuing a sync
+ *     responses:
+ *       200:
+ *         description: Job status retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 jobId:
+ *                   type: string
+ *                 status:
+ *                   type: string
+ *                   enum: [queued, running, completed, failed]
+ *                 result:
+ *                   type: object
+ *                 error:
+ *                   type: string
+ *       404:
+ *         description: Job not found
+ */
+router.get('/status/:jobId', (req, res) => {
+  try {
+    const { jobId } = req.params;
+    const jobStatus = backgroundSyncService.getJobStatus(jobId);
+    
+    if (!jobStatus) {
+      return res.status(404).json({
+        success: false,
+        message: 'Job not found',
+        jobId
+      });
+    }
+    
+    res.json({
+      success: true,
+      jobId,
+      status: jobStatus.status,
+      createdAt: jobStatus.createdAt,
+      startedAt: jobStatus.startedAt,
+      completedAt: jobStatus.completedAt,
+      result: jobStatus.result,
+      error: jobStatus.error
+    });
+    
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get job status',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @swagger
+ * /api/v1/swagger/sync/status:
+ *   get:
+ *     summary: Get all sync job statuses
+ *     description: Get status of all running and queued sync jobs
+ *     tags: [Sync Services]
+ *     responses:
+ *       200:
+ *         description: All job statuses retrieved successfully
+ */
+router.get('/status', (req, res) => {
+  try {
+    const allStatuses = backgroundSyncService.getAllJobStatuses();
+    res.json({
+      success: true,
+      data: allStatuses
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get job statuses',
+      error: error.message
     });
   }
 });
@@ -308,32 +403,23 @@ router.post('/strains', async (req, res) => {
  */
 router.post('/items', async (req, res) => {
   try {
-
-    const startTime = Date.now();
-    const { stdout, stderr } = await execAsync('npm run sync:items:prod', { timeout: 60000 });
-    const executionTime = Date.now() - startTime;
+    const userInfo = getUserInfoForAudit(req);
     
-    const lines = stdout.split('\n');
-    const recordsProcessed = extractRecordsProcessed(lines);
-    const details = extractSyncDetails(lines);
+    // Queue the sync job for background processing
+    const jobResult = await backgroundSyncService.queueSyncJob('items', userInfo, req);
     
-    res.json({
+    res.status(202).json({
       success: true,
-      message: 'Items sync completed successfully',
-      serviceName: 'items',
-      timestamp: new Date().toISOString(),
-      recordsProcessed,
-      executionTime,
-      details,
-      output: stdout.substring(0, 500)
+      message: 'Items sync queued for background processing',
+      data: jobResult
     });
+    
   } catch (error) {
     console.error('Items sync error:', error);
     res.status(500).json({
       success: false,
-      error: 'Items sync failed',
-      timestamp: new Date().toISOString(),
-      details: { message: error.message, stderr: error.stderr }
+      message: 'Failed to queue items sync',
+      error: error.message
     });
   }
 });
@@ -367,32 +453,23 @@ router.post('/items', async (req, res) => {
  */
 router.post('/transferred-packages', async (req, res) => {
   try {
-
-    const startTime = Date.now();
-    const { stdout, stderr } = await execAsync('npm run sync:transferred:prod', { timeout: 60000 });
-    const executionTime = Date.now() - startTime;
+    const userInfo = getUserInfoForAudit(req);
     
-    const lines = stdout.split('\n');
-    const recordsProcessed = extractRecordsProcessed(lines);
-    const details = extractSyncDetails(lines);
+    // Queue the sync job for background processing
+    const jobResult = await backgroundSyncService.queueSyncJob('transferred-packages', userInfo, req);
     
-    res.json({
+    res.status(202).json({
       success: true,
-      message: 'Transferred packages sync completed successfully',
-      serviceName: 'transferred-packages',
-      timestamp: new Date().toISOString(),
-      recordsProcessed,
-      executionTime,
-      details,
-      output: stdout.substring(0, 500)
+      message: 'Transferred packages sync queued for background processing',
+      data: jobResult
     });
+    
   } catch (error) {
     console.error('Transferred packages sync error:', error);
     res.status(500).json({
       success: false,
-      error: 'Transferred packages sync failed',
-      timestamp: new Date().toISOString(),
-      details: { message: error.message, stderr: error.stderr }
+      message: 'Failed to queue transferred packages sync',
+      error: error.message
     });
   }
 });
@@ -426,32 +503,23 @@ router.post('/transferred-packages', async (req, res) => {
  */
 router.post('/intransit-packages', async (req, res) => {
   try {
-
-    const startTime = Date.now();
-    const { stdout, stderr } = await execAsync('npm run sync:intransit:prod', { timeout: 60000 });
-    const executionTime = Date.now() - startTime;
+    const userInfo = getUserInfoForAudit(req);
     
-    const lines = stdout.split('\n');
-    const recordsProcessed = extractRecordsProcessed(lines);
-    const details = extractSyncDetails(lines);
+    // Queue the sync job for background processing
+    const jobResult = await backgroundSyncService.queueSyncJob('intransit-packages', userInfo, req);
     
-    res.json({
+    res.status(202).json({
       success: true,
-      message: 'In-transit packages sync completed successfully',
-      serviceName: 'intransit-packages',
-      timestamp: new Date().toISOString(),
-      recordsProcessed,
-      executionTime,
-      details,
-      output: stdout.substring(0, 500)
+      message: 'In-transit packages sync queued for background processing',
+      data: jobResult
     });
+    
   } catch (error) {
     console.error('In-transit packages sync error:', error);
     res.status(500).json({
       success: false,
-      error: 'In-transit packages sync failed',
-      timestamp: new Date().toISOString(),
-      details: { message: error.message, stderr: error.stderr }
+      message: 'Failed to queue in-transit packages sync',
+      error: error.message
     });
   }
 });
@@ -524,14 +592,16 @@ router.post('/scheduler/start', async (req, res) => {
     res.json({
       success: true,
       message: 'Master scheduler started successfully',
-      timestamp: new Date().toISOString()
+      username: userInfo.username,
+        timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('Error starting scheduler:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to start scheduler',
-      timestamp: new Date().toISOString(),
+      username: userInfo.username,
+        timestamp: new Date().toISOString(),
       details: { message: error.message }
     });
   }
@@ -565,14 +635,16 @@ router.post('/scheduler/stop', async (req, res) => {
     res.json({
       success: true,
       message: 'Master scheduler stopped successfully',
-      timestamp: new Date().toISOString()
+      username: userInfo.username,
+        timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('Error stopping scheduler:', error);
     res.status(500).json({
       success: false,
       error: 'Failed to stop scheduler',
-      timestamp: new Date().toISOString(),
+      username: userInfo.username,
+        timestamp: new Date().toISOString(),
       details: { message: error.message }
     });
   }
@@ -620,7 +692,8 @@ router.post('/scheduler/trigger/:jobName', async (req, res) => {
     res.json({
       success: true,
       message: `Job ${jobName} triggered successfully`,
-      timestamp: new Date().toISOString()
+      username: userInfo.username,
+        timestamp: new Date().toISOString()
     });
   } catch (error) {
     console.error('Error triggering job:', error);

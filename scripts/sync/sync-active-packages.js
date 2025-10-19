@@ -258,13 +258,160 @@ async function performBulkUpdate(client, packages) {
 }
 
 /**
+ * Update sync progress in the database
+ */
+async function updateSyncProgress(client, syncType, license, lastTimestamp = null) {
+    try {
+        const query = `
+            INSERT INTO sync_progress (sync_type, license, last_timestamp, updated_at)
+            VALUES ($1, $2, $3, NOW())
+            ON CONFLICT (sync_type, license)
+            DO UPDATE SET 
+                last_timestamp = COALESCE($3, sync_progress.last_timestamp),
+                updated_at = NOW()
+        `;
+        
+        await client.query(query, [syncType, license, lastTimestamp]);
+        console.log(`📊 Updated sync progress: ${syncType} for ${license}`);
+    } catch (error) {
+        console.error('❌ Error updating sync progress:', error.message);
+    }
+}
+
+/**
+ * Create sync job entry
+ */
+async function createSyncJob(client, scriptName, license, userId = null) {
+    try {
+        const jobId = require('crypto').randomUUID();
+        const query = `
+            INSERT INTO sync_jobs (job_id, license_number, script_name, status, start_time, triggered_by_user_id)
+            VALUES ($1, $2, $3, 'running', NOW(), $4)
+        `;
+        
+        await client.query(query, [jobId, license, scriptName, userId]);
+        console.log(`📋 Created sync job: ${jobId} for ${scriptName}`);
+        return jobId;
+    } catch (error) {
+        console.error('❌ Error creating sync job:', error.message);
+        return null;
+    }
+}
+
+/**
+ * Update sync job status
+ */
+async function updateSyncJob(client, jobId, status, outputLog = null, errorLog = null) {
+    try {
+        const query = `
+            UPDATE sync_jobs 
+            SET status = $1, end_time = NOW(), output_log = $2, error_log = $3
+            WHERE job_id = $4
+        `;
+        
+        await client.query(query, [status, outputLog, errorLog, jobId]);
+        console.log(`📋 Updated sync job: ${jobId} - ${status}`);
+    } catch (error) {
+        console.error('❌ Error updating sync job:', error.message);
+    }
+}
+
+/**
+ * Create sync history entry
+ */
+async function createSyncHistory(client, syncType, license, userId = null, scriptName = null) {
+    try {
+        const query = `
+            INSERT INTO sync_history (license_number, sync_type, start_time, status, user_id, script_name)
+            VALUES ($1, $2, NOW(), 'started', $3, $4)
+            RETURNING id
+        `;
+        
+        const result = await client.query(query, [license, syncType, userId, scriptName]);
+        const historyId = result.rows[0].id;
+        console.log(`📚 Created sync history: ${historyId} for ${syncType}`);
+        return historyId;
+    } catch (error) {
+        console.error('❌ Error creating sync history:', error.message);
+        return null;
+    }
+}
+
+/**
+ * Update sync history entry
+ */
+async function updateSyncHistory(client, historyId, status, durationMs = null, scriptOutput = null, scriptErrorOutput = null) {
+    try {
+        const query = `
+            UPDATE sync_history 
+            SET end_time = NOW(), status = $1, duration_ms = $2, script_output = $3, script_error_output = $4
+            WHERE id = $5
+        `;
+        
+        await client.query(query, [status, durationMs, scriptOutput, scriptErrorOutput, historyId]);
+        console.log(`📚 Updated sync history: ${historyId} - ${status}`);
+    } catch (error) {
+        console.error('❌ Error updating sync history:', error.message);
+    }
+}
+
+/**
+ * Create sync batch history entry
+ */
+async function createSyncBatchHistory(client, syncType, userId = null) {
+    try {
+        const batchId = require('crypto').randomUUID();
+        const query = `
+            INSERT INTO sync_batch_history (batch_id, sync_type, overall_start_time, status, user_id)
+            VALUES ($1, $2, NOW(), 'started', $3)
+        `;
+        
+        await client.query(query, [batchId, syncType, userId]);
+        console.log(`📦 Created sync batch: ${batchId} for ${syncType}`);
+        return batchId;
+    } catch (error) {
+        console.error('❌ Error creating sync batch:', error.message);
+        return null;
+    }
+}
+
+/**
+ * Update sync batch history entry
+ */
+async function updateSyncBatchHistory(client, batchId, status, durationMs = null, errorMessage = null) {
+    try {
+        const query = `
+            UPDATE sync_batch_history 
+            SET overall_end_time = NOW(), status = $1, overall_duration_ms = $2, error_message = $3
+            WHERE batch_id = $4
+        `;
+        
+        await client.query(query, [status, durationMs, errorMessage, batchId]);
+        console.log(`📦 Updated sync batch: ${batchId} - ${status}`);
+    } catch (error) {
+        console.error('❌ Error updating sync batch:', error.message);
+    }
+}
+
+/**
  * Enhanced sync active packages using Full Mirror Sync strategy
  */
 async function syncActivePackagesEnhanced() {
     const client = await pool.connect();
+    const startTime = Date.now();
+    let jobId = null;
+    let historyId = null;
+    let batchId = null;
+    let scriptOutput = '';
+    let scriptError = '';
     
     try {
         console.log('🔄 Starting enhanced active packages sync (Full Mirror)...');
+        
+        // Create tracking entries
+        jobId = await createSyncJob(client, 'sync-active-packages.js', METRC_CONFIG.licenseNumber);
+        historyId = await createSyncHistory(client, 'active_packages', METRC_CONFIG.licenseNumber, null, 'sync-active-packages.js');
+        batchId = await createSyncBatchHistory(client, 'active_packages');
         
         // Start transaction
         await client.query('BEGIN');
@@ -336,11 +483,29 @@ async function syncActivePackagesEnhanced() {
         // Commit transaction
         await client.query('COMMIT');
         
+        const duration = Date.now() - startTime;
+        scriptOutput = `Active packages sync completed: ${packagesToInsert.length} inserted, ${packagesToUpdate.length} updated, ${packagesToDelete.length} deleted in ${duration}ms`;
+        
+        // Update all tracking entries
+        await updateSyncJob(client, jobId, 'completed', scriptOutput);
+        await updateSyncHistory(client, historyId, 'completed', duration, scriptOutput);
+        await updateSyncBatchHistory(client, batchId, 'completed', duration);
+        await updateSyncProgress(client, 'active_packages', METRC_CONFIG.licenseNumber, new Date());
+        
         console.log(`✅ Enhanced sync completed: ${packagesToInsert.length} inserted, ${packagesToUpdate.length} updated, ${packagesToDelete.length} deleted`);
         
     } catch (error) {
+        const duration = Date.now() - startTime;
+        scriptError = error.message;
+        
         console.error('❌ Enhanced sync failed:', error.message);
         await client.query('ROLLBACK');
+        
+        // Update tracking entries for failed sync
+        if (jobId) await updateSyncJob(client, jobId, 'failed', scriptOutput, scriptError);
+        if (historyId) await updateSyncHistory(client, historyId, 'failed', duration, scriptOutput, scriptError);
+        if (batchId) await updateSyncBatchHistory(client, batchId, 'failed', duration, scriptError);
+        
         throw error;
     } finally {
         client.release();
