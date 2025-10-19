@@ -29,9 +29,11 @@ const manifestRoutes = require('./Routes/manifest-routes');
 const adminSyncRoutes = require('./Routes/admin-sync-routes');
 const userManagementRoutes = require('./Routes/user-management-routes');
 const auditLogRoutes = require('./Routes/audit-log-routes');
+const batchRoutes = require('./Routes/batch-routes');
 
 //import services
 const masterScheduler = require('./Services/masterScheduler');
+const inventoryMonitorService = require('./Services/inventoryMonitorService');
 
 //create express app
 const app = express();
@@ -90,6 +92,7 @@ app.use('/api/v1/swagger/sync', adminSyncRoutes); // admin sync API routes with 
 app.use('/api/v1/manifests', manifestRoutes); // manifest creation API routes
 app.use('/api/v1/admin/users', userManagementRoutes); // user management API routes
 app.use('/api/v1/admin/audit-logs', auditLogRoutes); // audit log API routes
+app.use('/api/batches', batchRoutes); // batch status management API routes
 
 //root redirect
 app.get('/', (req, res) => {
@@ -116,6 +119,16 @@ app.listen(PORT, async () => {
             logger.info(`⏰ Master scheduler started successfully`);
         } catch (error) {
             logger.error(`❌ Failed to start master scheduler: ${error.message}`);
+        }
+    }
+    
+    // Start inventory monitoring in production
+    if (process.env.NODE_ENV === 'production') {
+        try {
+            inventoryMonitorService.start();
+            logger.info(`📦 Inventory monitoring started successfully`);
+        } catch (error) {
+            logger.error(`❌ Failed to start inventory monitoring: ${error.message}`);
         }
     }
 });

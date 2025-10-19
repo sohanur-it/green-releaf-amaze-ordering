@@ -59,7 +59,7 @@ const authMiddleware = (req, res, next) => {
     // This allows Swagger API testing without requiring login
     if (!req.session || !req.session.userId) {
       // Create a mock authenticated session for API testing
-      req.session.userId = 'SYSTEM'; // Use SYSTEM for automated operations
+      req.session.userId = null; // Use null for SYSTEM operations
       req.session.username = 'system';
       req.session.isAdmin = true;
       req.session.isAuthenticated = true;
@@ -81,12 +81,12 @@ const authMiddleware = (req, res, next) => {
     console.error('🔐 Auth middleware error:', error.message);
     // Fall back to mock session for testing
     req.session = req.session || {};
-    req.session.userId = 'SYSTEM';
+    req.session.userId = null;
     req.session.username = 'system';
     req.session.isAdmin = true;
     
     req.user = {
-      id: 'SYSTEM',
+      id: null,
       username: 'system',
       email: 'system@example.com',
       isSuperuser: true
