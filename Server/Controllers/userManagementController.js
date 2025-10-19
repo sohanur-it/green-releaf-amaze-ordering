@@ -231,10 +231,14 @@ class UserManagementController {
             // Get current roles
             const currentRoles = await UserModel.getUserRoles(userId);
             
-            // Assign new roles
-            for (const roleId of roles) {
-                await UserModel.assignRole(userId, roleId, adminUserId);
+            // Remove all existing roles first
+            for (const role of currentRoles) {
+                await UserModel.removeRole(userId, role.id);
             }
+            
+            // Assign new roles (only the first one if multiple are provided)
+            const roleToAssign = roles[0]; // Take only the first role
+            await UserModel.assignRole(userId, roleToAssign, adminUserId);
             
             // Log the role assignment
             await auditLogger.logUserAction(
@@ -245,18 +249,20 @@ class UserManagementController {
                 {
                     username: user.username,
                     previousRoles: currentRoles.map(r => r.name),
-                    newRoles: roles
+                    newRole: roleToAssign,
+                    message: 'User role replaced (single role system)'
                 },
                 'success'
             );
             
             res.json({
                 success: true,
-                message: 'Roles assigned successfully',
+                message: 'Role assigned successfully (previous roles removed)',
                 data: {
                     userId,
                     username: user.username,
-                    assignedRoles: roles
+                    assignedRole: roleToAssign,
+                    previousRoles: currentRoles.map(r => r.name)
                 },
                 timestamp: new Date().toISOString()
             });
