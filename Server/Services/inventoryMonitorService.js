@@ -33,7 +33,7 @@ class InventoryMonitorService {
             await this.checkInventoryLevels();
         }, {
             scheduled: false,
-            timezone: "America/Chicago"
+            timezone: "America/Los_Angeles" // PST/PDT timezone (consistent with master scheduler)
         });
 
         this.monitoringInterval.start();

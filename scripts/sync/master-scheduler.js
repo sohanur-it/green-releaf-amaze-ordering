@@ -171,7 +171,7 @@ function setupScheduler() {
             }
         }, {
             scheduled: true,
-            timezone: 'America/New_York' // Adjust timezone as needed
+            timezone: 'America/Los_Angeles' // PST/PDT timezone for US West Coast business hours
         });
     });
     

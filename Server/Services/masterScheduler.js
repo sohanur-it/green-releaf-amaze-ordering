@@ -64,7 +64,7 @@ class MasterScheduler {
             {
                 name: 'strains',
                 description: 'Strains Sync (Incremental)',
-                schedule: '0 8-18 * * 1-5', // Every hour, 8 AM - 6 PM, weekdays
+                schedule: '30 8-18 * * 1-5', // Every hour at :30, 8 AM - 6 PM, weekdays
                 script: 'sync:strains:prod',
                 enabled: true,
                 lastRun: null,
@@ -160,7 +160,7 @@ class MasterScheduler {
                 await this.executeJob(job);
             }, {
                 scheduled: false,
-                timezone: 'America/Los_Angeles' // PST/PDT timezone
+                timezone: 'America/Los_Angeles' // PST/PDT timezone for US West Coast business hours
             });
 
             this.jobs.set(job.name, cronJob);
