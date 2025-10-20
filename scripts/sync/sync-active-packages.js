@@ -260,72 +260,337 @@ function truncateString(str, maxLength) {
 }
 
 /**
- * Perform bulk INSERT operation
+ * Get nested value from object using dot notation
+ */
+function getNestedValue(obj, path) {
+    if (!path) return null;
+    const properties = path.split('.');
+    let value = obj;
+    for (const prop of properties) {
+        if (value === null || typeof value !== 'object') return null;
+        value = value[prop];
+        if (value === undefined) return null;
+    }
+    return value;
+}
+
+/**
+ * Prepare value for database insertion with proper type handling
+ */
+function prepareValue(pkg, fieldName, fieldType = 'string') {
+    const fieldMapping = {
+        // Basic fields
+        metrcid: 'id',
+        label: 'label',
+        quantity: 'quantity',
+        lastmodified: 'lastModified',
+        sync_license: 'license_number',
+        
+        // Item fields (nested)
+        item_name: 'item.name',
+        item_productcategoryname: 'item.productCategoryName',
+        item_unitofmeasurename: 'item.unitOfMeasureName',
+        unitofmeasureabbreviation: 'unitOfMeasureAbbreviation',
+        
+        // Boolean fields
+        productrequiresreminder: 'productRequiresReminder',
+        containsseeds: 'containsSeeds',
+        isproductionbatch: 'isProductionBatch',
+        isonhold: 'isOnHold',
+        
+        // String fields
+        productionbatchnumber: 'productionBatchNumber',
+        
+        // Date fields
+        receiveddatetime: 'receivedDateTime',
+        createddatetime: 'createdDateTime'
+    };
+    
+    const apiPath = fieldMapping[fieldName];
+    if (!apiPath) return null;
+    
+    const value = getNestedValue(pkg, apiPath);
+    if (value === null || value === undefined) return null;
+    
+    // Handle different data types
+    if (fieldType === 'boolean') {
+        return /^(true|1|t|y)$/i.test(String(value).trim());
+    } else if (fieldType === 'number') {
+        const num = Number(value);
+        return isNaN(num) ? null : num;
+    } else if (fieldType === 'date') {
+        try {
+            const date = new Date(value);
+            return isNaN(date.getTime()) ? null : date.toISOString();
+        } catch (e) {
+            return null;
+        }
+    } else {
+        // String field
+        const str = String(value).trim();
+        return str.length === 0 ? null : truncateString(str, 255);
+    }
+}
+
+/**
+ * Perform bulk INSERT operation with comprehensive field mapping
  */
 async function performBulkInsert(client, packages) {
     if (packages.length === 0) return;
     
-    // Use a simplified field mapping for now - we'll expand this based on actual API response
+    // Process packages in smaller chunks to avoid parameter limits
+    const CHUNK_SIZE = 50; // Reduced chunk size for better performance
+    
+    for (let i = 0; i < packages.length; i += CHUNK_SIZE) {
+        const chunk = packages.slice(i, i + CHUNK_SIZE);
+        await insertPackageChunk(client, chunk);
+        console.log(`✅ Inserted chunk ${Math.floor(i / CHUNK_SIZE) + 1}/${Math.ceil(packages.length / CHUNK_SIZE)} (${chunk.length} packages)`);
+    }
+}
+
+/**
+ * Insert a chunk of packages with simplified field mapping (matching actual DB schema)
+ */
+async function insertPackageChunk(client, packages) {
     const insertQuery = `
         INSERT INTO activepackages (
-            metrcid, label, item_name, item_productcategoryname, quantity, item_unitofmeasurename,
-            lastmodified, sync_license
+            metrcid, label, quantity, lastmodified, sync_license,
+            item_name, item_productcategoryname, unit_of_measure_abbreviation,
+            isproductionbatch, productionbatchnumber, receiveddatetime, isonhold
         )
         VALUES ${packages.map((_, index) => 
-            `($${index * 8 + 1}, $${index * 8 + 2}, $${index * 8 + 3}, $${index * 8 + 4}, $${index * 8 + 5}, $${index * 8 + 6}, $${index * 8 + 7}, $${index * 8 + 8})`
+            `($${index * 12 + 1}, $${index * 12 + 2}, $${index * 12 + 3}, $${index * 12 + 4}, $${index * 12 + 5}, $${index * 12 + 6}, $${index * 12 + 7}, $${index * 12 + 8}, $${index * 12 + 9}, $${index * 12 + 10}, $${index * 12 + 11}, $${index * 12 + 12})`
         ).join(', ')}
         ON CONFLICT (metrcid) DO NOTHING
     `;
     
     const values = [];
     packages.forEach(pkg => {
-        values.push(
-            pkg.id,
-            truncateString(pkg.label, 255),
-            truncateString(pkg.item?.name || '', 255),
-            truncateString(pkg.item?.productCategoryName || '', 100),
-            pkg.quantity || 0,
-            truncateString(pkg.unitOfMeasureAbbreviation || '', 50),
-            pkg.lastModified ? new Date(pkg.lastModified) : null,
-            METRC_CONFIG.licenseNumber
-        );
+        // Map to actual database columns that exist
+        const fieldValues = [
+            pkg.id, // metrcid
+            prepareValue(pkg, 'label'), // label
+            prepareValue(pkg, 'quantity', 'number'), // quantity
+            prepareValue(pkg, 'lastmodified', 'date'), // lastmodified
+            METRC_CONFIG.licenseNumber, // sync_license
+            prepareValue(pkg, 'item_name'), // item_name
+            prepareValue(pkg, 'item_productcategoryname'), // item_productcategoryname
+            prepareValue(pkg, 'unitofmeasureabbreviation'), // unitofmeasureabbreviation
+            prepareValue(pkg, 'isproductionbatch', 'boolean'), // isproductionbatch
+            prepareValue(pkg, 'productionbatchnumber'), // productionbatchnumber
+            prepareValue(pkg, 'receiveddatetime', 'date'), // receiveddatetime
+            prepareValue(pkg, 'isonhold', 'boolean') // isonhold
+        ];
+        
+        values.push(...fieldValues);
     });
     
     await client.query(insertQuery, values);
 }
 
 /**
- * Perform bulk UPDATE operation
+ * Perform bulk UPDATE operation with comprehensive field mapping
  */
 async function performBulkUpdate(client, packages) {
     if (packages.length === 0) return;
     
+    // Process packages in smaller chunks to avoid parameter limits
+    const CHUNK_SIZE = 50;
+    
+    for (let i = 0; i < packages.length; i += CHUNK_SIZE) {
+        const chunk = packages.slice(i, i + CHUNK_SIZE);
+        await updatePackageChunk(client, chunk);
+        console.log(`✅ Updated chunk ${Math.floor(i / CHUNK_SIZE) + 1}/${Math.ceil(packages.length / CHUNK_SIZE)} (${chunk.length} packages)`);
+    }
+}
+
+/**
+ * Update a chunk of packages with comprehensive field mapping
+ */
+async function updatePackageChunk(client, packages) {
     for (const pkg of packages) {
         const updateQuery = `
             UPDATE activepackages 
             SET 
-                label = $1,
-                item_name = $2,
-                item_productcategoryname = $3,
-                quantity = $4,
-                item_unitofmeasurename = $5,
-                lastmodified = $6
-            WHERE metrcid = $7 AND sync_license = $8
+                label = $1, quantity = $2, lastmodified = $3,
+                item_name = $4, item_productcategoryname = $5, item_unitofmeasurename = $6, item_strainname = $7,
+                item_brandname = $8, item_description = $9, item_administrationmethod = $10, item_allergens = $11,
+                item_approvalstatusname = $12, item_defaultlabtestingstatename = $13, item_expirationconfigurationstate = $14,
+                item_expirationdateconfiguration = $15, item_facilitylicensenumber = $16, item_facilityname = $17,
+                item_globalproductid = $18, item_globalproductname = $19, item_itembrandname = $20,
+                item_processingjobcategoryname = $21, item_processingjobtypename = $22, item_productbrandname = $23,
+                item_productcategorytypename = $24, item_publicingredients = $25, item_quantitytypename = $26,
+                item_sellbyconfigurationstate = $27, item_sellbydateconfiguration = $28, item_servingsize = $29,
+                item_usebyconfigurationstate = $30, item_usebydateconfiguration = $31,
+                containsdecontaminatedproduct = $32, containsremediatedproduct = $33, haspartial = $34, isarchived = $35,
+                isdonation = $36, isdonationpersistent = $37, isfinished = $38, isintransit = $39, isonhold = $40, isonrecall = $41,
+                isonretailerdelivery = $42, isontrip = $43, ispartial = $44, isprocessvalidationtestingsample = $45,
+                isproductionbatch = $46, istestingsample = $47, istradesample = $48, istradesamplepersistent = $49,
+                item_isarchived = $50, item_isused = $51, item_productcategoryrequiresapproval = $52, multiharvest = $53,
+                multipackage = $54, multiprocessingjob = $55, multiproductionbatch = $56, packageforproductdestruction = $57,
+                productrequiresdecontamination = $58, productrequiresremediation = $59, sourcepackageisdonation = $60,
+                sourcepackageistradesample = $61, unitofmeasureid = $62, sourceharvestcount = $63, sourcepackagecount = $64,
+                sourceprocessingjobcount = $65, labteststageid = $66, processingjobtypeid = $67, item_expirationdatedaysinadvance = $68,
+                item_id = $69, item_itembrandid = $70, item_numberofdoses = $71, item_processingjobcategoryid = $72,
+                item_processingjobtypeid = $73, item_productcategoryid = $74, item_sellbydatedaysinadvance = $75,
+                item_strainid = $76, item_supplydurationdays = $77, item_unitcbdcontent = $78, item_unitcbdcontentdose = $79,
+                item_unitofmeasureid = $80, item_unitquantity = $81, item_unitthccontent = $82, item_unitthcpercent = $83,
+                item_unitweight = $84, item_usebydatedaysinadvance = $85, archiveddate = $86, decontaminationdate = $87,
+                expirationdate = $88, finisheddate = $89, item_approvalstatusdatetime = $90, item_lastmodified = $91,
+                labtestresultexpirationdatetime = $92, labtestingperformeddate = $93, labtestingrecordeddate = $94,
+                labtestingstatedate = $95, packageddate = $96, receiveddatetime = $97, remediationdate = $98, sellbydate = $99,
+                usebydate = $100, datamodel = $101, donationfacilitylicensenumber = $102, donationfacilityname = $103,
+                facilitylicensenumber = $104, facilityname = $105, intransitstatus = $106, index = $107, initiallabtestingstate = $108,
+                labtestresultdocumentfileid = $109, labteststage = $110, labtestingstatename = $111, licensenumber = $112,
+                locationname = $113, locationtypename = $114, note = $115, packagetype = $116, packagedbyfacilitylicensenumber = $117,
+                packagedbyfacilityname = $118, patientlicensenumber = $119, productlabel = $120, productionbatchnumber = $121,
+                receivedfromfacilitylicensenumber = $122, receivedfromfacilityname = $123, receivedfrommanifestnumber = $124,
+                sourceharvestnames = $125, sourcepackagelabels = $126, sourceprocessingjobnames = $127, sourceprocessingjobnumbers = $128,
+                sourceproductionbatchnumbers = $129, tradesamplefacilitylicensenumber = $130, tradesamplefacilityname = $131,
+                transfermanifestnumber = $132, trip = $133, unitofmeasureabbreviation = $134, unitofmeasurequantitytype = $135
+            WHERE metrcid = $136 AND sync_license = $137
         `;
         
-        // Perform the actual update
         try {
             await client.query(updateQuery, [
-                pkg.label,
-                pkg.itemName,
-                pkg.itemProductCategoryName,
-                pkg.quantity,
-                pkg.itemUnitOfMeasureName,
-                pkg.lastModified,
-                pkg.id,
-                pkg.licenseNumber
+                prepareValue(pkg, 'label'), // 1
+                prepareValue(pkg, 'quantity', 'number'), // 2
+                prepareValue(pkg, 'lastmodified', 'date'), // 3
+                prepareValue(pkg, 'item_name'), // 4
+                prepareValue(pkg, 'item_productcategoryname'), // 5
+                prepareValue(pkg, 'item_unitofmeasurename'), // 6
+                prepareValue(pkg, 'item_strainname'), // 7
+                prepareValue(pkg, 'item_brandname'), // 8
+                prepareValue(pkg, 'item_description'), // 9
+                prepareValue(pkg, 'item_administrationmethod'), // 10
+                prepareValue(pkg, 'item_allergens'), // 11
+                prepareValue(pkg, 'item_approvalstatusname'), // 12
+                prepareValue(pkg, 'item_defaultlabtestingstatename'), // 13
+                prepareValue(pkg, 'item_expirationconfigurationstate'), // 14
+                prepareValue(pkg, 'item_expirationdateconfiguration'), // 15
+                prepareValue(pkg, 'item_facilitylicensenumber'), // 16
+                prepareValue(pkg, 'item_facilityname'), // 17
+                prepareValue(pkg, 'item_globalproductid'), // 18
+                prepareValue(pkg, 'item_globalproductname'), // 19
+                prepareValue(pkg, 'item_itembrandname'), // 20
+                prepareValue(pkg, 'item_processingjobcategoryname'), // 21
+                prepareValue(pkg, 'item_processingjobtypename'), // 22
+                prepareValue(pkg, 'item_productbrandname'), // 23
+                prepareValue(pkg, 'item_productcategorytypename'), // 24
+                prepareValue(pkg, 'item_publicingredients'), // 25
+                prepareValue(pkg, 'item_quantitytypename'), // 26
+                prepareValue(pkg, 'item_sellbyconfigurationstate'), // 27
+                prepareValue(pkg, 'item_sellbydateconfiguration'), // 28
+                prepareValue(pkg, 'item_servingsize'), // 29
+                prepareValue(pkg, 'item_usebyconfigurationstate'), // 30
+                prepareValue(pkg, 'item_usebydateconfiguration'), // 31
+                prepareValue(pkg, 'containsdecontaminatedproduct', 'boolean'), // 32
+                prepareValue(pkg, 'containsremediatedproduct', 'boolean'), // 33
+                prepareValue(pkg, 'haspartial', 'boolean'), // 34
+                prepareValue(pkg, 'isarchived', 'boolean'), // 35
+                prepareValue(pkg, 'isdonation', 'boolean'), // 36
+                prepareValue(pkg, 'isdonationpersistent', 'boolean'), // 37
+                prepareValue(pkg, 'isfinished', 'boolean'), // 38
+                prepareValue(pkg, 'isintransit', 'boolean'), // 39
+                prepareValue(pkg, 'isonhold', 'boolean'), // 40
+                prepareValue(pkg, 'isonrecall', 'boolean'), // 41
+                prepareValue(pkg, 'isonretailerdelivery', 'boolean'), // 42
+                prepareValue(pkg, 'isontrip', 'boolean'), // 43
+                prepareValue(pkg, 'ispartial', 'boolean'), // 44
+                prepareValue(pkg, 'isprocessvalidationtestingsample', 'boolean'), // 45
+                prepareValue(pkg, 'isproductionbatch', 'boolean'), // 46
+                prepareValue(pkg, 'istestingsample', 'boolean'), // 47
+                prepareValue(pkg, 'istradesample', 'boolean'), // 48
+                prepareValue(pkg, 'istradesamplepersistent', 'boolean'), // 49
+                prepareValue(pkg, 'item_isarchived', 'boolean'), // 50
+                prepareValue(pkg, 'item_isused', 'boolean'), // 51
+                prepareValue(pkg, 'item_productcategoryrequiresapproval', 'boolean'), // 52
+                prepareValue(pkg, 'multiharvest', 'boolean'), // 53
+                prepareValue(pkg, 'multipackage', 'boolean'), // 54
+                prepareValue(pkg, 'multiprocessingjob', 'boolean'), // 55
+                prepareValue(pkg, 'multiproductionbatch', 'boolean'), // 56
+                prepareValue(pkg, 'packageforproductdestruction', 'boolean'), // 57
+                prepareValue(pkg, 'productrequiresdecontamination', 'boolean'), // 58
+                prepareValue(pkg, 'productrequiresremediation', 'boolean'), // 59
+                prepareValue(pkg, 'sourcepackageisdonation', 'boolean'), // 60
+                prepareValue(pkg, 'sourcepackageistradesample', 'boolean'), // 61
+                prepareValue(pkg, 'unitofmeasureid', 'number'), // 62
+                prepareValue(pkg, 'sourceharvestcount', 'number'), // 63
+                prepareValue(pkg, 'sourcepackagecount', 'number'), // 64
+                prepareValue(pkg, 'sourceprocessingjobcount', 'number'), // 65
+                prepareValue(pkg, 'labteststageid', 'number'), // 66
+                prepareValue(pkg, 'processingjobtypeid', 'number'), // 67
+                prepareValue(pkg, 'item_expirationdatedaysinadvance', 'number'), // 68
+                prepareValue(pkg, 'item_id', 'number'), // 69
+                prepareValue(pkg, 'item_itembrandid', 'number'), // 70
+                prepareValue(pkg, 'item_numberofdoses', 'number'), // 71
+                prepareValue(pkg, 'item_processingjobcategoryid', 'number'), // 72
+                prepareValue(pkg, 'item_processingjobtypeid', 'number'), // 73
+                prepareValue(pkg, 'item_productcategoryid', 'number'), // 74
+                prepareValue(pkg, 'item_sellbydatedaysinadvance', 'number'), // 75
+                prepareValue(pkg, 'item_strainid', 'number'), // 76
+                prepareValue(pkg, 'item_supplydurationdays', 'number'), // 77
+                prepareValue(pkg, 'item_unitcbdcontent', 'number'), // 78
+                prepareValue(pkg, 'item_unitcbdcontentdose', 'number'), // 79
+                prepareValue(pkg, 'item_unitofmeasureid', 'number'), // 80
+                prepareValue(pkg, 'item_unitquantity', 'number'), // 81
+                prepareValue(pkg, 'item_unitthccontent', 'number'), // 82
+                prepareValue(pkg, 'item_unitthcpercent', 'number'), // 83
+                prepareValue(pkg, 'item_unitweight', 'number'), // 84
+                prepareValue(pkg, 'item_usebydatedaysinadvance', 'number'), // 85
+                prepareValue(pkg, 'archiveddate', 'date'), // 86
+                prepareValue(pkg, 'decontaminationdate', 'date'), // 87
+                prepareValue(pkg, 'expirationdate', 'date'), // 88
+                prepareValue(pkg, 'finisheddate', 'date'), // 89
+                prepareValue(pkg, 'item_approvalstatusdatetime', 'date'), // 90
+                prepareValue(pkg, 'item_lastmodified', 'date'), // 91
+                prepareValue(pkg, 'labtestresultexpirationdatetime', 'date'), // 92
+                prepareValue(pkg, 'labtestingperformeddate', 'date'), // 93
+                prepareValue(pkg, 'labtestingrecordeddate', 'date'), // 94
+                prepareValue(pkg, 'labtestingstatedate', 'date'), // 95
+                prepareValue(pkg, 'packageddate', 'date'), // 96
+                prepareValue(pkg, 'receiveddatetime', 'date'), // 97
+                prepareValue(pkg, 'remediationdate', 'date'), // 98
+                prepareValue(pkg, 'sellbydate', 'date'), // 99
+                prepareValue(pkg, 'usebydate', 'date'), // 100
+                prepareValue(pkg, 'datamodel'), // 101
+                prepareValue(pkg, 'donationfacilitylicensenumber'), // 102
+                prepareValue(pkg, 'donationfacilityname'), // 103
+                prepareValue(pkg, 'facilitylicensenumber'), // 104
+                prepareValue(pkg, 'facilityname'), // 105
+                prepareValue(pkg, 'intransitstatus'), // 106
+                prepareValue(pkg, 'index'), // 107
+                prepareValue(pkg, 'initiallabtestingstate'), // 108
+                prepareValue(pkg, 'labtestresultdocumentfileid'), // 109
+                prepareValue(pkg, 'labteststage'), // 110
+                prepareValue(pkg, 'labtestingstatename'), // 111
+                prepareValue(pkg, 'licensenumber'), // 112
+                prepareValue(pkg, 'locationname'), // 113
+                prepareValue(pkg, 'locationtypename'), // 114
+                prepareValue(pkg, 'note'), // 115
+                prepareValue(pkg, 'packagetype'), // 116
+                prepareValue(pkg, 'packagedbyfacilitylicensenumber'), // 117
+                prepareValue(pkg, 'packagedbyfacilityname'), // 118
+                prepareValue(pkg, 'patientlicensenumber'), // 119
+                prepareValue(pkg, 'productlabel'), // 120
+                prepareValue(pkg, 'productionbatchnumber'), // 121
+                prepareValue(pkg, 'receivedfromfacilitylicensenumber'), // 122
+                prepareValue(pkg, 'receivedfromfacilityname'), // 123
+                prepareValue(pkg, 'receivedfrommanifestnumber'), // 124
+                prepareValue(pkg, 'sourceharvestnames'), // 125
+                prepareValue(pkg, 'sourcepackagelabels'), // 126
+                prepareValue(pkg, 'sourceprocessingjobnames'), // 127
+                prepareValue(pkg, 'sourceprocessingjobnumbers'), // 128
+                prepareValue(pkg, 'sourceproductionbatchnumbers'), // 129
+                prepareValue(pkg, 'tradesamplefacilitylicensenumber'), // 130
+                prepareValue(pkg, 'tradesamplefacilityname'), // 131
+                prepareValue(pkg, 'transfermanifestnumber'), // 132
+                prepareValue(pkg, 'trip'), // 133
+                prepareValue(pkg, 'unitofmeasureabbreviation'), // 134
+                prepareValue(pkg, 'unitofmeasurequantitytype'), // 135
+                pkg.id, // 136 - metrcid
+                METRC_CONFIG.licenseNumber // 137 - sync_license
             ]);
-            console.log(`✅ Updated package ${pkg.id}`);
         } catch (error) {
             console.error(`❌ Failed to update package ${pkg.id}:`, error.message);
         }

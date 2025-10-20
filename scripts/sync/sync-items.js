@@ -457,7 +457,8 @@ async function syncItems() {
         
         // Process API items
         for (const item of items) {
-            const existing = existingItems.get(item.id);
+            // Convert API ID to string to match database format
+            const existing = existingItems.get(String(item.id));
             
             if (!existing) {
                 // New item - insert
@@ -467,16 +468,16 @@ async function syncItems() {
                 const apiLastModified = item.lastModified ? new Date(item.lastModified) : null;
                 const localLastModified = existing.lastmodified;
                 
-                if (!apiLastModified || !localLastModified || apiLastModified > localLastModified) {
+                if (apiLastModified && localLastModified && apiLastModified > localLastModified) {
                     itemsToUpdate.push(item);
                 }
-                // If no update needed, item is already up to date
+                // If no update needed, item is already up to date - skip it
             }
         }
         
         // Find items to delete (exist locally but not in API)
         for (const [metrcid, existing] of existingItems) {
-            if (!items.find(item => item.id === metrcid)) {
+            if (!items.find(item => String(item.id) === metrcid)) {
                 itemsToDelete.push(metrcid);
             }
         }

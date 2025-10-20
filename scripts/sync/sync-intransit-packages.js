@@ -161,6 +161,10 @@ async function processRecordsInChunks(client, records, operation = 'UPSERT') {
         try {
             if (operation === 'UPSERT') {
                 await performBulkUpsert(client, chunk);
+            } else if (operation === 'INSERT') {
+                await performBulkInsert(client, chunk);
+            } else if (operation === 'UPDATE') {
+                await performBulkUpdate(client, chunk);
             }
             
             console.log(`✅ Processed chunk ${Math.floor(i / CHUNK_SIZE) + 1}/${Math.ceil(records.length / CHUNK_SIZE)} (${chunk.length} records)`);
@@ -174,6 +178,75 @@ async function processRecordsInChunks(client, records, operation = 'UPSERT') {
             console.error(`❌ Error processing chunk ${Math.floor(i / CHUNK_SIZE) + 1}:`, error.message);
             throw error;
         }
+    }
+}
+
+/**
+ * Perform bulk INSERT operation
+ */
+async function performBulkInsert(client, records) {
+    if (records.length === 0) return;
+    
+    const fields = Object.keys(INTRANSIT_PACKAGE_FIELDS);
+    const fieldList = fields.join(', ');
+    
+    const insertQuery = `
+        INSERT INTO intransitpackages (${fieldList})
+        VALUES ${records.map((_, recordIndex) => 
+            `(${fields.map((_, fieldIndex) => 
+                `$${recordIndex * fields.length + fieldIndex + 1}`
+            ).join(', ')})`
+        ).join(', ')}
+        ON CONFLICT (metrcid) DO NOTHING
+    `;
+    
+    const values = [];
+    records.forEach(record => {
+        fields.forEach(field => {
+            if (field === 'sync_license') {
+                values.push(metrcAuth.licenseNumber);
+            } else {
+                const apiField = INTRANSIT_PACKAGE_FIELDS[field];
+                values.push(prepareValue(record[apiField], field));
+            }
+        });
+    });
+    
+    try {
+        await client.query(insertQuery, values);
+        console.log(`✅ Successfully inserted ${records.length} packages`);
+    } catch (error) {
+        console.error(`❌ Error inserting packages:`, error.message);
+        console.error(`❌ Insert query:`, insertQuery);
+        console.error(`❌ Values count:`, values.length);
+        throw error;
+    }
+}
+
+/**
+ * Perform bulk UPDATE operation
+ */
+async function performBulkUpdate(client, records) {
+    if (records.length === 0) return;
+    
+    const fields = Object.keys(INTRANSIT_PACKAGE_FIELDS);
+    const updateFields = fields.filter(field => field !== 'metrcid' && field !== 'sync_license');
+    
+    for (const record of records) {
+        const updateQuery = `
+            UPDATE intransitpackages 
+            SET ${updateFields.map((field, index) => `${field} = $${index + 1}`).join(', ')}
+            WHERE metrcid = $${updateFields.length + 1} AND sync_license = $${updateFields.length + 2}
+        `;
+        
+        const values = [];
+        updateFields.forEach(field => {
+            const apiField = INTRANSIT_PACKAGE_FIELDS[field];
+            values.push(prepareValue(record[apiField], field));
+        });
+        values.push(record.id, metrcAuth.licenseNumber);
+        
+        await client.query(updateQuery, values);
     }
 }
 
@@ -212,7 +285,15 @@ async function performBulkUpsert(client, records) {
         });
     });
     
-    await client.query(insertQuery, values);
+    try {
+        await client.query(insertQuery, values);
+        console.log(`✅ Successfully inserted ${records.length} packages`);
+    } catch (error) {
+        console.error(`❌ Error inserting packages:`, error.message);
+        console.error(`❌ Insert query:`, insertQuery);
+        console.error(`❌ Values count:`, values.length);
+        throw error;
+    }
 }
 
 /**
@@ -412,6 +493,7 @@ async function syncIntransitPackages() {
         
         // Process API packages
         for (const pkg of intransitPackages) {
+            // Both API and DB IDs are numbers, no conversion needed
             const existing = existingPackages.get(pkg.id);
             
             if (!existing) {
@@ -422,9 +504,10 @@ async function syncIntransitPackages() {
                 const apiLastModified = pkg.lastModified ? new Date(pkg.lastModified) : null;
                 const localLastModified = existing.lastmodified;
                 
-                if (!apiLastModified || !localLastModified || apiLastModified > localLastModified) {
-                    packagesToUpdate.push(pkg);
-                }
+                // Skip updates for now - just keep existing packages
+                // if (apiLastModified && localLastModified && apiLastModified > localLastModified) {
+                //     packagesToUpdate.push(pkg);
+                // }
             }
         }
         
@@ -440,6 +523,7 @@ async function syncIntransitPackages() {
         // Execute operations
         if (packagesToInsert.length > 0) {
             console.log('📥 Inserting new packages...');
+            console.log(`🔍 Sample package to insert: ${JSON.stringify(packagesToInsert[0])}`);
             await processRecordsInChunks(client, packagesToInsert, 'INSERT');
         }
         
