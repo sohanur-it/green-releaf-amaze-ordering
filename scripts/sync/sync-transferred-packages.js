@@ -81,15 +81,14 @@ async function fetchTransferredPackages() {
         }
 
         console.log('📡 Fetching transferred packages from METRC API...');
-        console.log('🔬 PRODUCTION MODE: Limited to first 5 pages (2,500 records)');
+        console.log('🚀 FULL SYNC MODE: Fetching all pages');
         
         let allPackages = [];
         let page = 1;
         let hasMorePages = true;
         const pageSize = 500; // Maximum allowed by API
-        const MAX_PAGES = 5; // Limit to first 5 pages for production
         
-        while (hasMorePages && page <= MAX_PAGES) {
+        while (hasMorePages) {
             console.log(`📄 Fetching transferred packages page ${page}...`);
             
             let retries = 3;
@@ -669,7 +668,7 @@ async function syncTransferredPackages() {
         await updateSyncBatchHistory(client, batchId, 'completed', duration);
         await updateSyncProgress(client, 'transferred_packages', metrcAuth.licenseNumber, new Date());
         
-        console.log(`✅ Transferred packages sync completed: ${totalProcessed} total packages processed in ${batchNumber - 1} batches`);
+        console.log(`✅ Transferred packages sync completed: ${finalInsertCount} inserted, ${finalUpdateCount} updated, ${finalDeleteCount} deleted`);
         
     } catch (error) {
         const duration = Date.now() - startTime;
