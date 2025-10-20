@@ -153,21 +153,69 @@ async function fetchOutgoingTransfersIncremental(lastModified = null) {
             console.log(`🔍 Filtering transfers modified after: ${lastModified.toISOString()}`);
         }
         
-        const response = await axios.get(`${METRC_CONFIG.baseURL}/transfers/outgoing/active`, {
-            headers: {
-                'Authorization': `Bearer ${authToken}`,
-                'Content-Type': 'application/json'
-            },
-            params
-        });
+        let allTransfers = [];
+        let page = 1;
+        let hasMorePages = true;
+        const pageSize = 500; // Maximum allowed by API
+        
+        while (hasMorePages) {
+            console.log(`📄 Fetching outgoing transfers page ${page}...`);
+            
+            let retries = 3;
+            let success = false;
+            
+            while (retries > 0 && !success) {
+                try {
+                    const pageParams = {
+                        ...params,
+                        page: page,
+                        pageSize: pageSize
+                    };
+                    
+                    const response = await axios.get(`${METRC_CONFIG.baseURL}/transfers/outgoing/active`, {
+                        headers: {
+                            'Authorization': `Bearer ${authToken}`,
+                            'Content-Type': 'application/json'
+                        },
+                        params: pageParams
+                    });
 
-        if (response.data && response.data.data) {
-            console.log(`✅ Retrieved ${response.data.data.length} outgoing transfers`);
-            return response.data.data;
-        } else {
-            console.log('⚠️ No outgoing transfers data received');
-            return [];
+                    if (response.data && response.data.data) {
+                        const transfers = response.data.data;
+                        allTransfers = allTransfers.concat(transfers);
+                        
+                        console.log(`✅ Retrieved ${transfers.length} outgoing transfers from page ${page} (total: ${allTransfers.length})`);
+                        
+                        // Check if there are more pages
+                        const totalPages = response.data.totalPages || Math.ceil(response.data.total / pageSize);
+                        hasMorePages = page < totalPages;
+                        page++;
+                        success = true;
+                        
+                        // Small delay to avoid rate limiting
+                        if (hasMorePages) {
+                            await new Promise(resolve => setTimeout(resolve, 200));
+                        }
+                    } else {
+                        console.log('⚠️ No outgoing transfers data received for page', page);
+                        hasMorePages = false;
+                        success = true;
+                    }
+                } catch (error) {
+                    retries--;
+                    if (retries > 0) {
+                        console.log(`⚠️ API error on page ${page}, retrying in 2 seconds... (${retries} retries left)`);
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    } else {
+                        console.error(`❌ Failed to fetch page ${page} after 3 retries:`, error.message);
+                        throw error;
+                    }
+                }
+            }
         }
+
+        console.log(`✅ Retrieved ${allTransfers.length} total outgoing transfers across ${page - 1} pages`);
+        return allTransfers;
     } catch (error) {
         console.error('❌ Error fetching outgoing transfers:', error.message);
         if (error.response) {
@@ -210,7 +258,7 @@ function prepareValue(value, fieldName) {
  * Process records in chunks to prevent database locks
  */
 async function processRecordsInChunks(client, records, operation = 'UPSERT') {
-    const CHUNK_SIZE = 50;
+    const CHUNK_SIZE = 500;
     const DELAY_BETWEEN_CHUNKS = 100; // milliseconds
     
     for (let i = 0; i < records.length; i += CHUNK_SIZE) {
@@ -457,11 +505,76 @@ async function syncOutgoingTransfersEnhanced() {
 
         console.log(`📊 Processing ${outgoingTransfers.length} outgoing transfers...`);
         
-        // Process records in chunks to prevent database locks
-        await processRecordsInChunks(client, outgoingTransfers, 'UPSERT');
+        // Get existing transfers for comparison
+        const existingResult = await client.query(
+            'SELECT metrcid, lastmodified FROM outgoingtransfers WHERE sync_license = $1',
+            [METRC_CONFIG.licenseNumber]
+        );
+        
+        const existingTransfers = new Map();
+        existingResult.rows.forEach(row => {
+            existingTransfers.set(row.metrcid, {
+                lastmodified: row.lastmodified,
+                exists: true
+            });
+        });
+        
+        console.log(`📊 Found ${existingTransfers.size} existing outgoing transfers in local database`);
+        
+        // Categorize transfers
+        const transfersToInsert = [];
+        const transfersToUpdate = [];
+        const transfersToDelete = [];
+        
+        // Process API transfers
+        for (const transfer of outgoingTransfers) {
+            const existing = existingTransfers.get(transfer.id);
+            
+            if (!existing) {
+                // New transfer - insert
+                transfersToInsert.push(transfer);
+            } else {
+                // Existing transfer - check if needs update
+                const apiLastModified = transfer.lastModified ? new Date(transfer.lastModified) : null;
+                const localLastModified = existing.lastmodified;
+                
+                if (!apiLastModified || !localLastModified || apiLastModified > localLastModified) {
+                    transfersToUpdate.push(transfer);
+                }
+            }
+        }
+        
+        // Find transfers to delete (exist locally but not in API)
+        for (const [metrcid, existing] of existingTransfers) {
+            if (!outgoingTransfers.find(transfer => transfer.id === metrcid)) {
+                transfersToDelete.push(metrcid);
+            }
+        }
+        
+        console.log(`📊 Sync plan: ${transfersToInsert.length} insert, ${transfersToUpdate.length} update, ${transfersToDelete.length} delete`);
+        
+        // Execute operations
+        if (transfersToInsert.length > 0) {
+            console.log('📥 Inserting new transfers...');
+            await processRecordsInChunks(client, transfersToInsert, 'INSERT');
+        }
+        
+        if (transfersToUpdate.length > 0) {
+            console.log('🔄 Updating existing transfers...');
+            await processRecordsInChunks(client, transfersToUpdate, 'UPDATE');
+        }
+        
+        if (transfersToDelete.length > 0) {
+            console.log('🗑️ Deleting stale transfers...');
+            const deleteQuery = `
+                DELETE FROM outgoingtransfers 
+                WHERE metrcid = ANY($1) AND sync_license = $2
+            `;
+            await client.query(deleteQuery, [transfersToDelete, METRC_CONFIG.licenseNumber]);
+        }
         
         const duration = Date.now() - startTime;
-        scriptOutput = `Outgoing transfers sync completed: ${outgoingTransfers.length} records processed in ${duration}ms`;
+        scriptOutput = `Outgoing transfers sync completed: ${transfersToInsert.length} inserted, ${transfersToUpdate.length} updated, ${transfersToDelete.length} deleted in ${duration}ms`;
         
         // Update all tracking entries
         await updateSyncJob(client, jobId, 'completed', scriptOutput);
@@ -469,7 +582,7 @@ async function syncOutgoingTransfersEnhanced() {
         await updateSyncBatchHistory(client, batchId, 'completed', duration);
         await updateSyncProgress(client, 'outgoing_transfers', METRC_CONFIG.licenseNumber, new Date());
         
-        console.log(`✅ Enhanced sync completed: ${outgoingTransfers.length} records processed`);
+        console.log(`✅ Enhanced sync completed: ${transfersToInsert.length} inserted, ${transfersToUpdate.length} updated, ${transfersToDelete.length} deleted`);
         
     } catch (error) {
         const duration = Date.now() - startTime;

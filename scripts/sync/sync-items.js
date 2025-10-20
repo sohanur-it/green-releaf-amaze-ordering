@@ -31,7 +31,8 @@ const DB_CONFIG = {
     password: process.env.DB_PASSWORD || 'postgres',
     max: 20,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
+    connectionTimeoutMillis: 30000,
+    ssl: { rejectUnauthorized: false }
 };
 
 // Field mapping for items (production schema - simplified)
@@ -55,27 +56,95 @@ const ITEM_FIELDS = {
 const pool = new Pool(DB_CONFIG);
 
 /**
+ * Get database connection with retry logic
+ */
+async function getDatabaseConnection(retries = 3, delay = 5000) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            console.log(`🔌 Attempting database connection (attempt ${i + 1}/${retries})...`);
+            const client = await pool.connect();
+            console.log('✅ Database connection established');
+            return client;
+        } catch (error) {
+            console.error(`❌ Database connection attempt ${i + 1} failed:`, error.message);
+            
+            if (i === retries - 1) {
+                throw new Error(`Failed to connect to database after ${retries} attempts: ${error.message}`);
+            }
+            
+            console.log(`⏳ Waiting ${delay}ms before retry...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+}
+
+/**
  * Fetch items from METRC API
  */
 async function fetchItems() {
     try {
         console.log('📡 Fetching items from METRC API...');
         
-        const response = await metrcAuth.makeAuthenticatedRequest({
-            method: 'GET',
-            url: `${metrcAuth.apiBaseUrl}/items`,
-            params: {
-                licenseNumber: metrcAuth.licenseNumber
-            }
-        });
+        let allItems = [];
+        let page = 1;
+        let hasMorePages = true;
+        const pageSize = 500; // Maximum allowed by API
+        
+        while (hasMorePages) {
+            console.log(`📄 Fetching items page ${page}...`);
+            
+            let retries = 3;
+            let success = false;
+            
+            while (retries > 0 && !success) {
+                try {
+                    const response = await metrcAuth.makeAuthenticatedRequest({
+                        method: 'GET',
+                        url: `${metrcAuth.apiBaseUrl}/items`,
+                        params: {
+                            licenseNumber: metrcAuth.licenseNumber,
+                            page: page,
+                            pageSize: pageSize
+                        }
+                    });
 
-        if (response.data && response.data.data) {
-            console.log(`✅ Retrieved ${response.data.data.length} items`);
-            return response.data.data;
-        } else {
-            console.log('⚠️ No items data received');
-            return [];
+                    if (response.data && response.data.data) {
+                        const items = response.data.data;
+                        allItems = allItems.concat(items);
+                        
+                        console.log(`✅ Retrieved ${items.length} items from page ${page} (total: ${allItems.length})`);
+                        
+                        // Check if there are more pages
+                        const totalPages = response.data.totalPages || Math.ceil(response.data.total / pageSize);
+                        hasMorePages = page < totalPages;
+                        page++;
+                        success = true;
+                        
+                        // Small delay to avoid rate limiting
+                        if (hasMorePages) {
+                            await new Promise(resolve => setTimeout(resolve, 200));
+                        }
+                    } else {
+                        console.log('⚠️ No items data received for page', page);
+                        hasMorePages = false;
+                        success = true;
+                    }
+                } catch (error) {
+                    retries--;
+                    if (retries > 0) {
+                        console.log(`⚠️ API error on page ${page}, retrying in 2 seconds... (${retries} retries left)`);
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    } else {
+                        console.error(`❌ Failed to fetch page ${page} after 3 retries:`, error.message);
+                        throw error;
+                    }
+                }
+            }
         }
+
+        console.log(`✅ Retrieved ${allItems.length} total items across ${page - 1} pages`);
+        return allItems;
+        
     } catch (error) {
         console.error('❌ Error fetching items:', error.message);
         if (error.response) {
@@ -101,16 +170,18 @@ function prepareValue(value, fieldName) {
 /**
  * Process records in chunks to prevent database locks
  */
-async function processRecordsInChunks(client, records, operation = 'UPSERT') {
-    const CHUNK_SIZE = 50;
+async function processRecordsInChunks(client, records, operation = 'INSERT') {
+    const CHUNK_SIZE = 500;
     const DELAY_BETWEEN_CHUNKS = 100; // milliseconds
     
     for (let i = 0; i < records.length; i += CHUNK_SIZE) {
         const chunk = records.slice(i, i + CHUNK_SIZE);
         
         try {
-            if (operation === 'UPSERT') {
-                await performBulkUpsert(client, chunk);
+            if (operation === 'INSERT') {
+                await performBulkInsert(client, chunk);
+            } else if (operation === 'UPDATE') {
+                await performBulkUpdate(client, chunk);
             }
             
             console.log(`✅ Processed chunk ${Math.floor(i / CHUNK_SIZE) + 1}/${Math.ceil(records.length / CHUNK_SIZE)} (${chunk.length} records)`);
@@ -128,17 +199,13 @@ async function processRecordsInChunks(client, records, operation = 'UPSERT') {
 }
 
 /**
- * Perform bulk UPSERT operation
+ * Perform bulk INSERT operation
  */
-async function performBulkUpsert(client, records) {
+async function performBulkInsert(client, records) {
     if (records.length === 0) return;
     
     const fields = Object.keys(ITEM_FIELDS);
     const fieldList = fields.join(', ');
-    const valuePlaceholders = fields.map((_, index) => `$${index + 1}`).join(', ');
-    
-    const updateFields = fields.filter(field => field !== 'metrcid' && field !== 'sync_license');
-    const updateClause = updateFields.map(field => `${field} = EXCLUDED.${field}`).join(', ');
     
     const insertQuery = `
         INSERT INTO items (${fieldList})
@@ -163,6 +230,33 @@ async function performBulkUpsert(client, records) {
     });
     
     await client.query(insertQuery, values);
+}
+
+/**
+ * Perform bulk UPDATE operation
+ */
+async function performBulkUpdate(client, records) {
+    if (records.length === 0) return;
+    
+    const fields = Object.keys(ITEM_FIELDS);
+    const updateFields = fields.filter(field => field !== 'metrcid' && field !== 'sync_license');
+    
+    for (const record of records) {
+        const updateQuery = `
+            UPDATE items 
+            SET ${updateFields.map((field, index) => `${field} = $${index + 1}`).join(', ')}
+            WHERE metrcid = $${updateFields.length + 1} AND sync_license = $${updateFields.length + 2}
+        `;
+        
+        const values = [];
+        updateFields.forEach(field => {
+            const apiField = ITEM_FIELDS[field];
+            values.push(prepareValue(record[apiField], field));
+        });
+        values.push(record.id, metrcAuth.licenseNumber);
+        
+        await client.query(updateQuery, values);
+    }
 }
 
 /**
@@ -305,7 +399,7 @@ async function updateSyncBatchHistory(client, batchId, status, durationMs = null
  * Sync items to database
  */
 async function syncItems() {
-    const client = await pool.connect();
+    const client = await getDatabaseConnection();
     const startTime = Date.now();
     let jobId = null;
     let historyId = null;
@@ -340,11 +434,77 @@ async function syncItems() {
 
         console.log(`📊 Processing ${items.length} items...`);
         
-        // Process records in chunks to prevent database locks
-        await processRecordsInChunks(client, items, 'UPSERT');
+        // Get existing items for comparison
+        const existingResult = await client.query(
+            'SELECT metrcid, lastmodified FROM items WHERE sync_license = $1',
+            [metrcAuth.licenseNumber]
+        );
+        
+        const existingItems = new Map();
+        existingResult.rows.forEach(row => {
+            existingItems.set(row.metrcid, {
+                lastmodified: row.lastmodified,
+                exists: true
+            });
+        });
+        
+        console.log(`📊 Found ${existingItems.size} existing items in local database`);
+        
+        // Categorize items
+        const itemsToInsert = [];
+        const itemsToUpdate = [];
+        const itemsToDelete = [];
+        
+        // Process API items
+        for (const item of items) {
+            const existing = existingItems.get(item.id);
+            
+            if (!existing) {
+                // New item - insert
+                itemsToInsert.push(item);
+            } else {
+                // Existing item - check if needs update
+                const apiLastModified = item.lastModified ? new Date(item.lastModified) : null;
+                const localLastModified = existing.lastmodified;
+                
+                if (!apiLastModified || !localLastModified || apiLastModified > localLastModified) {
+                    itemsToUpdate.push(item);
+                }
+                // If no update needed, item is already up to date
+            }
+        }
+        
+        // Find items to delete (exist locally but not in API)
+        for (const [metrcid, existing] of existingItems) {
+            if (!items.find(item => item.id === metrcid)) {
+                itemsToDelete.push(metrcid);
+            }
+        }
+        
+        console.log(`📊 Sync plan: ${itemsToInsert.length} insert, ${itemsToUpdate.length} update, ${itemsToDelete.length} delete`);
+        
+        // Execute operations
+        if (itemsToInsert.length > 0) {
+            console.log('📥 Inserting new items...');
+            await processRecordsInChunks(client, itemsToInsert, 'INSERT');
+        }
+        
+        if (itemsToUpdate.length > 0) {
+            console.log('🔄 Updating existing items...');
+            await processRecordsInChunks(client, itemsToUpdate, 'UPDATE');
+        }
+        
+        if (itemsToDelete.length > 0) {
+            console.log('🗑️ Deleting stale items...');
+            const deleteQuery = `
+                DELETE FROM items 
+                WHERE metrcid = ANY($1) AND sync_license = $2
+            `;
+            await client.query(deleteQuery, [itemsToDelete, metrcAuth.licenseNumber]);
+        }
         
         const duration = Date.now() - startTime;
-        scriptOutput = `Items sync completed: ${items.length} records processed in ${duration}ms`;
+        scriptOutput = `Items sync completed: ${itemsToInsert.length} inserted, ${itemsToUpdate.length} updated, ${itemsToDelete.length} deleted in ${duration}ms`;
         
         // Update all tracking entries
         await updateSyncJob(client, jobId, 'completed', scriptOutput);
@@ -352,7 +512,7 @@ async function syncItems() {
         await updateSyncBatchHistory(client, batchId, 'completed', duration);
         await updateSyncProgress(client, 'items', metrcAuth.licenseNumber, new Date());
         
-        console.log(`✅ Items sync completed: ${items.length} records processed`);
+        console.log(`✅ Items sync completed: ${itemsToInsert.length} inserted, ${itemsToUpdate.length} updated, ${itemsToDelete.length} deleted`);
         
     } catch (error) {
         const duration = Date.now() - startTime;

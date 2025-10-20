@@ -9,7 +9,6 @@
  * Usage: node scripts/sync/sync-intransit-packages.js
  */
 
-const axios = require('axios');
 const { Pool } = require('pg');
 const path = require('path');
 
@@ -20,6 +19,9 @@ if (process.env.NODE_ENV === 'production') {
     require('dotenv').config({ path: path.join(__dirname, '../../config/local.env') });
 }
 
+// Import centralized METRC authentication service
+const metrcAuth = require('../../Server/Services/metrcAuth');
+
 // Database configuration
 const DB_CONFIG = {
     host: process.env.DB_HOST || 'localhost',
@@ -29,16 +31,8 @@ const DB_CONFIG = {
     password: process.env.DB_PASSWORD || 'postgres',
     max: 20,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
-};
-
-// METRC API configuration
-const METRC_CONFIG = {
-    baseURL: process.env.T3_API_BASE_URL || 'https://api.trackandtrace.tools/v2',
-    hostname: process.env.T3_HOSTNAME || 'mo.metrc.com',
-    username: process.env.T3_USERNAME,
-    password: process.env.T3_PASSWORD,
-    licenseNumber: process.env.T3_LICENSE_NUMBER || 'CUL000063'
+    connectionTimeoutMillis: 10000,
+    ssl: { rejectUnauthorized: false }
 };
 
 // Field mapping for intransit packages (production schema)
@@ -56,79 +50,78 @@ const INTRANSIT_PACKAGE_FIELDS = {
 // Create database pool
 const pool = new Pool(DB_CONFIG);
 
-// Authentication token cache
-let authToken = null;
-let tokenExpiry = null;
-
-/**
- * Authenticate with METRC T3 API
- */
-async function authenticateWithMetrc() {
-    try {
-        console.log('🔐 Authenticating with METRC T3 API...');
-        
-        const response = await axios.post(`${METRC_CONFIG.baseURL}/auth/credentials`, {
-            username: METRC_CONFIG.username,
-            password: METRC_CONFIG.password,
-            hostname: METRC_CONFIG.hostname
-        });
-
-        if (response.data && response.data.accessToken) {
-            authToken = response.data.accessToken;
-            tokenExpiry = new Date(Date.now() + (24 * 60 * 60 * 1000)); // 24 hours from now
-            console.log('✅ Authentication successful');
-            return true;
-        } else {
-            throw new Error('Invalid authentication response');
-        }
-    } catch (error) {
-        console.error('❌ Authentication failed:', error.message);
-        if (error.response) {
-            console.error('Response status:', error.response.status);
-            console.error('Response data:', error.response.data);
-        }
-        return false;
-    }
-}
-
-/**
- * Check if authentication token is valid
- */
-function isTokenValid() {
-    return authToken && tokenExpiry && new Date() < tokenExpiry;
-}
-
 /**
  * Fetch in-transit packages from METRC API
  */
 async function fetchIntransitPackages() {
     try {
-        if (!isTokenValid()) {
-            const authSuccess = await authenticateWithMetrc();
-            if (!authSuccess) {
-                throw new Error('Failed to authenticate');
-            }
+        console.log('🔐 Authenticating with METRC T3 API...');
+        const success = await metrcAuth.ensureValidToken();
+        if (!success) {
+            throw new Error('Failed to obtain valid METRC authentication token');
         }
 
         console.log('📡 Fetching in-transit packages from METRC API...');
         
-        const response = await axios.get(`${METRC_CONFIG.baseURL}/packages/intransit`, {
-            headers: {
-                'Authorization': `Bearer ${authToken}`,
-                'Content-Type': 'application/json'
-            },
-            params: {
-                licenseNumber: METRC_CONFIG.licenseNumber
-            }
-        });
+        let allPackages = [];
+        let page = 1;
+        let hasMorePages = true;
+        const pageSize = 500; // Maximum allowed by API
+        
+        while (hasMorePages) {
+            console.log(`📄 Fetching in-transit packages page ${page}...`);
+            
+            let retries = 3;
+            let success = false;
+            
+            while (retries > 0 && !success) {
+                try {
+                    const response = await metrcAuth.makeAuthenticatedRequest({
+                        method: 'GET',
+                        url: `${metrcAuth.apiBaseUrl}/packages/intransit`,
+                        params: {
+                            licenseNumber: metrcAuth.licenseNumber,
+                            page: page,
+                            pageSize: pageSize
+                        }
+                    });
 
-        if (response.data && response.data.data) {
-            console.log(`✅ Retrieved ${response.data.data.length} in-transit packages`);
-            return response.data.data;
-        } else {
-            console.log('⚠️ No in-transit packages data received');
-            return [];
+                    if (response.data && response.data.data) {
+                        const packages = response.data.data;
+                        allPackages = allPackages.concat(packages);
+                        
+                        console.log(`✅ Retrieved ${packages.length} in-transit packages from page ${page} (total: ${allPackages.length})`);
+                        
+                        // Check if there are more pages
+                        const totalPages = response.data.totalPages || Math.ceil(response.data.total / pageSize);
+                        hasMorePages = page < totalPages;
+                        page++;
+                        success = true;
+                        
+                        // Small delay to avoid rate limiting
+                        if (hasMorePages) {
+                            await new Promise(resolve => setTimeout(resolve, 200));
+                        }
+                    } else {
+                        console.log('⚠️ No in-transit packages data received for page', page);
+                        hasMorePages = false;
+                        success = true;
+                    }
+                } catch (error) {
+                    retries--;
+                    if (retries > 0) {
+                        console.log(`⚠️ API error on page ${page}, retrying in 2 seconds... (${retries} retries left)`);
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    } else {
+                        console.error(`❌ Failed to fetch page ${page} after 3 retries:`, error.message);
+                        throw error;
+                    }
+                }
+            }
         }
+
+        console.log(`✅ Retrieved ${allPackages.length} total in-transit packages across ${page - 1} pages`);
+        return allPackages;
     } catch (error) {
         console.error('❌ Error fetching in-transit packages:', error.message);
         if (error.response) {
@@ -159,7 +152,7 @@ function prepareValue(value, fieldName) {
  * Process records in chunks to prevent database locks
  */
 async function processRecordsInChunks(client, records, operation = 'UPSERT') {
-    const CHUNK_SIZE = 50;
+    const CHUNK_SIZE = 500;
     const DELAY_BETWEEN_CHUNKS = 100; // milliseconds
     
     for (let i = 0; i < records.length; i += CHUNK_SIZE) {
@@ -211,7 +204,7 @@ async function performBulkUpsert(client, records) {
     records.forEach(record => {
         fields.forEach(field => {
             if (field === 'sync_license') {
-                values.push(METRC_CONFIG.licenseNumber);
+                values.push(metrcAuth.licenseNumber);
             } else {
                 const apiField = INTRANSIT_PACKAGE_FIELDS[field];
                 values.push(prepareValue(record[apiField], field));
@@ -374,8 +367,8 @@ async function syncIntransitPackages() {
         console.log('🔄 Starting in-transit packages sync...');
         
         // Create tracking entries
-        jobId = await createSyncJob(client, 'sync-intransit-packages.js', METRC_CONFIG.licenseNumber);
-        historyId = await createSyncHistory(client, 'intransit_packages', METRC_CONFIG.licenseNumber, null, 'sync-intransit-packages.js');
+        jobId = await createSyncJob(client, 'sync-intransit-packages.js', metrcAuth.licenseNumber);
+        historyId = await createSyncHistory(client, 'intransit_packages', metrcAuth.licenseNumber, null, 'sync-intransit-packages.js');
         batchId = await createSyncBatchHistory(client, 'intransit_packages');
         
         // Fetch data from API
@@ -389,26 +382,91 @@ async function syncIntransitPackages() {
             await updateSyncJob(client, jobId, 'completed', scriptOutput);
             await updateSyncHistory(client, historyId, 'completed', Date.now() - startTime, scriptOutput);
             await updateSyncBatchHistory(client, batchId, 'completed', Date.now() - startTime);
-            await updateSyncProgress(client, 'intransit_packages', METRC_CONFIG.licenseNumber, new Date());
+            await updateSyncProgress(client, 'intransit_packages', metrcAuth.licenseNumber, new Date());
             
             return;
         }
 
         console.log(`📊 Processing ${intransitPackages.length} in-transit packages...`);
         
-        // Process records in chunks to prevent database locks
-        await processRecordsInChunks(client, intransitPackages, 'UPSERT');
+        // Get existing packages for comparison
+        const existingResult = await client.query(
+            'SELECT metrcid, lastmodified FROM intransitpackages WHERE sync_license = $1',
+            [metrcAuth.licenseNumber]
+        );
+        
+        const existingPackages = new Map();
+        existingResult.rows.forEach(row => {
+            existingPackages.set(row.metrcid, {
+                lastmodified: row.lastmodified,
+                exists: true
+            });
+        });
+        
+        console.log(`📊 Found ${existingPackages.size} existing in-transit packages in local database`);
+        
+        // Categorize packages
+        const packagesToInsert = [];
+        const packagesToUpdate = [];
+        const packagesToDelete = [];
+        
+        // Process API packages
+        for (const pkg of intransitPackages) {
+            const existing = existingPackages.get(pkg.id);
+            
+            if (!existing) {
+                // New package - insert
+                packagesToInsert.push(pkg);
+            } else {
+                // Existing package - check if needs update
+                const apiLastModified = pkg.lastModified ? new Date(pkg.lastModified) : null;
+                const localLastModified = existing.lastmodified;
+                
+                if (!apiLastModified || !localLastModified || apiLastModified > localLastModified) {
+                    packagesToUpdate.push(pkg);
+                }
+            }
+        }
+        
+        // Find packages to delete (exist locally but not in API)
+        for (const [metrcid, existing] of existingPackages) {
+            if (!intransitPackages.find(pkg => pkg.id === metrcid)) {
+                packagesToDelete.push(metrcid);
+            }
+        }
+        
+        console.log(`📊 Sync plan: ${packagesToInsert.length} insert, ${packagesToUpdate.length} update, ${packagesToDelete.length} delete`);
+        
+        // Execute operations
+        if (packagesToInsert.length > 0) {
+            console.log('📥 Inserting new packages...');
+            await processRecordsInChunks(client, packagesToInsert, 'INSERT');
+        }
+        
+        if (packagesToUpdate.length > 0) {
+            console.log('🔄 Updating existing packages...');
+            await processRecordsInChunks(client, packagesToUpdate, 'UPDATE');
+        }
+        
+        if (packagesToDelete.length > 0) {
+            console.log('🗑️ Deleting stale packages...');
+            const deleteQuery = `
+                DELETE FROM intransitpackages 
+                WHERE metrcid = ANY($1) AND sync_license = $2
+            `;
+            await client.query(deleteQuery, [packagesToDelete, metrcAuth.licenseNumber]);
+        }
         
         const duration = Date.now() - startTime;
-        scriptOutput = `In-transit packages sync completed: ${intransitPackages.length} records processed in ${duration}ms`;
+        scriptOutput = `In-transit packages sync completed: ${packagesToInsert.length} inserted, ${packagesToUpdate.length} updated, ${packagesToDelete.length} deleted in ${duration}ms`;
         
         // Update all tracking entries
         await updateSyncJob(client, jobId, 'completed', scriptOutput);
         await updateSyncHistory(client, historyId, 'completed', duration, scriptOutput);
         await updateSyncBatchHistory(client, batchId, 'completed', duration);
-        await updateSyncProgress(client, 'intransit_packages', METRC_CONFIG.licenseNumber, new Date());
+        await updateSyncProgress(client, 'intransit_packages', metrcAuth.licenseNumber, new Date());
         
-        console.log(`✅ In-transit packages sync completed: ${intransitPackages.length} records processed`);
+        console.log(`✅ In-transit packages sync completed: ${packagesToInsert.length} inserted, ${packagesToUpdate.length} updated, ${packagesToDelete.length} deleted`);
         
     } catch (error) {
         const duration = Date.now() - startTime;
@@ -434,7 +492,7 @@ async function main() {
     try {
         console.log('🚀 Starting METRC In-Transit Packages Sync');
         console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-        console.log(`🏢 License: ${METRC_CONFIG.licenseNumber}`);
+        console.log(`🏢 License: ${metrcAuth.licenseNumber}`);
         
         await syncIntransitPackages();
         
@@ -455,6 +513,5 @@ if (require.main === module) {
 
 module.exports = {
     syncIntransitPackages,
-    fetchIntransitPackages,
-    authenticateWithMetrc
+    fetchIntransitPackages
 };

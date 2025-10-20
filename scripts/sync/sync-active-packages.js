@@ -78,9 +78,38 @@ function isTokenValid() {
 }
 
 /**
- * Fetch all active packages from METRC API
+ * Get the last sync timestamp for incremental sync
  */
-async function fetchAllActivePackages() {
+async function getLastSyncTimestamp(client) {
+    try {
+        const query = `
+            SELECT last_timestamp 
+            FROM sync_progress 
+            WHERE sync_type = 'active_packages' AND license = $1
+        `;
+        
+        const result = await client.query(query, [METRC_CONFIG.licenseNumber]);
+        
+        if (result.rows.length > 0 && result.rows[0].last_timestamp) {
+            const lastSync = new Date(result.rows[0].last_timestamp);
+            // Add a 5-minute buffer to account for potential delays
+            const bufferTime = new Date(lastSync.getTime() - 5 * 60 * 1000);
+            console.log(`📅 Last sync: ${lastSync.toISOString()}, using buffer: ${bufferTime.toISOString()}`);
+            return bufferTime;
+        } else {
+            console.log('📅 No previous sync found, fetching all packages');
+            return null;
+        }
+    } catch (error) {
+        console.error('❌ Error getting last sync timestamp:', error.message);
+        return null;
+    }
+}
+
+/**
+ * Fetch active packages from METRC API with pagination and incremental sync support
+ */
+async function fetchActivePackages() {
     try {
         if (!isTokenValid()) {
             const authSuccess = await authenticateWithMetrc();
@@ -91,21 +120,66 @@ async function fetchAllActivePackages() {
 
         console.log('📡 Fetching all active packages from METRC API...');
         
-        const response = await metrcAuth.makeAuthenticatedRequest({
-            method: 'GET',
-            url: `${METRC_CONFIG.baseURL}/packages/active`,
-            params: {
-                licenseNumber: METRC_CONFIG.licenseNumber
-            }
-        });
+        let allPackages = [];
+        let page = 1;
+        let hasMorePages = true;
+        const pageSize = 500; // Maximum allowed by API (500 packages per page)
+        
+        while (hasMorePages) {
+            console.log(`📄 Fetching page ${page}...`);
+            
+            let retries = 3;
+            let success = false;
+            
+            while (retries > 0 && !success) {
+                try {
+                    const response = await metrcAuth.makeAuthenticatedRequest({
+                        method: 'GET',
+                        url: `${METRC_CONFIG.baseURL}/packages/active`,
+                        params: {
+                            licenseNumber: METRC_CONFIG.licenseNumber,
+                            page: page,
+                            pageSize: pageSize
+                        }
+                    });
 
-        if (response.data && response.data.data) {
-            console.log(`✅ Retrieved ${response.data.data.length} active packages`);
-            return response.data.data;
-        } else {
-            console.log('⚠️ No active packages data received');
-            return [];
+                    if (response.data && response.data.data) {
+                        const packages = response.data.data;
+                        allPackages = allPackages.concat(packages);
+                        
+                        console.log(`✅ Retrieved ${packages.length} packages from page ${page} (total: ${allPackages.length})`);
+                        
+                        // Check if there are more pages
+                        const totalPages = response.data.totalPages || Math.ceil(response.data.total / pageSize);
+                        hasMorePages = page < totalPages;
+                        page++;
+                        success = true;
+                        
+                        // Small delay to avoid rate limiting
+                        if (hasMorePages) {
+                            await new Promise(resolve => setTimeout(resolve, 200));
+                        }
+                    } else {
+                        console.log('⚠️ No active packages data received for page', page);
+                        hasMorePages = false;
+                        success = true;
+                    }
+                } catch (error) {
+                    retries--;
+                    if (retries > 0) {
+                        console.log(`⚠️ API error on page ${page}, retrying in 2 seconds... (${retries} retries left)`);
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    } else {
+                        console.error(`❌ Failed to fetch page ${page} after 3 retries:`, error.message);
+                        throw error;
+                    }
+                }
+            }
         }
+
+        console.log(`✅ Retrieved ${allPackages.length} total active packages across ${page - 1} pages`);
+        return allPackages;
+        
     } catch (error) {
         console.error('❌ Error fetching active packages:', error.message);
         if (error.response) {
@@ -150,7 +224,7 @@ async function getExistingPackages(client) {
  * Process records in chunks to prevent database locks
  */
 async function processRecordsInChunks(client, records, operation = 'INSERT') {
-    const CHUNK_SIZE = 50;
+    const CHUNK_SIZE = 500;
     const DELAY_BETWEEN_CHUNKS = 100; // milliseconds
     
     for (let i = 0; i < records.length; i += CHUNK_SIZE) {
@@ -417,8 +491,8 @@ async function syncActivePackagesEnhanced() {
         // Start transaction
         await client.query('BEGIN');
         
-        // Fetch all packages from API
-        const apiPackages = await fetchAllActivePackages();
+        // Fetch all packages from API (full sync - API doesn't support incremental)
+        const apiPackages = await fetchActivePackages();
         
         if (apiPackages.length === 0) {
             console.log('ℹ️ No active packages to sync');
@@ -426,13 +500,16 @@ async function syncActivePackagesEnhanced() {
             return;
         }
         
-        // Get existing packages from local database for THIS LICENSE ONLY
-        const existingPackages = await getExistingPackages(client);
-        
-        // Categorize packages
+        // Categorize packages based on sync type
         const packagesToInsert = [];
         const packagesToUpdate = [];
         const packagesToDelete = [];
+        
+        // FULL SYNC: Compare with all existing packages
+        console.log('🔄 Processing full sync - comparing with all existing packages');
+        
+        // Get existing packages from local database for THIS LICENSE ONLY
+        const existingPackages = await getExistingPackages(client);
         
         // Process API packages
         for (const pkg of apiPackages) {
@@ -453,7 +530,6 @@ async function syncActivePackagesEnhanced() {
         }
         
         // Find packages to delete (exist locally but not in API)
-        // CRITICAL: Only delete packages that belong to the same license being synced
         for (const [metrcid, existing] of existingPackages) {
             if (!apiPackages.find(pkg => pkg.id === metrcid)) {
                 packagesToDelete.push(metrcid);
@@ -550,6 +626,6 @@ main();
 
 module.exports = {
     syncActivePackagesEnhanced,
-    fetchAllActivePackages,
+    fetchActivePackages,
     authenticateWithMetrc
 };
