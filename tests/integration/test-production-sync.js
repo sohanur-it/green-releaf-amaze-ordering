@@ -8,10 +8,11 @@
  */
 
 const { Pool } = require('pg');
-const metrcAuth = require('../Server/Services/metrcAuth');
+const path = require('path');
+const metrcAuth = require('../../Server/Services/metrcAuth');
 
 // Load production environment variables first
-require('dotenv').config({ path: './config/production.env' });
+require('dotenv').config({ path: path.join(__dirname, '../../config/production.env') });
 
 // Production database configuration (after loading env vars)
 const PROD_DB_CONFIG = {
@@ -129,8 +130,11 @@ async function checkRequiredTables() {
 async function testMetrcAuthentication() {
     try {
         logFun('Testing METRC authentication...', 'AUTH');
+        logFun(`T3_USERNAME: ${process.env.T3_USERNAME}`, 'DEBUG');
+        logFun(`T3_PASSWORD: ${process.env.T3_PASSWORD ? '***SET***' : 'NOT SET'}`, 'DEBUG');
+        logFun(`T3_HOSTNAME: ${process.env.T3_HOSTNAME}`, 'DEBUG');
         
-        const token = await metrcAuth.getValidToken();
+        const token = await metrcAuth.ensureValidToken();
         
         if (token) {
             logFun('✅ METRC authentication successful', 'AUTH');
@@ -153,7 +157,7 @@ async function testSimpleSync() {
         logFun('Testing simple sync operation (strains)...', 'SYNC');
         
         // Import the strains sync script
-        const { syncStrains } = require('../Sync/sync-strains');
+        const { syncStrains } = require('../../scripts/sync/sync-strains');
         
         // Run the sync
         const result = await syncStrains();
@@ -193,7 +197,7 @@ async function checkSchemaConsistency() {
         logFun(`✅ Active packages table has ${result.rows.length} columns`, 'DB');
         
         // Check for key columns
-        const keyColumns = ['metrcid', 'label', 'lastmodified', 'synclicense'];
+        const keyColumns = ['metrcid', 'label', 'lastmodified', 'sync_license'];
         const existingColumns = result.rows.map(row => row.column_name);
         
         for (const column of keyColumns) {

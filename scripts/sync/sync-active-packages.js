@@ -13,6 +13,7 @@
 const axios = require('axios');
 const { Pool } = require('pg');
 const path = require('path');
+const metrcAuth = require('../../Server/Services/metrcAuth');
 
 // Load environment variables
 if (process.env.NODE_ENV === 'production') {
@@ -28,9 +29,10 @@ const DB_CONFIG = {
     database: process.env.DB_DATABASE || 'green_releaf_dev',
     user: process.env.DB_USER || 'postgres',
     password: process.env.DB_PASSWORD || 'postgres',
-    max: 20,
+    max: 5,
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 2000,
+    connectionTimeoutMillis: 10000,
+    ssl: { rejectUnauthorized: false }
 };
 
 // METRC API configuration
@@ -55,27 +57,15 @@ let tokenExpiry = null;
 async function authenticateWithMetrc() {
     try {
         console.log('🔐 Authenticating with METRC T3 API...');
-        
-        const response = await axios.post(`${METRC_CONFIG.baseURL}/auth/credentials`, {
-            username: METRC_CONFIG.username,
-            password: METRC_CONFIG.password,
-            hostname: METRC_CONFIG.hostname
-        });
-
-        if (response.data && response.data.accessToken) {
-            authToken = response.data.accessToken;
-            tokenExpiry = new Date(Date.now() + (24 * 60 * 60 * 1000)); // 24 hours from now
+        const success = await metrcAuth.ensureValidToken();
+        if (success) {
             console.log('✅ Authentication successful');
             return true;
-            } else {
-            throw new Error('Invalid authentication response');
+        } else {
+            throw new Error('Failed to obtain valid METRC authentication token');
         }
-        } catch (error) {
+    } catch (error) {
         console.error('❌ Authentication failed:', error.message);
-        if (error.response) {
-            console.error('Response status:', error.response.status);
-            console.error('Response data:', error.response.data);
-        }
         return false;
     }
 }
@@ -101,11 +91,9 @@ async function fetchAllActivePackages() {
 
         console.log('📡 Fetching all active packages from METRC API...');
         
-        const response = await axios.get(`${METRC_CONFIG.baseURL}/packages/active`, {
-            headers: {
-                'Authorization': `Bearer ${authToken}`,
-                'Content-Type': 'application/json'
-            },
+        const response = await metrcAuth.makeAuthenticatedRequest({
+            method: 'GET',
+            url: `${METRC_CONFIG.baseURL}/packages/active`,
             params: {
                 licenseNumber: METRC_CONFIG.licenseNumber
             }
@@ -251,9 +239,22 @@ async function performBulkUpdate(client, packages) {
             WHERE metrcid = $7 AND sync_license = $8
         `;
         
-        // Skip updates for now due to production schema constraints
-        console.log(`⚠️ Skipping update for package ${pkg.id} due to production schema constraints`);
-        continue;
+        // Perform the actual update
+        try {
+            await client.query(updateQuery, [
+                pkg.label,
+                pkg.itemName,
+                pkg.itemProductCategoryName,
+                pkg.quantity,
+                pkg.itemUnitOfMeasureName,
+                pkg.lastModified,
+                pkg.id,
+                pkg.licenseNumber
+            ]);
+            console.log(`✅ Updated package ${pkg.id}`);
+        } catch (error) {
+            console.error(`❌ Failed to update package ${pkg.id}:`, error.message);
+        }
     }
 }
 
@@ -425,7 +426,7 @@ async function syncActivePackagesEnhanced() {
             return;
         }
         
-        // Get existing packages from local database
+        // Get existing packages from local database for THIS LICENSE ONLY
         const existingPackages = await getExistingPackages(client);
         
         // Categorize packages
@@ -452,6 +453,7 @@ async function syncActivePackagesEnhanced() {
         }
         
         // Find packages to delete (exist locally but not in API)
+        // CRITICAL: Only delete packages that belong to the same license being synced
         for (const [metrcid, existing] of existingPackages) {
             if (!apiPackages.find(pkg => pkg.id === metrcid)) {
                 packagesToDelete.push(metrcid);
@@ -459,6 +461,14 @@ async function syncActivePackagesEnhanced() {
         }
         
         console.log(`📊 Sync plan: ${packagesToInsert.length} insert, ${packagesToUpdate.length} update, ${packagesToDelete.length} delete`);
+        
+        // SAFETY CHECK: Prevent mass deletions
+        if (packagesToDelete.length > 100) {
+            console.error(`🚨 SAFETY CHECK FAILED: Attempting to delete ${packagesToDelete.length} packages. This exceeds the safety limit of 100.`);
+            console.error(`🚨 This might indicate a sync logic error. Aborting sync to prevent data loss.`);
+            await client.query('ROLLBACK');
+            throw new Error(`Safety check failed: Too many deletions (${packagesToDelete.length} > 100). Sync aborted.`);
+        }
         
         // Execute operations
         if (packagesToInsert.length > 0) {
