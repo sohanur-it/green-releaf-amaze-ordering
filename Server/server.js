@@ -30,6 +30,7 @@ const adminSyncRoutes = require('./Routes/admin-sync-routes');
 const userManagementRoutes = require('./Routes/user-management-routes');
 const auditLogRoutes = require('./Routes/audit-log-routes');
 const batchRoutes = require('./Routes/batch-routes');
+const module3Routes = require('./Routes/module3-routes');
 
 //import services
 const masterScheduler = require('./Services/masterScheduler');
@@ -93,6 +94,7 @@ app.use('/api/v1/manifests', manifestRoutes); // manifest creation API routes
 app.use('/api/v1/admin/users', userManagementRoutes); // user management API routes
 app.use('/api/v1/admin/audit-logs', auditLogRoutes); // audit log API routes
 app.use('/api/batches', batchRoutes); // batch status management API routes
+app.use('/api/v1', module3Routes); // Module 3: Product & Inventory Management API routes
 
 //root redirect
 app.get('/', (req, res) => {

@@ -1,0 +1,185 @@
+<!-- Views/admin/products/index.ejs -->
+
+<div class="page-header">
+    <h1>Master Products</h1>
+    <a href="/admin/products/new" class="btn btn-primary">
+        <i class="fas fa-plus"></i> Create Product
+    </a>
+</div>
+
+<div class="products-container">
+    <% if (products.length === 0) { %>
+        <div class="empty-state">
+            <i class="fas fa-box-open" style="font-size: 64px; color: #ccc;"></i>
+            <h3>No Products Yet</h3>
+            <p>Create your first master product to get started</p>
+            <a href="/admin/products/new" class="btn btn-primary">Create Product</a>
+        </div>
+    <% } else { %>
+        <div class="products-grid">
+            <% products.forEach(product => { %>
+                <div class="product-card">
+                    <div class="product-header">
+                        <h3><%= product.name %></h3>
+                        <% if (product.brand_name) { %>
+                            <span class="badge badge-secondary"><%= product.brand_name %></span>
+                        <% } %>
+                    </div>
+                    
+                    <div class="product-info">
+                        <% if (product.category_name) { %>
+                            <p><strong>Category:</strong> <%= product.category_name %></p>
+                        <% } %>
+                        
+                        <% if (product.default_price) { %>
+                            <p><strong>Price:</strong> $<%= parseFloat(product.default_price).toFixed(2) %></p>
+                        <% } %>
+                        
+                        <p><strong>Linked Items:</strong> <%= (product.metrc_linked_items || []).length %></p>
+                        <p><strong>Batches:</strong> <%= product.batch_count || 0 %></p>
+                        <p><strong>Available:</strong> <%= product.available_quantity || 0 %> units</p>
+                    </div>
+                    
+                    <div class="product-actions">
+                        <a href="/admin/products/<%= product.entry_id %>" class="btn btn-sm btn-secondary">
+                            View Details
+                        </a>
+                        <a href="/admin/products/<%= product.entry_id %>/link-items" class="btn btn-sm btn-primary">
+                            Link Items
+                        </a>
+                    </div>
+                </div>
+            <% }); %>
+        </div>
+    <% } %>
+</div>
+
+<style>
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.products-container {
+    background: white;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+}
+
+.empty-state i {
+    margin-bottom: 1rem;
+}
+
+.empty-state h3 {
+    color: #333;
+    margin-bottom: 0.5rem;
+}
+
+.empty-state p {
+    color: #666;
+    margin-bottom: 2rem;
+}
+
+.products-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+.product-card {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 1.5rem;
+    transition: box-shadow 0.3s;
+}
+
+.product-card:hover {
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.product-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #eee;
+}
+
+.product-header h3 {
+    margin: 0;
+    font-size: 1.2rem;
+    color: #333;
+}
+
+.product-info {
+    margin-bottom: 1rem;
+}
+
+.product-info p {
+    margin: 0.5rem 0;
+    color: #666;
+    font-size: 0.9rem;
+}
+
+.product-actions {
+    display: flex;
+    gap: 0.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid #eee;
+}
+
+.badge {
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.badge-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.btn {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    transition: background-color 0.3s;
+}
+
+.btn-primary {
+    background: #007bff;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #0056b3;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #545b62;
+}
+
+.btn-sm {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.875rem;
+}
+</style>
+

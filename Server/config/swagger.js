@@ -259,6 +259,176 @@ const swaggerOptions = {
               description: 'Additional error details'
             }
           }
+        },
+        // Order Management Schemas
+        Order: {
+          type: 'object',
+          properties: {
+            order_id: {
+              type: 'integer',
+              description: 'Unique order identifier',
+              example: 12345
+            },
+            customer_id: {
+              type: 'integer',
+              description: 'Customer ID',
+              example: 567
+            },
+            total_amount: {
+              type: 'number',
+              format: 'float',
+              description: 'Total order amount',
+              example: 150.00
+            },
+            status: {
+              type: 'string',
+              enum: ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'],
+              description: 'Order status',
+              example: 'confirmed'
+            },
+            notes: {
+              type: 'string',
+              description: 'Order notes',
+              example: 'Client requested more items'
+            },
+            shipping_address: {
+              type: 'object',
+              description: 'Shipping address details'
+            },
+            billing_address: {
+              type: 'object',
+              description: 'Billing address details'
+            },
+            payment_method: {
+              type: 'string',
+              description: 'Payment method',
+              example: 'credit_card'
+            },
+            created_at: {
+              type: 'string',
+              format: 'date-time',
+              description: 'Order creation timestamp'
+            },
+            updated_at: {
+              type: 'string',
+              format: 'date-time',
+              description: 'Last update timestamp'
+            }
+          }
+        },
+        OrderCreateRequest: {
+          type: 'object',
+          required: ['customer_id', 'items'],
+          properties: {
+            customer_id: {
+              type: 'integer',
+              description: 'Customer ID',
+              example: 567
+            },
+            items: {
+              type: 'array',
+              description: 'Order items',
+              items: {
+                type: 'object',
+                properties: {
+                  product_id: { type: 'integer', example: 1 },
+                  quantity: { type: 'integer', example: 2 },
+                  price: { type: 'number', example: 25.00 }
+                }
+              }
+            },
+            notes: {
+              type: 'string',
+              example: 'Delivery instructions here'
+            },
+            shipping_address: {
+              type: 'object',
+              properties: {
+                street: { type: 'string', example: '123 Main St' },
+                city: { type: 'string', example: 'Springfield' },
+                state: { type: 'string', example: 'MO' },
+                zip: { type: 'string', example: '65801' }
+              }
+            },
+            billing_address: {
+              type: 'object',
+              description: 'Billing address (same format as shipping_address)'
+            },
+            payment_method: {
+              type: 'string',
+              enum: ['cash', 'credit_card', 'debit_card', 'check'],
+              example: 'credit_card'
+            }
+          }
+        },
+        OrderUpdateRequest: {
+          type: 'object',
+          properties: {
+            status: {
+              type: 'string',
+              enum: ['pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled'],
+              example: 'confirmed'
+            },
+            total_amount: {
+              type: 'number',
+              format: 'float',
+              example: 150.00
+            },
+            notes: {
+              type: 'string',
+              example: 'Client requested more items'
+            },
+            shipping_address: {
+              type: 'object',
+              description: 'Updated shipping address'
+            },
+            billing_address: {
+              type: 'object',
+              description: 'Updated billing address'
+            },
+            payment_method: {
+              type: 'string',
+              example: 'cash'
+            }
+          }
+        },
+        OrderListResponse: {
+          type: 'object',
+          properties: {
+            success: {
+              type: 'boolean',
+              example: true
+            },
+            data: {
+              type: 'array',
+              items: {
+                $ref: '#/components/schemas/Order'
+              }
+            },
+            pagination: {
+              type: 'object',
+              properties: {
+                page: { type: 'integer', example: 1 },
+                limit: { type: 'integer', example: 50 }
+              }
+            }
+          }
+        },
+        OrderResponse: {
+          type: 'object',
+          properties: {
+            success: {
+              type: 'boolean',
+              example: true
+            },
+            data: {
+              $ref: '#/components/schemas/Order'
+            },
+            message: {
+              type: 'string',
+              example: 'Order updated successfully'
+            }
+          }
         }
       }
     },
@@ -266,6 +436,10 @@ const swaggerOptions = {
       {
         name: 'Authentication',
         description: 'JWT token generation and validation endpoints'
+      },
+      {
+        name: 'Orders',
+        description: 'Order management with field-level audit tracking'
       },
       {
         name: 'Sync Services',

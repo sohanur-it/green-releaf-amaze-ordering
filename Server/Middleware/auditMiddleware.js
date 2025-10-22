@@ -163,10 +163,104 @@ const manifestAuditMiddleware = createAuditMiddleware({
     }
 });
 
+/**
+ * Audit middleware for order operations with field-level change tracking
+ * 
+ * This middleware:
+ * 1. Intercepts order update requests (PUT/PATCH)
+ * 2. Fetches the current state of the order from database BEFORE changes
+ * 3. Allows the controller to process the update
+ * 4. Captures the new state AFTER changes
+ * 5. Logs detailed field-by-field changes to audit trail
+ */
+const { Pool } = require('pg');
+const pool = new Pool({
+    user: process.env.DB_USER || 'postgres',
+    host: process.env.DB_HOST || 'localhost',
+    database: process.env.DB_DATABASE || 'green_releaf_dev',
+    password: process.env.DB_PASSWORD || 'postgres',
+    port: parseInt(process.env.DB_PORT, 10) || 5432,
+});
+
+const orderAuditMiddleware = createAuditMiddleware({
+    logMethods: ['PUT', 'PATCH'],
+    excludePaths: [],
+    extractAction: (req) => 'order_update',
+    extractResourceData: async (req) => {
+        // Extract order ID from URL parameters
+        const orderId = req.params.orderId || req.params.id;
+        
+        if (!orderId) {
+            return null;
+        }
+        
+        try {
+            // Fetch current order state from database BEFORE any changes
+            const result = await pool.query(`
+                SELECT * FROM "ORDERS-orders" WHERE order_id = $1
+            `, [orderId]);
+            
+            if (result.rows.length === 0) {
+                return null;
+            }
+            
+            // Return the complete current state
+            return result.rows[0];
+            
+        } catch (error) {
+            console.error('❌ Failed to fetch order before state:', error.message);
+            return null;
+        }
+    }
+});
+
+/**
+ * Audit middleware for batch status changes
+ * Tracks when batches are promoted from "On Deck" to "Sellable" or "On Hold"
+ */
+const batchAuditMiddleware = createAuditMiddleware({
+    logMethods: ['PUT', 'PATCH'],
+    excludePaths: [],
+    extractAction: (req) => {
+        if (req.path.includes('/promote')) return 'batch_promote';
+        if (req.path.includes('/hold')) return 'batch_hold';
+        return 'batch_update';
+    },
+    extractResourceData: async (req) => {
+        const batchId = req.params.batchId || req.params.id;
+        
+        if (!batchId) {
+            return null;
+        }
+        
+        try {
+            const result = await pool.query(`
+                SELECT 
+                    id, batch_name, metrc_item_name, status,
+                    quantity, allocated_quantity, fk_master_product_id,
+                    override_price, thc_percentage, production_date
+                FROM "ORDERS-batches" WHERE id = $1
+            `, [batchId]);
+            
+            if (result.rows.length === 0) {
+                return null;
+            }
+            
+            return result.rows[0];
+            
+        } catch (error) {
+            console.error('❌ Failed to fetch batch before state:', error.message);
+            return null;
+        }
+    }
+});
+
 module.exports = {
     createAuditMiddleware,
     auditMiddleware,
     syncAuditMiddleware,
     userAuditMiddleware,
-    manifestAuditMiddleware
+    manifestAuditMiddleware,
+    orderAuditMiddleware,
+    batchAuditMiddleware
 };
