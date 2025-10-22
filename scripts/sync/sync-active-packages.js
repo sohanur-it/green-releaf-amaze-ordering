@@ -13,14 +13,16 @@
 const axios = require('axios');
 const { Pool } = require('pg');
 const path = require('path');
-const metrcAuth = require('../../Server/Services/metrcAuth');
 
-// Load environment variables
+// Load environment variables FIRST
 if (process.env.NODE_ENV === 'production') {
     require('dotenv').config({ path: path.join(__dirname, '../../config/production.env') });
 } else {
     require('dotenv').config({ path: path.join(__dirname, '../../config/local.env') });
 }
+
+// Import centralized METRC authentication service AFTER environment variables are loaded
+const metrcAuth = require('../../Server/Services/metrcAuth');
 
 // Database configuration
 const DB_CONFIG = {
@@ -47,35 +49,7 @@ const METRC_CONFIG = {
 // Create database pool
 const pool = new Pool(DB_CONFIG);
 
-// Authentication token cache
-let authToken = null;
-let tokenExpiry = null;
-
-/**
- * Authenticate with METRC T3 API
- */
-async function authenticateWithMetrc() {
-    try {
-        console.log('🔐 Authenticating with METRC T3 API...');
-        const success = await metrcAuth.ensureValidToken();
-        if (success) {
-            console.log('✅ Authentication successful');
-            return true;
-        } else {
-            throw new Error('Failed to obtain valid METRC authentication token');
-        }
-    } catch (error) {
-        console.error('❌ Authentication failed:', error.message);
-        return false;
-    }
-}
-
-/**
- * Check if authentication token is valid
- */
-function isTokenValid() {
-    return authToken && tokenExpiry && new Date() < tokenExpiry;
-}
+// Using centralized metrcAuth service - no local token cache needed
 
 /**
  * Get the last sync timestamp for incremental sync
@@ -111,11 +85,10 @@ async function getLastSyncTimestamp(client) {
  */
 async function fetchActivePackages() {
     try {
-        if (!isTokenValid()) {
-            const authSuccess = await authenticateWithMetrc();
+        // Ensure we have a valid token before starting
+        const authSuccess = await metrcAuth.ensureValidToken();
             if (!authSuccess) {
                 throw new Error('Failed to authenticate');
-            }
         }
 
         console.log('📡 Fetching all active packages from METRC API...');
@@ -290,7 +263,7 @@ function prepareValue(pkg, fieldName, fieldType = 'string') {
         item_name: 'item.name',
         item_productcategoryname: 'item.productCategoryName',
         item_unitofmeasurename: 'item.unitOfMeasureName',
-        unitofmeasureabbreviation: 'unitOfMeasureAbbreviation',
+        unit_of_measure_abbreviation: 'unitOfMeasureAbbreviation',
         
         // Boolean fields
         productrequiresreminder: 'productRequiresReminder',
@@ -375,7 +348,7 @@ async function insertPackageChunk(client, packages) {
             METRC_CONFIG.licenseNumber, // sync_license
             prepareValue(pkg, 'item_name'), // item_name
             prepareValue(pkg, 'item_productcategoryname'), // item_productcategoryname
-            prepareValue(pkg, 'unitofmeasureabbreviation'), // unitofmeasureabbreviation
+            prepareValue(pkg, 'unit_of_measure_abbreviation'), // unit_of_measure_abbreviation
             prepareValue(pkg, 'isproductionbatch', 'boolean'), // isproductionbatch
             prepareValue(pkg, 'productionbatchnumber'), // productionbatchnumber
             prepareValue(pkg, 'receiveddatetime', 'date'), // receiveddatetime
@@ -447,7 +420,7 @@ async function updatePackageChunk(client, packages) {
                 receivedfromfacilitylicensenumber = $122, receivedfromfacilityname = $123, receivedfrommanifestnumber = $124,
                 sourceharvestnames = $125, sourcepackagelabels = $126, sourceprocessingjobnames = $127, sourceprocessingjobnumbers = $128,
                 sourceproductionbatchnumbers = $129, tradesamplefacilitylicensenumber = $130, tradesamplefacilityname = $131,
-                transfermanifestnumber = $132, trip = $133, unitofmeasureabbreviation = $134, unitofmeasurequantitytype = $135
+                transfermanifestnumber = $132, trip = $133, unit_of_measure_abbreviation = $134, unitofmeasurequantitytype = $135
             WHERE metrcid = $136 AND sync_license = $137
         `;
         
@@ -586,7 +559,7 @@ async function updatePackageChunk(client, packages) {
                 prepareValue(pkg, 'tradesamplefacilityname'), // 131
                 prepareValue(pkg, 'transfermanifestnumber'), // 132
                 prepareValue(pkg, 'trip'), // 133
-                prepareValue(pkg, 'unitofmeasureabbreviation'), // 134
+                prepareValue(pkg, 'unit_of_measure_abbreviation'), // 134
                 prepareValue(pkg, 'unitofmeasurequantitytype'), // 135
                 pkg.id, // 136 - metrcid
                 METRC_CONFIG.licenseNumber // 137 - sync_license
@@ -891,6 +864,5 @@ main();
 
 module.exports = {
     syncActivePackagesEnhanced,
-    fetchActivePackages,
-    authenticateWithMetrc
+    fetchActivePackages
 };
