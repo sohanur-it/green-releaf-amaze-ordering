@@ -1,72 +1,58 @@
-<!-- Views/admin/products/index.ejs -->
-
-<div class="page-header">
-    <h1>Master Products</h1>
-    <a href="/admin/products/new" class="btn btn-primary">
-        <i class="fas fa-plus"></i> Create Product
-    </a>
-</div>
-
-<div class="products-container">
-    <% if (products.length === 0) { %>
-        <div class="empty-state">
-            <i class="fas fa-box-open" style="font-size: 64px; color: #ccc;"></i>
-            <h3>No Products Yet</h3>
-            <p>Create your first master product to get started</p>
-            <a href="/admin/products/new" class="btn btn-primary">Create Product</a>
-        </div>
-    <% } else { %>
-        <div class="products-grid">
-            <% products.forEach(product => { %>
-                <div class="product-card">
-                    <div class="product-header">
-                        <h3><%= product.name %></h3>
-                        <% if (product.brand_name) { %>
-                            <span class="badge badge-secondary"><%= product.brand_name %></span>
-                        <% } %>
-                    </div>
-                    
-                    <div class="product-info">
-                        <% if (product.category_name) { %>
-                            <p><strong>Category:</strong> <%= product.category_name %></p>
-                        <% } %>
-                        
-                        <% if (product.default_price) { %>
-                            <p><strong>Price:</strong> $<%= parseFloat(product.default_price).toFixed(2) %></p>
-                        <% } %>
-                        
-                        <p><strong>Linked Items:</strong> <%= (product.metrc_linked_items || []).length %></p>
-                        <p><strong>Batches:</strong> <%= product.batch_count || 0 %></p>
-                        <p><strong>Available:</strong> <%= product.available_quantity || 0 %> units</p>
-                    </div>
-                    
-                    <div class="product-actions">
-                        <a href="/admin/products/<%= product.entry_id %>" class="btn btn-sm btn-secondary">
-                            View Details
-                        </a>
-                        <a href="/admin/products/<%= product.entry_id %>/link-items" class="btn btn-sm btn-primary">
-                            Link Items
-                        </a>
-                    </div>
-                </div>
-            <% }); %>
-        </div>
-    <% } %>
-</div>
-
+<!-- Modern Master Products List -->
 <style>
-.page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2rem;
+.stats-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 15px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
 }
 
-.products-container {
+.stats-card h3 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.stats-card p {
+    margin: 0;
+    opacity: 0.9;
+}
+
+.dashboard-card {
     background: white;
-    padding: 2rem;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    border-radius: 15px;
+    padding: 1.5rem;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+}
+
+.modern-table {
+    margin: 0;
+}
+
+.modern-table thead {
+    background: #f8f9fa;
+}
+
+.modern-table th {
+    font-weight: 600;
+    color: #4b5563;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    padding: 1rem;
+    border: none;
+}
+
+.modern-table td {
+    padding: 1rem;
+    vertical-align: middle;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.modern-table tbody tr:hover {
+    background: #f9fafb;
 }
 
 .empty-state {
@@ -75,111 +61,159 @@
 }
 
 .empty-state i {
+    color: #d1d5db;
     margin-bottom: 1rem;
 }
 
 .empty-state h3 {
-    color: #333;
+    color: #6b7280;
     margin-bottom: 0.5rem;
 }
 
 .empty-state p {
-    color: #666;
+    color: #9ca3af;
     margin-bottom: 2rem;
-}
-
-.products-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 1.5rem;
-}
-
-.product-card {
-    border: 1px solid #ddd;
-    border-radius: 8px;
-    padding: 1.5rem;
-    transition: box-shadow 0.3s;
-}
-
-.product-card:hover {
-    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-}
-
-.product-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: start;
-    margin-bottom: 1rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid #eee;
-}
-
-.product-header h3 {
-    margin: 0;
-    font-size: 1.2rem;
-    color: #333;
-}
-
-.product-info {
-    margin-bottom: 1rem;
-}
-
-.product-info p {
-    margin: 0.5rem 0;
-    color: #666;
-    font-size: 0.9rem;
-}
-
-.product-actions {
-    display: flex;
-    gap: 0.5rem;
-    padding-top: 1rem;
-    border-top: 1px solid #eee;
-}
-
-.badge {
-    padding: 0.25rem 0.75rem;
-    border-radius: 12px;
-    font-size: 0.75rem;
-    font-weight: 600;
-}
-
-.badge-secondary {
-    background: #6c757d;
-    color: white;
-}
-
-.btn {
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    text-decoration: none;
-    display: inline-block;
-    transition: background-color 0.3s;
-}
-
-.btn-primary {
-    background: #007bff;
-    color: white;
-}
-
-.btn-primary:hover {
-    background: #0056b3;
-}
-
-.btn-secondary {
-    background: #6c757d;
-    color: white;
-}
-
-.btn-secondary:hover {
-    background: #545b62;
-}
-
-.btn-sm {
-    padding: 0.375rem 0.75rem;
-    font-size: 0.875rem;
 }
 </style>
 
+<div class="container-fluid p-4">
+    <!-- Action Buttons -->
+    <div class="d-flex justify-content-end mb-4">
+        <a href="/admin/products/new" class="btn btn-primary">
+            <i class="fas fa-plus me-1"></i> Create Product
+        </a>
+    </div>
+
+    <% 
+    // Calculate stats
+    const totalProducts = products.length;
+    const totalBatches = products.reduce((sum, p) => sum + (parseInt(p.batch_count) || 0), 0);
+    const totalAvailable = products.reduce((sum, p) => sum + (parseFloat(p.available_quantity) || 0), 0);
+    const linkedItems = products.reduce((sum, p) => sum + ((p.metrc_linked_items || []).length), 0);
+    %>
+
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                <p>Total Products</p>
+                <h3><%= totalProducts %></h3>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                <p>Total Batches</p>
+                <h3><%= totalBatches %></h3>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                <p>Linked METRC Items</p>
+                <h3><%= linkedItems %></h3>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
+                <p>Available Units</p>
+                <h3><%= Math.round(totalAvailable) %></h3>
+            </div>
+        </div>
+    </div>
+
+    <!-- Products Table -->
+    <div class="dashboard-card">
+        <% if (products.length === 0) { %>
+            <div class="empty-state">
+                <i class="fas fa-box-open fa-4x"></i>
+                <h3>No Products Yet</h3>
+                <p>Create your first master product to get started</p>
+                <a href="/admin/products/new" class="btn btn-primary">
+                    <i class="fas fa-plus me-1"></i> Create Product
+                </a>
+            </div>
+        <% } else { %>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">All Products</h5>
+                <input type="text" id="searchProducts" class="form-control" style="max-width: 300px;" placeholder="Search products...">
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover modern-table">
+                    <thead>
+                        <tr>
+                            <th>Product Name</th>
+                            <th>Category</th>
+                            <th>Price</th>
+                            <th>Linked Items</th>
+                            <th>Batches</th>
+                            <th>Available</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="productsTableBody">
+                        <% products.forEach(product => { %>
+                            <tr>
+                                <td>
+                                    <div>
+                                        <div class="fw-bold"><%= product.name %></div>
+                                        <% if (product.brand_name) { %>
+                                            <small class="text-muted"><%= product.brand_name %></small>
+                                        <% } %>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="badge bg-secondary"><%= product.category_name || 'N/A' %></span>
+                                </td>
+                                <td>
+                                    <% if (product.default_price) { %>
+                                        <strong>$<%= parseFloat(product.default_price).toFixed(2) %></strong>
+                                    <% } else { %>
+                                        <span class="text-muted">-</span>
+                                    <% } %>
+                                </td>
+                                <td>
+                                    <span class="badge bg-info text-dark"><%= (product.metrc_linked_items || []).length %></span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-success"><%= product.batch_count || 0 %></span>
+                                </td>
+                                <td>
+                                    <%= Math.round(product.available_quantity || 0) %> units
+                                </td>
+                                <td>
+                                    <a href="/admin/products/<%= product.entry_id %>" class="btn btn-sm btn-outline-primary me-1">
+                                        <i class="fas fa-eye"></i> View
+                                    </a>
+                                    <a href="/admin/products/<%= product.entry_id %>/link-items" class="btn btn-sm btn-outline-success">
+                                        <i class="fas fa-link"></i> Link
+                                    </a>
+                                </td>
+                            </tr>
+                        <% }); %>
+                    </tbody>
+                </table>
+            </div>
+        <% } %>
+    </div>
+</div>
+
+<script>
+// Search functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('searchProducts');
+    if (searchInput) {
+        searchInput.addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            const rows = document.querySelectorAll('#productsTableBody tr');
+            
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                if (text.includes(searchTerm)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        });
+    }
+});
+</script>

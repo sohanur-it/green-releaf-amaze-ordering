@@ -114,24 +114,30 @@ app.listen(PORT, async () => {
     logger.info(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
     logger.info(`💚 Green Releaf Amaze Ordering System`);
     
-    // Start the master scheduler in production
-    if (process.env.NODE_ENV === 'production') {
+    // Start the master scheduler (configurable via environment variable)
+    const enableScheduler = process.env.ENABLE_SCHEDULER === 'true' || process.env.NODE_ENV === 'production';
+    if (enableScheduler) {
         try {
             await masterScheduler.start();
             logger.info(`⏰ Master scheduler started successfully`);
         } catch (error) {
             logger.error(`❌ Failed to start master scheduler: ${error.message}`);
         }
+    } else {
+        logger.info(`⏸️  Master scheduler disabled (set ENABLE_SCHEDULER=true to enable)`);
     }
     
-    // Start inventory monitoring in production
-    if (process.env.NODE_ENV === 'production') {
+    // Start inventory monitoring (configurable via environment variable)
+    const enableInventoryMonitoring = process.env.ENABLE_INVENTORY_MONITORING === 'true' || process.env.NODE_ENV === 'production';
+    if (enableInventoryMonitoring) {
         try {
             inventoryMonitorService.start();
             logger.info(`📦 Inventory monitoring started successfully`);
         } catch (error) {
             logger.error(`❌ Failed to start inventory monitoring: ${error.message}`);
         }
+    } else {
+        logger.info(`⏸️  Inventory monitoring disabled (set ENABLE_INVENTORY_MONITORING=true to enable)`);
     }
 });
 

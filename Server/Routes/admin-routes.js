@@ -65,16 +65,16 @@ router.get('/products/:id', productController.getProductById);
 
 // User management page
 router.get('/users', requirePermission('admin', 'user'), (req, res) => {
-    res.render('admin/user-management', { 
+    res.render('admin/user-management-enhanced', { 
         title: 'User Management',
         layout: 'layouts/main',
         user: req.session.user 
     });
 });
 
-// Audit logs page
+// Audit logs page (enhanced with Chart.js)
 router.get('/audit-logs', requirePermission('admin', 'audit'), (req, res) => {
-    res.render('admin/audit-logs', { 
+    res.render('admin/audit-logs-enhanced', { 
         title: 'Audit Logs',
         layout: 'layouts/main',
         user: req.session.user 

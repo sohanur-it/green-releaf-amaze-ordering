@@ -15,6 +15,10 @@ class AuditLogger {
             database: process.env.DB_DATABASE || 'green_releaf_dev',
             password: process.env.DB_PASSWORD || 'dev_password_123',
             port: parseInt(process.env.DB_PORT, 10) || 5432,
+            connectionTimeoutMillis: 5000,  // 5 second connection timeout
+            query_timeout: 3000,            // 3 second query timeout
+            statement_timeout: 3000,        // 3 second statement timeout
+            idle_in_transaction_session_timeout: 10000, // 10 second idle timeout
         });
     }
 
@@ -83,16 +87,18 @@ class AuditLogger {
 
     /**
      * Log a system action (automated processes)
+     * Non-blocking version - fire and forget to prevent blocking cron jobs
      * 
      * @param {string} action - Action performed
      * @param {string} resourceType - Type of resource
      * @param {string} resourceId - ID of the affected resource
      * @param {Object} details - Contextual data
      * @param {string} status - 'success' or 'failure'
+     * @param {boolean} blocking - If true, waits for log to complete (default: false for system actions)
      * @returns {Promise<Object>} - Log entry result
      */
-    async logSystemAction(action, resourceType = null, resourceId = null, details = null, status = 'success') {
-        return await this.logAction({
+    async logSystemAction(action, resourceType = null, resourceId = null, details = null, status = 'success', blocking = false) {
+        const logPromise = this.logAction({
             userId: null, // System action
             action,
             resourceType,
@@ -101,6 +107,18 @@ class AuditLogger {
             status,
             sourceIp: null
         });
+
+        // For non-blocking (default), fire-and-forget with error catching
+        if (!blocking) {
+            logPromise.catch(error => {
+                console.error(`⚠️ Non-blocking audit log failed (${action}):`, error.message);
+            });
+            // Return immediately without waiting
+            return { success: true, nonBlocking: true };
+        }
+
+        // For blocking, wait for completion
+        return await logPromise;
     }
 
     /**

@@ -105,16 +105,28 @@ class UserManagementController {
                 }
             }
             
-            // Log the approval
+            // Get role names if roles were assigned
+            let roleNames = [];
+            if (roles && roles.length > 0) {
+                const allRoles = await UserModel.getAllRoles();
+                roleNames = roles.map(roleId => {
+                    const role = allRoles.find(r => r.id === parseInt(roleId));
+                    return role ? role.name : 'Unknown';
+                });
+            }
+            
+            // Log the approval with clear message
+            const roleText = roleNames.length > 0 ? ` with role(s): ${roleNames.join(', ')}` : '';
             await auditLogger.logUserAction(
                 adminUserId,
                 'user_approved',
                 'User',
                 userId,
                 {
+                    message: `User ${user.firstname} ${user.lastname} (${user.username}) approved successfully${roleText}`,
                     username: user.username,
                     email: user.email,
-                    assignedRoles: roles || []
+                    assignedRoles: roleNames.join(', ') || 'None'
                 },
                 'success'
             );
@@ -168,13 +180,14 @@ class UserManagementController {
             // Revoke the user
             await UserModel.revoke(userId);
             
-            // Log the revocation
+            // Log the revocation with clear message
             await auditLogger.logUserAction(
                 adminUserId,
                 'user_revoked',
                 'User',
                 userId,
                 {
+                    message: `User ${user.firstname} ${user.lastname} (${user.username})'s access has been revoked`,
                     username: user.username,
                     email: user.email,
                     previousStatus: user.status
@@ -240,17 +253,22 @@ class UserManagementController {
             const roleToAssign = roles[0]; // Take only the first role
             await UserModel.assignRole(userId, roleToAssign, adminUserId);
             
-            // Log the role assignment
+            // Get the assigned role details
+            const allRoles = await UserModel.getAllRoles();
+            const assignedRoleDetails = allRoles.find(r => r.id === parseInt(roleToAssign));
+            const roleName = assignedRoleDetails ? assignedRoleDetails.name : 'Unknown Role';
+            
+            // Log the role assignment with clear message
             await auditLogger.logUserAction(
                 adminUserId,
                 'user_roles_assigned',
                 'User',
                 userId,
                 {
+                    message: `User ${user.firstname} ${user.lastname}'s new role "${roleName}" assigned successfully!`,
                     username: user.username,
-                    previousRoles: currentRoles.map(r => r.name),
-                    newRole: roleToAssign,
-                    message: 'User role replaced (single role system)'
+                    previousRoles: currentRoles.map(r => r.name).join(', ') || 'None',
+                    newRole: roleName
                 },
                 'success'
             );
@@ -311,16 +329,24 @@ class UserManagementController {
                 await UserModel.removeRole(userId, roleId);
             }
             
-            // Log the role removal
+            // Get removed role names
+            const allRoles = await UserModel.getAllRoles();
+            const removedRoleNames = roles.map(roleId => {
+                const role = allRoles.find(r => r.id === parseInt(roleId));
+                return role ? role.name : 'Unknown';
+            });
+            
+            // Log the role removal with clear message
             await auditLogger.logUserAction(
                 adminUserId,
                 'user_roles_removed',
                 'User',
                 userId,
                 {
+                    message: `User ${user.firstname} ${user.lastname} (${user.username})'s role(s) removed: ${removedRoleNames.join(', ')}`,
                     username: user.username,
-                    previousRoles: currentRoles.map(r => r.name),
-                    removedRoles: roles
+                    previousRoles: currentRoles.map(r => r.name).join(', ') || 'None',
+                    removedRoles: removedRoleNames.join(', ')
                 },
                 'success'
             );

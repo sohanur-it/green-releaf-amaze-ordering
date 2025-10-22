@@ -111,11 +111,21 @@ router.post('/products/master/:id/link-items', async (req, res) => {
  */
 router.post('/products/master/:id/link-items/confirm', async (req, res) => {
     const client = await pool.connect();
+    const auditLogger = require('../Services/auditLogger');
+    
     try {
         const { metrc_item_names } = req.body;
         const productId = req.params.id;
+        const userId = req.user?.id || req.session?.userId || null;
 
         await client.query('BEGIN');
+
+        // Get product details for audit log
+        const productInfo = await client.query(`
+            SELECT name FROM "ORDERS-products" WHERE entry_id = $1
+        `, [productId]);
+        
+        const productName = productInfo.rows[0]?.name || 'Unknown Product';
 
         // Update the Master Product's JSONB array
         await client.query(`
@@ -129,7 +139,7 @@ router.post('/products/master/:id/link-items/confirm', async (req, res) => {
             UPDATE "ORDERS-batches"
             SET fk_master_product_id = $1
             WHERE metrc_item_name = ANY($2)
-            RETURNING id
+            RETURNING id, metrc_item_name
         `, [productId, metrc_item_names]);
 
         // Log this action for each affected batch
@@ -139,19 +149,55 @@ router.post('/products/master/:id/link-items/confirm', async (req, res) => {
                     batch_id, change_type, reason,
                     changed_by_user_id, changed_by_system
                 ) VALUES ($1, 'master_product_linked', 'Linked to Master Product', $2, false)
-            `, [row.id, req.user?.id || null]);
+            `, [row.id, userId]);
         }
+
+        // Create audit log for the linking action
+        await auditLogger.logAction({
+            userId: userId,
+            action: 'master_product_items_linked',
+            resourceType: 'Master Product',
+            resourceId: productId.toString(),
+            details: {
+                message: `${metrc_item_names.length} METRC item(s) linked to Master Product "${productName}" affecting ${result.rowCount} batch(es)`,
+                product_name: productName,
+                product_id: productId,
+                linked_items: metrc_item_names,
+                batches_affected: result.rowCount,
+                batch_details: result.rows.map(r => ({ id: r.id, item_name: r.metrc_item_name }))
+            },
+            status: 'success',
+            sourceIp: req.ip
+        });
 
         await client.query('COMMIT');
 
         res.json({
             success: true,
-            batches_updated: result.rowCount
+            batches_updated: result.rowCount,
+            message: `Successfully linked ${metrc_item_names.length} METRC items to ${productName}`
         });
 
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error linking METRC items:', error.message);
+        
+        // Log failure
+        const auditLogger = require('../Services/auditLogger');
+        await auditLogger.logAction({
+            userId: req.user?.id || req.session?.userId || null,
+            action: 'master_product_items_linked',
+            resourceType: 'Master Product',
+            resourceId: req.params.id.toString(),
+            details: {
+                message: `Failed to link METRC items to Master Product: ${error.message}`,
+                attempted_items: req.body.metrc_item_names,
+                error: error.message
+            },
+            status: 'failure',
+            sourceIp: req.ip
+        });
+        
         res.status(500).json({
             success: false,
             error: error.message
