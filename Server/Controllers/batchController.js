@@ -241,12 +241,14 @@ class BatchController {
             inventoryMonitorService.start();
             
             // Log the action
+            const userText = userId === 'SYSTEM' ? 'System' : `User ID ${userId}`;
             await auditLogger.logAction({
                 userId: userId === 'SYSTEM' ? null : userId,
                 action: 'inventory_monitoring_started',
                 resourceType: 'InventoryMonitor',
                 resourceId: 'service',
                 details: {
+                    message: `${userText} started the inventory monitoring service`,
                     triggered_by: 'manual',
                     user_id: userId
                 },
@@ -282,12 +284,14 @@ class BatchController {
             inventoryMonitorService.stop();
             
             // Log the action
+            const userText = userId === 'SYSTEM' ? 'System' : `User ID ${userId}`;
             await auditLogger.logAction({
                 userId: userId === 'SYSTEM' ? null : userId,
                 action: 'inventory_monitoring_stopped',
                 resourceType: 'InventoryMonitor',
                 resourceId: 'service',
                 details: {
+                    message: `${userText} stopped the inventory monitoring service`,
                     triggered_by: 'manual',
                     user_id: userId
                 },
@@ -331,13 +335,16 @@ class BatchController {
             inventoryMonitorService.updateInterval(parseInt(intervalMinutes));
             
             // Log the action
+            const userText = userId === 'SYSTEM' ? 'System' : `User ID ${userId}`;
+            const oldInterval = inventoryMonitorService.checkInterval;
             await auditLogger.logAction({
                 userId: userId === 'SYSTEM' ? null : userId,
                 action: 'inventory_monitoring_interval_updated',
                 resourceType: 'InventoryMonitor',
                 resourceId: 'service',
                 details: {
-                    old_interval: inventoryMonitorService.checkInterval,
+                    message: `${userText} updated inventory monitoring interval from ${oldInterval} to ${intervalMinutes} minutes`,
+                    old_interval: oldInterval,
                     new_interval: intervalMinutes,
                     user_id: userId
                 },

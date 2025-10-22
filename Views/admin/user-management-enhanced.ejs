@@ -1,0 +1,571 @@
+<!-- Modern User Management with Chart.js -->
+<style>
+.stats-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 15px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+}
+
+.stats-card h3 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.stats-card p {
+    margin: 0;
+    opacity: 0.9;
+}
+
+.dashboard-card {
+    background: white;
+    border-radius: 15px;
+    padding: 1.5rem;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+}
+
+.modern-table {
+    margin: 0;
+}
+
+.modern-table thead {
+    background: #f8f9fa;
+}
+
+.modern-table th {
+    font-weight: 600;
+    color: #4b5563;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    padding: 1rem;
+    border: none;
+}
+
+.modern-table td {
+    padding: 1rem;
+    vertical-align: middle;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.modern-table tbody tr:hover {
+    background: #f9fafb;
+}
+
+.user-avatar {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.status-badge {
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+
+.status-active {
+    background: #10b981;
+    color: white;
+}
+
+.status-pending {
+    background: #f59e0b;
+    color: white;
+}
+
+.status-revoked {
+    background: #ef4444;
+    color: white;
+}
+
+.modern-modal .modal-content {
+    border-radius: 20px;
+    border: none;
+    overflow: hidden;
+}
+
+.modern-modal .modal-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 1.5rem;
+}
+
+.role-option {
+    border: 2px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.role-option:hover {
+    border-color: #667eea;
+    background: #f3f4f6;
+}
+
+.role-option.selected {
+    border-color: #667eea;
+    background: #eef2ff;
+}
+
+.permission-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 15px;
+    background: #e0e7ff;
+    color: #4f46e5;
+    font-size: 0.75rem;
+    margin: 0.25rem;
+}
+
+.permissions-list {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+}
+</style>
+
+<div class="container-fluid p-4">
+    <!-- Refresh Button -->
+    <div class="d-flex justify-content-end mb-4">
+        <button class="btn btn-primary" onclick="refreshData()">
+            <i class="fas fa-sync"></i> Refresh
+        </button>
+    </div>
+
+    <!-- Statistics Row -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                <p>Total Users</p>
+                <h3 id="totalUsers">0</h3>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                <p>Active Users</p>
+                <h3 id="activeUsers">0</h3>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                <p>Pending Approval</p>
+                <h3 id="pendingUsers">0</h3>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+                <p>Revoked</p>
+                <h3 id="revokedUsers">0</h3>
+            </div>
+        </div>
+    </div>
+
+    <!-- Users Table -->
+    <div class="dashboard-card">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0">All Users</h5>
+            <input type="text" id="searchUsers" class="form-control" style="max-width: 300px;" placeholder="Search users...">
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover modern-table" id="usersTable">
+                <thead>
+                    <tr>
+                        <th>User</th>
+                        <th>Email</th>
+                        <th>Status</th>
+                        <th>Roles</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTableBody">
+                    <!-- Users will be loaded here -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modern Role Assignment Modal -->
+<div class="modal fade modern-modal" id="roleModal" tabindex="-1">
+    <div class="modal-dialog modal-lg" style="max-width: 800px; margin: 1.75rem auto;">
+        <div class="modal-content" style="max-height: calc(100vh - 3.5rem);">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-user-shield me-2"></i>Assign Role
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4" style="max-height: calc(100vh - 12rem); overflow-y: auto;">
+                <div class="mb-4">
+                    <h6 class="mb-3">User Information</h6>
+                    <div class="d-flex align-items-center mb-3">
+                        <div class="user-avatar me-3" id="modalUserAvatar">A</div>
+                        <div>
+                            <h6 class="mb-0" id="modalUserName">User Name</h6>
+                            <small class="text-muted" id="modalUserEmail">user@example.com</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Current Role</label>
+                    <div id="currentRoleDisplay" class="alert alert-info">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <span id="currentRoleName">No role assigned</span>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="roleSelect" class="form-label">Select New Role</label>
+                    <select class="form-select" id="roleSelect" onchange="previewRolePermissions()">
+                        <option value="">-- Select a role --</option>
+                    </select>
+                </div>
+
+                <div id="permissionsPreview" class="mt-4" style="display: none;">
+                    <h6 class="mb-3">Role Permissions</h6>
+                    <div id="permissionsList" class="permissions-list"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="assignRole()">
+                    <i class="fas fa-check me-1"></i>Assign Role
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let allUsers = [];
+let filteredUsers = [];
+let availableRoles = [];
+let selectedUser = null;
+let selectedRole = null;
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadUsers();
+    loadRoles();
+    
+    // Search functionality
+    document.getElementById('searchUsers').addEventListener('input', function(e) {
+        const searchTerm = e.target.value.toLowerCase();
+        filteredUsers = allUsers.filter(user => {
+            return user.firstname?.toLowerCase().includes(searchTerm) ||
+                   user.lastname?.toLowerCase().includes(searchTerm) ||
+                   user.email?.toLowerCase().includes(searchTerm) ||
+                   user.username?.toLowerCase().includes(searchTerm);
+        });
+        renderUsers();
+    });
+});
+
+async function loadUsers() {
+    try {
+        const response = await fetch('/api/v1/admin/users');
+        const data = await response.json();
+        
+        if (data.success) {
+            allUsers = data.data || data.users || [];
+            filteredUsers = allUsers;
+            updateStats();
+            renderUsers();
+        }
+    } catch (error) {
+        console.error('Error:', error);
+    }
+}
+
+async function loadRoles() {
+    try {
+        const response = await fetch('/api/v1/admin/users/roles');
+        const data = await response.json();
+        
+        if (data.success) {
+            availableRoles = data.data || data.roles || [];
+        }
+    } catch (error) {
+        console.error('Error:', error);
+    }
+}
+
+function updateStats() {
+    const total = allUsers.length;
+    const active = allUsers.filter(u => u.status === 'active').length;
+    const pending = allUsers.filter(u => u.status === 'pending').length;
+    const revoked = allUsers.filter(u => u.status === 'revoked').length;
+    
+    document.getElementById('totalUsers').textContent = total;
+    document.getElementById('activeUsers').textContent = active;
+    document.getElementById('pendingUsers').textContent = pending;
+    document.getElementById('revokedUsers').textContent = revoked;
+}
+
+function renderUsers() {
+    const tbody = document.getElementById('usersTableBody');
+    tbody.innerHTML = '';
+    
+    filteredUsers.forEach(user => {
+        const row = document.createElement('tr');
+        
+        const statusClass = user.status === 'active' ? 'success' : user.status === 'pending' ? 'warning' : 'danger';
+        const statusText = user.status.charAt(0).toUpperCase() + user.status.slice(1);
+        
+        const rolesHtml = user.roles && user.roles.length > 0 ?
+            user.roles.map(role => `<span class="permission-badge">${role.name}</span>`).join(' ') :
+            '<span class="text-muted">No roles</span>';
+        
+        const actionsHtml = user.status === 'pending' ? `
+            <button class="btn btn-sm btn-success me-1" onclick="approveUser(${user.id})">
+                <i class="fas fa-check"></i> Approve
+            </button>
+            <button class="btn btn-sm btn-danger" onclick="revokeUser(${user.id})">
+                <i class="fas fa-times"></i> Reject
+            </button>
+        ` : `
+            <button class="btn btn-sm btn-primary me-1" onclick="openRoleModal(${user.id})">
+                <i class="fas fa-user-cog"></i> Assign Role
+            </button>
+            <button class="btn btn-sm btn-warning" onclick="revokeUser(${user.id})">
+                <i class="fas fa-ban"></i> Revoke
+            </button>
+        `;
+        
+        row.innerHTML = `
+            <td>
+                <div class="d-flex align-items-center">
+                    <div class="user-avatar me-3" style="width: 40px; height: 40px; font-size: 1rem;">
+                        ${(user.firstname?.[0] || '') + (user.lastname?.[0] || '')}
+                    </div>
+                    <div>
+                        <div class="fw-bold">${user.firstname} ${user.lastname}</div>
+                        <small class="text-muted">@${user.username}</small>
+                    </div>
+                </div>
+            </td>
+            <td>${user.email}</td>
+            <td><span class="badge bg-${statusClass}">${statusText}</span></td>
+            <td>${rolesHtml}</td>
+            <td><small>${new Date(user.created_at).toLocaleDateString()}</small></td>
+            <td>${actionsHtml}</td>
+        `;
+        
+        tbody.appendChild(row);
+    });
+}
+
+function openRoleModal(userId) {
+    selectedUser = allUsers.find(u => u.id === userId);
+    if (!selectedUser) return;
+    
+    const initials = (selectedUser.firstname?.[0] || '') + (selectedUser.lastname?.[0] || '');
+    document.getElementById('modalUserAvatar').textContent = initials;
+    document.getElementById('modalUserName').textContent = `${selectedUser.firstname} ${selectedUser.lastname}`;
+    document.getElementById('modalUserEmail').textContent = selectedUser.email;
+    
+    // Display current role
+    const currentRoleName = document.getElementById('currentRoleName');
+    if (selectedUser.roles && selectedUser.roles.length > 0) {
+        currentRoleName.textContent = selectedUser.roles.map(r => r.name).join(', ');
+    } else {
+        currentRoleName.textContent = 'No role assigned';
+    }
+    
+    // Populate role dropdown
+    const roleSelect = document.getElementById('roleSelect');
+    roleSelect.innerHTML = '<option value="">-- Select a role --</option>';
+    
+    availableRoles.forEach(role => {
+        const option = document.createElement('option');
+        option.value = role.id;
+        option.textContent = role.name;
+        option.dataset.description = role.description || '';
+        roleSelect.appendChild(option);
+    });
+    
+    // Reset preview
+    document.getElementById('permissionsPreview').style.display = 'none';
+    selectedRole = null;
+    
+    new bootstrap.Modal(document.getElementById('roleModal')).show();
+}
+
+async function previewRolePermissions() {
+    const roleSelect = document.getElementById('roleSelect');
+    selectedRole = roleSelect.value;
+    
+    if (!selectedRole) {
+        document.getElementById('permissionsPreview').style.display = 'none';
+        return;
+    }
+    
+    // Load permissions for selected role
+    try {
+        const response = await fetch(`/api/v1/admin/users/roles/${selectedRole}/permissions`);
+        
+        // Check if response is ok
+        if (!response.ok) {
+            console.error('Failed to fetch permissions:', response.status);
+            document.getElementById('permissionsPreview').style.display = 'none';
+            return;
+        }
+        
+        // Check content type
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            console.error('Response is not JSON:', contentType);
+            document.getElementById('permissionsPreview').style.display = 'none';
+            return;
+        }
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            const permissions = data.data || [];
+            const permissionsContainer = document.getElementById('permissionsList');
+            
+            if (permissions.length === 0) {
+                permissionsContainer.innerHTML = '<span class="text-muted">No permissions assigned to this role</span>';
+            } else {
+                permissionsContainer.innerHTML = permissions.map(p => 
+                    `<span class="permission-badge">${p.resource}: ${p.action}</span>`
+                ).join('');
+            }
+            
+            document.getElementById('permissionsPreview').style.display = 'block';
+        } else {
+            console.error('API returned error:', data.error || 'Unknown error');
+            document.getElementById('permissionsPreview').style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading permissions:', error);
+        document.getElementById('permissionsPreview').style.display = 'none';
+    }
+}
+
+async function assignRole() {
+    if (!selectedRole || !selectedUser) {
+        alert('Please select a role');
+        return;
+    }
+    
+    // Get selected role name
+    const roleSelect = document.getElementById('roleSelect');
+    const selectedRoleName = roleSelect.options[roleSelect.selectedIndex].text;
+    
+    try {
+        const response = await fetch(`/api/v1/admin/users/${selectedUser.id}/roles`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ roles: [parseInt(selectedRole)] })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Close modal
+            bootstrap.Modal.getInstance(document.getElementById('roleModal')).hide();
+            
+            // Show success message
+            showSuccessMessage(`User ${selectedUser.firstname} ${selectedUser.lastname}'s new role "${selectedRoleName}" assigned successfully!`);
+            
+            // Refresh data
+            refreshData();
+        } else {
+            alert('Failed to assign role: ' + (data.message || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error assigning role: ' + error.message);
+    }
+}
+
+function showSuccessMessage(message) {
+    // Create success alert
+    const alert = document.createElement('div');
+    alert.className = 'alert alert-success alert-dismissible fade show position-fixed';
+    alert.style.cssText = 'top: 20px; right: 20px; z-index: 9999; min-width: 300px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);';
+    alert.innerHTML = `
+        <i class="fas fa-check-circle me-2"></i>
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.body.appendChild(alert);
+    
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => {
+        alert.classList.remove('show');
+        setTimeout(() => alert.remove(), 150);
+    }, 5000);
+}
+
+async function approveUser(userId) {
+    const user = allUsers.find(u => u.id === userId);
+    if (!user) return;
+    
+    try {
+        const response = await fetch(`/api/v1/admin/users/${userId}/approve`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.ok) {
+            showSuccessMessage(`User ${user.firstname} ${user.lastname} has been approved successfully!`);
+            refreshData();
+        } else {
+            alert('Failed to approve user');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error approving user: ' + error.message);
+    }
+}
+
+async function revokeUser(userId) {
+    const user = allUsers.find(u => u.id === userId);
+    if (!user) return;
+    
+    if (!confirm(`Are you sure you want to revoke access for ${user.firstname} ${user.lastname}?`)) return;
+    
+    try {
+        const response = await fetch(`/api/v1/admin/users/${userId}/revoke`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.ok) {
+            showSuccessMessage(`User ${user.firstname} ${user.lastname}'s access has been revoked.`);
+            refreshData();
+        } else {
+            alert('Failed to revoke user');
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error revoking user: ' + error.message);
+    }
+}
+
+function refreshData() {
+    loadUsers();
+    loadRoles();
+}
+</script>
+

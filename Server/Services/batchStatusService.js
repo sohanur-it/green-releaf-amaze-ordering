@@ -130,14 +130,12 @@ class BatchStatusService {
                 resourceType: 'Batch',
                 resourceId: productId.toString(),
                 details: {
-                    updated_batches: updateResult.rows.map(row => ({
-                        id: row.id,
-                        batch_number: row.batch_number,
-                        quantity: row.quantity
-                    })),
+                    message: `System automatically promoted ${updateResult.rows.length} batch(es) to Sellable for Product ID ${productId} due to inventory depletion`,
+                    batch_count: updateResult.rows.length,
+                    batch_numbers: updateResult.rows.map(row => row.batch_number).join(', '),
                     new_status: 'Sellable',
                     product_id: productId,
-                    promotion_reason: 'Inventory depletion triggered automatic promotion'
+                    promotion_reason: 'Inventory depletion'
                 },
                 status: 'success',
                 sourceIp: null
@@ -162,9 +160,10 @@ class BatchStatusService {
                 resourceType: 'Batch',
                 resourceId: productId.toString(),
                 details: {
+                    message: `System failed to automatically promote batches for Product ID ${productId}: ${error.message}`,
                     error: error.message,
                     product_id: productId,
-                    promotion_reason: 'Inventory depletion triggered automatic promotion'
+                    promotion_reason: 'Inventory depletion'
                 },
                 status: 'failure',
                 sourceIp: null
@@ -335,12 +334,14 @@ class BatchStatusService {
             await client.query('COMMIT');
             
             // Log the manual update
+            const userText = userId === 'SYSTEM' ? 'System' : `User ID ${userId}`;
             await auditLogger.logAction({
                 userId: userId === 'SYSTEM' ? null : userId,
                 action: 'batch_status_update',
                 resourceType: 'Batch',
                 resourceId: batchId.toString(),
                 details: {
+                    message: `${userText} manually updated Batch ${currentBatch.batch_number} status from "${oldStatus}" to "${newStatus}" (Quantity: ${currentBatch.quantity})`,
                     batch_id: batchId,
                     batch_number: currentBatch.batch_number,
                     old_status: oldStatus,

@@ -43,18 +43,18 @@ router.post('/crm/buyers/:id/delete', buyerController.deleteBuyer);
 // The ':id' part is a placeholder for the actual buyer's entry_id
 router.get('/crm/buyers/:id', buyerController.getBuyerById);
 
-// User management page
+// User management page (enhanced with Chart.js)
 router.get('/users', requirePermission('admin', 'user'), (req, res) => {
-    res.render('admin/user-management', { 
+    res.render('admin/user-management-enhanced', { 
         title: 'User Management',
         layout: 'layouts/main',
         user: req.session.user 
     });
 });
 
-// Audit logs page
+// Audit logs page (enhanced with Chart.js)
 router.get('/audit-logs', requirePermission('admin', 'audit'), (req, res) => {
-    res.render('admin/audit-logs', { 
+    res.render('admin/audit-logs-enhanced', { 
         title: 'Audit Logs',
         layout: 'layouts/main',
         user: req.session.user 
