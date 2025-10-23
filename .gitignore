@@ -1,0 +1,35 @@
+node_modules/
+.ENV
+.DS_Store
+.env
+*.log
+Photos/products/*
+!Photos/products/.gitkeep
+Public/uploads/*
+!Public/uploads/.gitkeep
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+package-lock.json
+backups/*
+
+# Additional production files
+logs/
+*.pid
+*.seed
+*.pid.lock
+
+# Cache directories
+.cache/
+.parcel-cache/
+
+# Environment files
+config/production.env
+config/local.env
+
+# PM2 logs
+pids/
+*.pid
+*.seed
+*.pid.lock
