@@ -48,7 +48,7 @@ const SCHEDULE_CONFIG = {
     
     // Items - Incremental Sync (every 60 minutes)
     items: {
-        schedule: '0 8-18 * * 1-5', // Every hour, 8 AM - 6 PM, Mon-Fri
+        schedule: '0 8-18 * * 1-5', // Every hour at :00, 8 AM - 6 PM, Mon-Fri
         script: 'sync:items:prod',
         description: 'Items Sync (Incremental)'
     },
@@ -171,7 +171,7 @@ function setupScheduler() {
             }
         }, {
             scheduled: true,
-            timezone: 'America/Los_Angeles' // PST/PDT timezone for US West Coast business hours
+            timezone: 'America/New_York' // EST/EDT timezone for US East Coast business hours
         });
     });
     

@@ -1,0 +1,6 @@
+{
+  "audit-level": "high",
+  "exceptions": [
+    "GHSA-9965-vmph-33xx"
+  ]
+}

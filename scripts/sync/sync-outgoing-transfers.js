@@ -227,17 +227,19 @@ async function fetchOutgoingTransfersIncremental(lastModified = null) {
 }
 
 /**
- * Prepare value for database insertion
+ * Prepare value for database insertion with proper timezone handling
  */
 function prepareValue(value, fieldName) {
     if (value === null || value === undefined) {
         return null;
     }
     
-    // Handle date fields
+    // Handle date fields - ensure UTC storage
     if (fieldName.includes('date') || fieldName.includes('Date')) {
         if (value === '') return null;
-        return new Date(value);
+        const date = new Date(value);
+        // Return UTC timestamp for consistent storage
+        return date.toISOString();
     }
     
     // Handle boolean fields
@@ -478,6 +480,9 @@ async function syncOutgoingTransfersEnhanced() {
         historyId = await createSyncHistory(client, 'outgoing_transfers', METRC_CONFIG.licenseNumber, null, 'sync-outgoing-transfers.js');
         batchId = await createSyncBatchHistory(client, 'outgoing_transfers');
         
+        // Start transaction
+        await client.query('BEGIN');
+        
         // Get latest lastmodified timestamp from local database
         const latestLastModified = await getLatestLastModified(client);
         
@@ -493,6 +498,9 @@ async function syncOutgoingTransfersEnhanced() {
         if (outgoingTransfers.length === 0) {
             console.log('ℹ️ No new or updated outgoing transfers to sync');
             scriptOutput = 'No new or updated outgoing transfers to sync';
+            
+            // Commit transaction
+            await client.query('COMMIT');
             
             // Update tracking entries for empty sync
             await updateSyncJob(client, jobId, 'completed', scriptOutput);
@@ -521,25 +529,40 @@ async function syncOutgoingTransfersEnhanced() {
         
         console.log(`📊 Found ${existingTransfers.size} existing outgoing transfers in local database`);
         
-        // Categorize transfers
-        const transfersToInsert = [];
-        const transfersToUpdate = [];
+        // Categorize transfers based on actual changes
+        const transfersToUpsert = [];
         const transfersToDelete = [];
         
-        // Process API transfers
+        // Process API transfers - only upsert if they're new or have changed
         for (const transfer of outgoingTransfers) {
             const existing = existingTransfers.get(transfer.id);
             
             if (!existing) {
-                // New transfer - insert
-                transfersToInsert.push(transfer);
+                // New transfer - upsert
+                transfersToUpsert.push(transfer);
             } else {
                 // Existing transfer - check if needs update
                 const apiLastModified = transfer.lastModified ? new Date(transfer.lastModified) : null;
                 const localLastModified = existing.lastmodified;
                 
-                if (!apiLastModified || !localLastModified || apiLastModified > localLastModified) {
-                    transfersToUpdate.push(transfer);
+                // Normalize timestamps to UTC for accurate comparison (US deployment)
+                const apiTimeUTC = apiLastModified ? new Date(apiLastModified) : null;
+                const localTimeUTC = localLastModified ? new Date(localLastModified) : null;
+                
+                // Convert both to UTC timestamps for comparison
+                const apiUTCTime = apiTimeUTC ? apiTimeUTC.getTime() : null;
+                const localUTCTime = localTimeUTC ? localTimeUTC.getTime() : null;
+                
+                // Check if timestamps represent the same moment (within 1 minute tolerance)
+                const timeDifference = apiUTCTime && localUTCTime ? Math.abs(apiUTCTime - localUTCTime) : Infinity;
+                const isSameTime = timeDifference <= (60 * 1000); // 1 minute tolerance
+                
+                // Special case: if timestamps are exactly 6 hours apart, they're likely the same time in different timezones
+                const isTimezoneDifference = timeDifference === (6 * 60 * 60 * 1000); // Exactly 6 hours
+                
+                // Only upsert if timestamps are significantly different (not the same time or timezone difference)
+                if (!apiUTCTime || !localUTCTime || (!isSameTime && !isTimezoneDifference)) {
+                    transfersToUpsert.push(transfer);
                 }
             }
         }
@@ -551,21 +574,16 @@ async function syncOutgoingTransfersEnhanced() {
             }
         }
         
-        console.log(`📊 Sync plan: ${transfersToInsert.length} insert, ${transfersToUpdate.length} update, ${transfersToDelete.length} delete`);
+        console.log(`📊 Sync plan: ${transfersToUpsert.length} upsert, ${transfersToDelete.length} delete`);
         
-        // Execute operations
-        if (transfersToInsert.length > 0) {
-            console.log('📥 Inserting new transfers...');
-            await processRecordsInChunks(client, transfersToInsert, 'INSERT');
-        }
-        
-        if (transfersToUpdate.length > 0) {
-            console.log('🔄 Updating existing transfers...');
-            await processRecordsInChunks(client, transfersToUpdate, 'UPDATE');
+        // Execute UPSERT operation only for changed transfers
+        if (transfersToUpsert.length > 0) {
+            console.log('📥 Upserting changed transfers...');
+            await processRecordsInChunks(client, transfersToUpsert, 'UPSERT');
         }
         
         if (transfersToDelete.length > 0) {
-            console.log('🗑️ Deleting stale transfers...');
+            console.log(`🗑️ Deleting ${transfersToDelete.length} stale transfers...`);
             const deleteQuery = `
                 DELETE FROM outgoingtransfers 
                 WHERE metrcid = ANY($1) AND sync_license = $2
@@ -574,7 +592,10 @@ async function syncOutgoingTransfersEnhanced() {
         }
         
         const duration = Date.now() - startTime;
-        scriptOutput = `Outgoing transfers sync completed: ${transfersToInsert.length} inserted, ${transfersToUpdate.length} updated, ${transfersToDelete.length} deleted in ${duration}ms`;
+        scriptOutput = `Outgoing transfers sync completed: ${transfersToUpsert.length} upserted, ${transfersToDelete.length} deleted in ${duration}ms`;
+        
+        // Commit transaction
+        await client.query('COMMIT');
         
         // Update all tracking entries
         await updateSyncJob(client, jobId, 'completed', scriptOutput);
@@ -582,13 +603,14 @@ async function syncOutgoingTransfersEnhanced() {
         await updateSyncBatchHistory(client, batchId, 'completed', duration);
         await updateSyncProgress(client, 'outgoing_transfers', METRC_CONFIG.licenseNumber, new Date());
         
-        console.log(`✅ Enhanced sync completed: ${transfersToInsert.length} inserted, ${transfersToUpdate.length} updated, ${transfersToDelete.length} deleted`);
+        console.log(`✅ Enhanced sync completed: ${transfersToUpsert.length} upserted, ${transfersToDelete.length} deleted`);
         
     } catch (error) {
         const duration = Date.now() - startTime;
         scriptError = error.message;
         
         console.error('❌ Enhanced sync failed:', error.message);
+        await client.query('ROLLBACK');
         
         // Update tracking entries for failed sync
         if (jobId) await updateSyncJob(client, jobId, 'failed', scriptOutput, scriptError);
