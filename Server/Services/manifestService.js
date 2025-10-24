@@ -13,7 +13,11 @@ const auditLogger = require('./auditLogger');
 class ManifestService {
     constructor() {
         this.apiBaseUrl = process.env.T3_API_BASE_URL || 'https://api.trackandtrace.tools/v2';
-        this.shipperLicense = process.env.T3_LICENSE_NUMBER || 'CUL000063';
+        this.shipperLicense = process.env.T3_LICENSE_NUMBER;
+        
+        if (!this.shipperLicense) {
+            throw new Error('T3_LICENSE_NUMBER environment variable is required');
+        }
         
         this.pool = pool; // Use shared connection pool
     }
@@ -151,7 +155,7 @@ class ManifestService {
                 const packageQuery = `
                     SELECT metrcid, label, quantity, item_name 
                     FROM activepackages 
-                    WHERE label = $1 AND synclicense = $2
+                    WHERE label = $1 AND sync_license = $2
                 `;
                 const packageResult = await client.query(packageQuery, [pkg.PackageLabel, this.shipperLicense]);
                 
@@ -181,9 +185,9 @@ class ManifestService {
         for (const pkg of manifestData.packages) {
             // Get package details from database
             const packageQuery = `
-                SELECT metrcid, label, quantity, item_name, unitofmeasurename
+                SELECT metrcid, label, quantity, item_name, item_unitofmeasurename
                 FROM activepackages 
-                WHERE label = $1 AND synclicense = $2
+                WHERE label = $1 AND sync_license = $2
             `;
             const packageResult = await client.query(packageQuery, [pkg.PackageLabel, this.shipperLicense]);
             const activePackage = packageResult.rows[0];
@@ -191,7 +195,7 @@ class ManifestService {
             packages.push({
                 PackageLabel: pkg.PackageLabel,
                 Quantity: pkg.Quantity,
-                UnitOfMeasureName: pkg.UnitOfMeasureName || activePackage.unitofmeasurename,
+                UnitOfMeasureName: pkg.UnitOfMeasureName || activePackage.item_unitofmeasurename,
                 WholesalePrice: pkg.WholesalePrice || 0
             });
         }

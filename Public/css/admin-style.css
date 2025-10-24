@@ -199,11 +199,11 @@ html.sidebar-is-collapsed .sidebar-title-full {
     box-shadow: 0 5px 15px rgba(0,0,0,.5); transform: scale(0.95); transition: transform 0.3s ease;
 }
 .modal-overlay.active .modal-dialog { transform: scale(1); }
-.modal-header { padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); }
-.modal-title { margin: 0; font-size: 20px; font-weight: 600; }
+.modal-header { padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); }
+.modal-title { margin: 0; font-size: 18px; font-weight: 600; }
 .modal-close-btn { background: none; border: none; font-size: 28px; font-weight: 300; cursor: pointer; color: var(--text-light); line-height: 1; }
-.modal-body { padding: 24px; font-size: 16px; line-height: 1.6; color: var(--text-light); }
-.modal-footer { padding: 16px 24px; border-top: 1px solid var(--border-color); background-color: var(--bg-color); }
+.modal-body { padding: 16px 20px; font-size: 16px; line-height: 1.6; color: var(--text-light); }
+.modal-footer { padding: 12px 20px; border-top: 1px solid var(--border-color); background-color: var(--bg-color); }
 .modal-footer form { display: flex; justify-content: flex-end; gap: 12px; }
 .btn-danger { background-color: #d73a49; color: #fff; }
 .btn-danger:hover { background-color: #cb2131; }
@@ -574,6 +574,22 @@ html.sidebar-is-collapsed .sidebar-title-full {
     box-shadow: 0 10px 30px rgba(0,0,0,0.1);
 }
 
+.stats-card.success {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.stats-card.danger {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+}
+
+.stats-card.info {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+}
+
+.stats-card.warning {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
 .stats-card h3 {
     font-size: 2.5rem;
     font-weight: 700;
@@ -698,7 +714,75 @@ html.sidebar-is-collapsed .sidebar-title-full {
 .modern-modal .modal-header {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
-    padding: 1.5rem;
+    padding: 1rem 1.5rem;
+}
+
+/* Audit Log Modal Specific Styles */
+#detailsModal .modal-body {
+    padding: 0.75rem 1.25rem;
+}
+
+#detailsModal .modal-header {
+    padding: 0.5rem 1.25rem;
+}
+
+#detailsModal .modal-title {
+    font-size: 1rem;
+}
+
+/* Role Assign Modal Specific Styles */
+#roleModal .modal-body {
+    padding: 0.75rem 1.25rem;
+}
+
+#roleModal .modal-header {
+    padding: 0.5rem 1.25rem;
+}
+
+#roleModal .modal-title {
+    font-size: 1rem;
+}
+
+#roleModal .modal-footer {
+    padding: 0.5rem 1.25rem;
+}
+
+/* Reduce spacing in modals */
+.modal-body .mb-3 {
+    margin-bottom: 0.75rem !important;
+}
+
+.modal-body .mb-2 {
+    margin-bottom: 0.5rem !important;
+}
+
+.modal-body .mt-3 {
+    margin-top: 0.75rem !important;
+}
+
+.modal-body .mt-4 {
+    margin-top: 1rem !important;
+}
+
+/* Make modals more compact */
+.modal-body h6 {
+    margin-bottom: 0.5rem !important;
+    font-size: 0.9rem;
+}
+
+.modal-body .form-label {
+    margin-bottom: 0.25rem !important;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.modal-body .alert {
+    padding: 0.5rem 0.75rem !important;
+    margin-bottom: 0.5rem !important;
+}
+
+.modal-body .form-select {
+    padding: 0.375rem 0.75rem !important;
 }
 
 .role-option {
@@ -737,6 +821,47 @@ html.sidebar-is-collapsed .sidebar-title-full {
     border: 1px solid #e5e7eb;
 }
 
+/* Role Selection Styles */
+.roles-selection {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 0.75rem;
+    background: #f8f9fa;
+}
+
+.role-checkbox-item {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem;
+    margin-bottom: 0.25rem;
+    border-radius: 6px;
+    transition: background-color 0.2s ease;
+}
+
+.role-checkbox-item:hover {
+    background: #e9ecef;
+}
+
+.role-checkbox-item input[type="checkbox"] {
+    margin-right: 0.75rem;
+    transform: scale(1.1);
+}
+
+.role-checkbox-item label {
+    margin: 0;
+    cursor: pointer;
+    flex: 1;
+    font-weight: 500;
+}
+
+.role-checkbox-item .role-description {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-left: 1.5rem;
+}
+
 /* User Management Legacy Styles */
 .permissions-display {
     max-width: 300px;
@@ -759,3 +884,7 @@ html.sidebar-is-collapsed .sidebar-title-full {
 .table td {
     vertical-align: middle;
 }/* Cache buster: Fri Oct 24 16:23:56 +06 2025 */
+/* Cache buster: 1761304982 */
+/* Modal spacing fix: 1761305160 */
+/* Modal spacing fix v2: 1761305492 */
+/* Multiple role assignment fix: 1761306375 */

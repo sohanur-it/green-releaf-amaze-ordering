@@ -10,25 +10,25 @@
     <!-- Statistics Row -->
     <div class="row mb-4">
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+            <div class="stats-card">
                 <p>Total Users</p>
                 <h3 id="totalUsers">0</h3>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+            <div class="stats-card success">
                 <p>Active Users</p>
                 <h3 id="activeUsers">0</h3>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+            <div class="stats-card warning">
                 <p>Pending Approval</p>
                 <h3 id="pendingUsers">0</h3>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+            <div class="stats-card danger">
                 <p>Revoked</p>
                 <h3 id="revokedUsers">0</h3>
             </div>
@@ -71,10 +71,10 @@
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body p-4">
-                <div class="mb-4">
-                    <h6 class="mb-3">User Information</h6>
-                    <div class="d-flex align-items-center mb-3">
+            <div class="modal-body">
+                <div class="mb-3">
+                    <h6 class="mb-2">User Information</h6>
+                    <div class="d-flex align-items-center mb-2">
                         <div class="user-avatar me-3" id="modalUserAvatar">A</div>
                         <div>
                             <h6 class="mb-0" id="modalUserName">User Name</h6>
@@ -83,7 +83,7 @@
                     </div>
                 </div>
 
-                <div class="mb-3">
+                <div class="mb-2">
                     <label class="form-label">Current Role</label>
                     <div id="currentRoleDisplay" class="alert alert-info">
                         <i class="fas fa-info-circle me-2"></i>
@@ -91,22 +91,22 @@
                     </div>
                 </div>
 
-                <div class="mb-3">
-                    <label for="roleSelect" class="form-label">Select New Role</label>
-                    <select class="form-select" id="roleSelect" onchange="previewRolePermissions()">
-                        <option value="">-- Select a role --</option>
-                    </select>
+                <div class="mb-2">
+                    <label class="form-label">Select Roles</label>
+                    <div id="rolesList" class="roles-selection">
+                        <!-- Roles will be loaded here as checkboxes -->
+                    </div>
                 </div>
 
-                <div id="permissionsPreview" class="mt-4" style="display: none;">
-                    <h6 class="mb-3">Role Permissions</h6>
+                <div id="permissionsPreview" class="mt-3" style="display: none;">
+                    <h6 class="mb-2">Selected Role Permissions</h6>
                     <div id="permissionsList" class="permissions-list"></div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="assignRole()">
-                    <i class="fas fa-check me-1"></i>Assign Role
+                <button type="button" class="btn btn-primary" onclick="assignRoles()">
+                    <i class="fas fa-check me-1"></i>Assign Roles
                 </button>
             </div>
         </div>
@@ -280,17 +280,28 @@ function openRoleModal(userId) {
         currentRoleName.textContent = 'No role assigned';
     }
     
-    // Populate role dropdown
-    const roleSelect = document.getElementById('roleSelect');
-    roleSelect.innerHTML = '<option value="">-- Select a role --</option>';
+    // Populate role checkboxes
+    const rolesList = document.getElementById('rolesList');
+    rolesList.innerHTML = '';
     
     availableRoles.forEach(role => {
-        const option = document.createElement('option');
-        option.value = role.id;
-        option.textContent = role.name;
-        option.dataset.description = role.description || '';
-        roleSelect.appendChild(option);
+        const roleItem = document.createElement('div');
+        roleItem.className = 'role-checkbox-item';
+        
+        // Check if user already has this role
+        const hasRole = selectedUser.roles && selectedUser.roles.some(r => r.id === role.id);
+        
+        roleItem.innerHTML = `
+            <input type="checkbox" id="role_${role.id}" value="${role.id}" ${hasRole ? 'checked' : ''} onchange="updateRoleSelection()">
+            <label for="role_${role.id}">${role.name}</label>
+            ${role.description ? `<div class="role-description">${role.description}</div>` : ''}
+        `;
+        
+        rolesList.appendChild(roleItem);
     });
+    
+    // Update permission preview
+    updateRoleSelection();
     
     // Reset preview
     document.getElementById('permissionsPreview').style.display = 'none';
@@ -299,52 +310,55 @@ function openRoleModal(userId) {
     new bootstrap.Modal(document.getElementById('roleModal')).show();
 }
 
-async function previewRolePermissions() {
-    const roleSelect = document.getElementById('roleSelect');
-    selectedRole = roleSelect.value;
+function updateRoleSelection() {
+    const checkboxes = document.querySelectorAll('#rolesList input[type="checkbox"]:checked');
+    const selectedRoles = Array.from(checkboxes).map(cb => parseInt(cb.value));
     
-    if (!selectedRole) {
+    if (selectedRoles.length > 0) {
+        // Show permissions preview
+        document.getElementById('permissionsPreview').style.display = 'block';
+        previewMultipleRolePermissions(selectedRoles);
+    } else {
+        // Hide permissions preview
         document.getElementById('permissionsPreview').style.display = 'none';
-        return;
     }
-    
-    // Load permissions for selected role
+}
+
+async function previewMultipleRolePermissions(roleIds) {
     try {
-        const response = await fetch(`/api/v1/admin/users/roles/${selectedRole}/permissions`);
+        const permissionsList = document.getElementById('permissionsList');
+        permissionsList.innerHTML = '<div class="text-muted">Loading permissions...</div>';
         
-        // Check if response is ok
-        if (!response.ok) {
-            console.error('Failed to fetch permissions:', response.status);
-            document.getElementById('permissionsPreview').style.display = 'none';
-            return;
-        }
+        // Get permissions for all selected roles
+        const allPermissions = new Set();
+        const roleNames = [];
         
-        // Check content type
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            console.error('Response is not JSON:', contentType);
-            document.getElementById('permissionsPreview').style.display = 'none';
-            return;
-        }
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            const permissions = data.data || [];
-            const permissionsContainer = document.getElementById('permissionsList');
-            
-            if (permissions.length === 0) {
-                permissionsContainer.innerHTML = '<span class="text-muted">No permissions assigned to this role</span>';
-            } else {
-                permissionsContainer.innerHTML = permissions.map(p => 
-                    `<span class="permission-badge">${p.resource}: ${p.action}</span>`
-                ).join('');
+        for (const roleId of roleIds) {
+            const role = availableRoles.find(r => r.id === roleId);
+            if (role) {
+                roleNames.push(role.name);
+                if (role.permissions) {
+                    role.permissions.forEach(perm => allPermissions.add(perm));
+                }
             }
-            
-            document.getElementById('permissionsPreview').style.display = 'block';
+        }
+        
+        if (allPermissions.size > 0) {
+            permissionsList.innerHTML = `
+                <div class="mb-2">
+                    <strong>Selected Roles:</strong> ${roleNames.join(', ')}
+                </div>
+                <div class="mb-2">
+                    <strong>Combined Permissions:</strong>
+                </div>
+                <div class="permissions-grid">
+                    ${Array.from(allPermissions).map(perm => 
+                        `<span class="permission-badge">${perm}</span>`
+                    ).join('')}
+                </div>
+            `;
         } else {
-            console.error('API returned error:', data.error || 'Unknown error');
-            document.getElementById('permissionsPreview').style.display = 'none';
+            permissionsList.innerHTML = '<div class="text-muted">No specific permissions defined for selected roles.</div>';
         }
     } catch (error) {
         console.error('Error loading permissions:', error);
@@ -352,21 +366,31 @@ async function previewRolePermissions() {
     }
 }
 
-async function assignRole() {
-    if (!selectedRole || !selectedUser) {
-        alert('Please select a role');
+async function assignRoles() {
+    if (!selectedUser) {
+        alert('Please select a user');
         return;
     }
     
-    // Get selected role name
-    const roleSelect = document.getElementById('roleSelect');
-    const selectedRoleName = roleSelect.options[roleSelect.selectedIndex].text;
+    const checkboxes = document.querySelectorAll('#rolesList input[type="checkbox"]:checked');
+    const selectedRoleIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+    
+    if (selectedRoleIds.length === 0) {
+        alert('Please select at least one role');
+        return;
+    }
+    
+    // Get selected role names for display
+    const selectedRoleNames = selectedRoleIds.map(roleId => {
+        const role = availableRoles.find(r => r.id === roleId);
+        return role ? role.name : 'Unknown Role';
+    });
     
     try {
         const response = await fetch(`/api/v1/admin/users/${selectedUser.id}/roles`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ roles: [parseInt(selectedRole)] })
+            body: JSON.stringify({ roles: selectedRoleIds })
         });
         
         const data = await response.json();
@@ -376,16 +400,17 @@ async function assignRole() {
             bootstrap.Modal.getInstance(document.getElementById('roleModal')).hide();
             
             // Show success message
-            showSuccessMessage(`User ${selectedUser.firstname} ${selectedUser.lastname}'s new role "${selectedRoleName}" assigned successfully!`);
+            const roleText = selectedRoleNames.length === 1 ? 'role' : 'roles';
+            showSuccessMessage(`User ${selectedUser.firstname} ${selectedUser.lastname}'s ${roleText} "${selectedRoleNames.join(', ')}" assigned successfully!`);
             
             // Refresh data
             refreshData();
         } else {
-            alert('Failed to assign role: ' + (data.message || 'Unknown error'));
+            alert('Failed to assign roles: ' + (data.message || 'Unknown error'));
         }
     } catch (error) {
         console.error('Error:', error);
-        alert('Error assigning role: ' + error.message);
+        alert('Error assigning roles: ' + error.message);
     }
 }
 

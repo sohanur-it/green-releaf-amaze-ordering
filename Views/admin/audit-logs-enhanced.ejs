@@ -15,28 +15,28 @@
     <!-- Statistics Cards -->
     <div class="row mb-4">
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+            <div class="stats-card">
                 <i class="fas fa-clipboard-list fa-2x mb-2"></i>
                 <h3 id="totalLogs">0</h3>
                 <p>Total Logs</p>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+            <div class="stats-card success">
                 <i class="fas fa-check-circle fa-2x mb-2"></i>
                 <h3 id="successLogs">0</h3>
                 <p>Successful Actions</p>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+            <div class="stats-card danger">
                 <i class="fas fa-exclamation-circle fa-2x mb-2"></i>
                 <h3 id="failureLogs">0</h3>
                 <p>Failed Actions</p>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
+            <div class="stats-card info">
                 <i class="fas fa-calendar-day fa-2x mb-2"></i>
                 <h3 id="todayLogs">0</h3>
                 <p>Today's Activity</p>
@@ -101,11 +101,11 @@
 <div class="modal fade" id="detailsModal" tabindex="-1">
     <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content">
-            <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+            <div class="modal-header modern-modal">
                 <h5 class="modal-title"><i class="fas fa-info-circle me-2"></i>Log Details</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body p-4" id="detailsContent">
+            <div class="modal-body" id="detailsContent">
                 <!-- Details will be loaded here -->
             </div>
         </div>
@@ -331,7 +331,7 @@ async function showDetails(logId) {
                     <div class="row g-3">
                         <div class="col-md-4">
                             <div class="p-3 bg-light rounded">
-                                <small class="text-muted">User</small>
+                                <small class="text-muted">Executed By</small>
                                 <div class="fw-bold">${log.userFullName || 'System'}</div>
                             </div>
                         </div>

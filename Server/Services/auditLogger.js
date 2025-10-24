@@ -37,6 +37,9 @@ class AuditLogger {
         const client = await this.pool.connect();
         
         try {
+            console.log('🔍 Audit Logger - User ID:', userId);
+            console.log('🔍 Audit Logger - Action:', action);
+            
             // Get user information if userId is provided
             let userInfo = null;
             if (userId) {
@@ -45,6 +48,8 @@ class AuditLogger {
                         SELECT username, first_name, last_name, email
                         FROM users WHERE id = $1
                     `, [userId]);
+                    
+                    console.log('🔍 User query result:', userResult.rows);
                     
                     if (userResult.rows.length > 0) {
                         const user = userResult.rows[0];
@@ -55,10 +60,15 @@ class AuditLogger {
                             lastName: user.last_name,
                             email: user.email
                         };
+                        console.log('🔍 User info stored:', userInfo);
+                    } else {
+                        console.warn('⚠️ No user found with ID:', userId);
                     }
                 } catch (userError) {
                     console.warn('⚠️ Could not fetch user info for audit log:', userError.message);
                 }
+            } else {
+                console.warn('⚠️ No user ID provided for audit log');
             }
 
             // Merge user info into details
@@ -453,17 +463,31 @@ class AuditLogger {
             return result.rows.map(row => {
                 const details = row.details ? (typeof row.details === 'string' ? JSON.parse(row.details) : row.details) : null;
                 
+                console.log('🔍 Audit Log Row:', {
+                    id: row.id,
+                    userId: row.user_id,
+                    username: row.username,
+                    firstname: row.firstname,
+                    lastname: row.lastname,
+                    action: row.action,
+                    details: details
+                });
+                
                 // Use user info from details if user table data is not available
                 let userFullName = null;
                 let username = row.username;
                 
                 if (row.firstname && row.lastname) {
                     userFullName = `${row.firstname} ${row.lastname}`;
+                    console.log('🔍 Using user table data:', userFullName);
                 } else if (details && details.userInfo) {
                     userFullName = details.userInfo.firstName && details.userInfo.lastName 
                         ? `${details.userInfo.firstName} ${details.userInfo.lastName}` 
                         : details.userInfo.username || 'Unknown User';
                     username = details.userInfo.username || username;
+                    console.log('🔍 Using details userInfo:', userFullName);
+                } else {
+                    console.log('🔍 No user info available, using fallback');
                 }
                 
                 return {

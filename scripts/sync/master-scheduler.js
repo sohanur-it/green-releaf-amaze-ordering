@@ -4,7 +4,7 @@
  * Master Scheduler for METRC Sync Operations
  * 
  * Automatically triggers METRC sync operations at specified intervals
- * during business hours (8 AM - 6 PM, Monday-Friday)
+ * during business hours (8 AM - 6 PM CST/CDT, Monday-Friday)
  * 
  * Usage: node scripts/sync/master-scheduler.js
  */
@@ -171,7 +171,7 @@ function setupScheduler() {
             }
         }, {
             scheduled: true,
-            timezone: 'America/New_York' // EST/EDT timezone for US East Coast business hours
+            timezone: 'America/Chicago' // CST/CDT timezone for US Central business hours
         });
     });
     
@@ -230,7 +230,7 @@ process.on('SIGINT', () => {
 if (require.main === module) {
     log('=== METRC Sync Master Scheduler ===', 'SCHEDULER');
     log(`Environment: ${process.env.NODE_ENV || 'development'}`, 'INFO');
-    log(`Timezone: America/New_York`, 'INFO');
+    log(`Timezone: America/Chicago (CST/CDT)`, 'INFO');
     
     setupScheduler();
     
