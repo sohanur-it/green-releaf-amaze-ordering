@@ -1,108 +1,15 @@
 <!-- Modern Audit Logs with Chart.js Visualizations -->
-<style>
-.dashboard-card {
-    background: white;
-    border-radius: 15px;
-    padding: 1.5rem;
-    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
-    margin-bottom: 1.5rem;
-}
-
-.stats-card {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border-radius: 15px;
-    padding: 1.5rem;
-    text-align: center;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-}
-
-.stats-card h3 {
-    font-size: 2.5rem;
-    font-weight: 700;
-    margin: 0.5rem 0;
-}
-
-.stats-card p {
-    margin: 0;
-    opacity: 0.9;
-    font-size: 0.875rem;
-}
-
-.modern-table {
-    margin: 0;
-}
-
-.modern-table thead {
-    background: #f8f9fa;
-}
-
-.modern-table th {
-    font-weight: 600;
-    color: #4b5563;
-    text-transform: uppercase;
-    font-size: 0.75rem;
-    letter-spacing: 0.05em;
-    padding: 1rem;
-    border: none;
-}
-
-.modern-table td {
-    padding: 0.75rem 1rem;
-    vertical-align: middle;
-    border-bottom: 1px solid #f3f4f6;
-}
-
-.modern-table tbody tr:hover {
-    background: #f9fafb;
-    cursor: pointer;
-}
-
-.action-code {
-    background: #e0e7ff;
-    color: #4f46e5;
-    padding: 0.25rem 0.75rem;
-    border-radius: 15px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    font-family: monospace;
-}
-
-.modern-filter {
-    background: white;
-    border-radius: 15px;
-    padding: 1.5rem;
-    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
-    margin-bottom: 1.5rem;
-}
-
-.filter-badge {
-    display: inline-block;
-    background: #667eea;
-    color: white;
-    padding: 0.5rem 1rem;
-    border-radius: 20px;
-    margin: 0.25rem;
-    font-size: 0.875rem;
-}
-
-.filter-badge .remove {
-    margin-left: 0.5rem;
-    cursor: pointer;
-    opacity: 0.8;
-}
-
-.filter-badge .remove:hover {
-    opacity: 1;
-}
-</style>
-
 <div class="container-fluid p-4">
     <!-- Refresh Button -->
     <div class="d-flex justify-content-end mb-3">
         <button class="btn btn-primary" onclick="refreshData()">
             <i class="fas fa-sync me-1"></i> Refresh
         </button>
+    </div>
+
+    <!-- Sync Failure Alerts -->
+    <div id="alertContainer">
+        <!-- Alerts will be loaded here -->
     </div>
 
     <!-- Statistics Cards -->
@@ -458,6 +365,159 @@ async function showDetails(logId) {
 function refreshData() {
     loadStats();
     loadLogs();
+    loadAlerts();
 }
+
+// Alert Management Functions
+async function loadAlerts() {
+    try {
+        const response = await fetch('/api/alerts');
+        const data = await response.json();
+        
+        if (data.success) {
+            displayAlerts(data.alerts);
+        }
+    } catch (error) {
+        console.error('Error loading alerts:', error);
+    }
+}
+
+function displayAlerts(alerts) {
+    const container = document.getElementById('alertContainer');
+    
+    if (alerts.length === 0) {
+        container.innerHTML = `
+            <div class="no-alerts">
+                <div class="alert-icon">✅</div>
+                <div class="alert-text">All sync scripts are running normally</div>
+            </div>
+        `;
+        return;
+    }
+    
+    // Sort alerts by severity (critical first)
+    alerts.sort((a, b) => {
+        if (a.level === 'critical' && b.level !== 'critical') return -1;
+        if (a.level !== 'critical' && b.level === 'critical') return 1;
+        return b.count - a.count;
+    });
+    
+    container.innerHTML = alerts.map(alert => `
+        <div class="alert-banner ${alert.level}">
+            <div class="alert-header">
+                <div class="alert-title">
+                    <i class="fas fa-${alert.level === 'critical' ? 'exclamation-triangle' : 'exclamation-circle'} me-2"></i>
+                    ${alert.level.toUpperCase()} ALERT
+                </div>
+                <div class="alert-count">${alert.count} failures</div>
+            </div>
+            <div class="alert-message">
+                <strong>${alert.scriptName}</strong> has failed ${alert.count} times consecutively
+                ${alert.lastFailure ? `<br><small>Last failure: ${new Date(alert.lastFailure).toLocaleString()}</small>` : ''}
+            </div>
+            <div class="alert-actions">
+                <button class="btn-reset" onclick="resetFailureCount('${alert.scriptName}', '${alert.licenseNumber}')">
+                    <i class="fas fa-undo me-1"></i> Reset Count
+                </button>
+                ${alert.lastError ? `
+                    <button class="btn-reset ms-2" onclick="showLastError('${alert.scriptName}', '${alert.lastError}')">
+                        <i class="fas fa-info-circle me-1"></i> View Error
+                    </button>
+                ` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+async function resetFailureCount(scriptName, licenseNumber) {
+    if (!confirm(`Are you sure you want to reset the failure count for ${scriptName}?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/alerts/reset', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                scriptName: scriptName,
+                licenseNumber: licenseNumber
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Reload alerts to reflect the reset
+            loadAlerts();
+            
+            // Show success message
+            showAlert('success', `Failure count reset for ${scriptName}`);
+        } else {
+            showAlert('error', data.message || 'Failed to reset failure count');
+        }
+    } catch (error) {
+        console.error('Error resetting failure count:', error);
+        showAlert('error', 'Failed to reset failure count');
+    }
+}
+
+function showLastError(scriptName, errorMessage) {
+    const modal = document.createElement('div');
+    modal.className = 'modal fade';
+    modal.innerHTML = `
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Last Error - ${scriptName}</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <pre class="bg-light p-3 rounded">${errorMessage}</pre>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    const bsModal = new bootstrap.Modal(modal);
+    bsModal.show();
+    
+    modal.addEventListener('hidden.bs.modal', () => {
+        document.body.removeChild(modal);
+    });
+}
+
+function showAlert(type, message) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type === 'success' ? 'success' : 'danger'} alert-dismissible fade show`;
+    alertDiv.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    // Insert at the top of the container
+    const container = document.getElementById('alertContainer');
+    container.insertBefore(alertDiv, container.firstChild);
+    
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => {
+        if (alertDiv.parentNode) {
+            alertDiv.remove();
+        }
+    }, 5000);
+}
+
+// Load alerts when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    loadAlerts();
+    
+    // Refresh alerts every 30 seconds
+    setInterval(loadAlerts, 30000);
+});
 </script>
 

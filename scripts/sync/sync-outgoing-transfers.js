@@ -13,6 +13,7 @@
 const axios = require('axios');
 const { Pool } = require('pg');
 const path = require('path');
+const syncFailureTracker = require('../../Server/Services/syncFailureTracker');
 
 // Load environment variables
 if (process.env.NODE_ENV === 'production') {
@@ -619,6 +620,9 @@ async function syncOutgoingTransfersEnhanced() {
         
         console.log(`✅ Enhanced sync completed: ${transfersToUpsert.length} upserted, ${transfersToDelete.length} deleted`);
         
+        // Record successful sync
+        await syncFailureTracker.recordSuccess('sync-outgoing-transfers', METRC_CONFIG.licenseNumber);
+        
     } catch (error) {
         const duration = Date.now() - startTime;
         scriptError = error.message;
@@ -630,6 +634,9 @@ async function syncOutgoingTransfersEnhanced() {
         if (jobId) await updateSyncJob(client, jobId, 'failed', scriptOutput, scriptError);
         if (historyId) await updateSyncHistory(client, historyId, 'failed', duration, scriptOutput, scriptError);
         if (batchId) await updateSyncBatchHistory(client, batchId, 'failed', duration, scriptError);
+        
+        // Record sync failure
+        await syncFailureTracker.recordFailure('sync-outgoing-transfers', scriptError, METRC_CONFIG.licenseNumber);
         
         throw error;
     } finally {
