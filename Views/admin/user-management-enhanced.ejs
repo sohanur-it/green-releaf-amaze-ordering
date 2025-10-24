@@ -63,7 +63,7 @@
 
 <!-- Modern Role Assignment Modal -->
 <div class="modal fade modern-modal" id="roleModal" tabindex="-1">
-    <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">
@@ -148,13 +148,13 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // Ensure modals are properly centered when shown
+    // Ensure modals are properly positioned when shown
     document.addEventListener('shown.bs.modal', function(event) {
         const modal = event.target;
         const modalDialog = modal.querySelector('.modal-dialog');
         if (modalDialog) {
-            // Force centering
-            modalDialog.style.margin = '1.75rem auto';
+            // Set proper positioning without centering
+            modalDialog.style.margin = '1rem auto';
         }
     });
 });
@@ -218,14 +218,14 @@ function renderUsers() {
             <button class="btn btn-sm btn-success me-1 mb-1" onclick="approveUser(${user.id})">
                 <i class="fas fa-check"></i> Approve
             </button>
-            <button class="btn btn-sm btn-danger" onclick="revokeUser(${user.id})">
+            <button class="btn btn-sm btn-danger mb-1" onclick="revokeUser(${user.id})">
                 <i class="fas fa-times"></i> Reject
             </button>
         ` : `
             <button class="btn btn-sm btn-primary me-1 mb-1" onclick="openRoleModal(${user.id})">
                 <i class="fas fa-user-cog"></i> Assign Role
             </button>
-            <button class="btn btn-sm btn-warning" onclick="revokeUser(${user.id})">
+            <button class="btn btn-sm btn-warning mb-1" onclick="revokeUser(${user.id})">
                 <i class="fas fa-ban"></i> Revoke
             </button>
         `;
@@ -303,8 +303,18 @@ function openRoleModal(userId) {
     // Update permission preview
     updateRoleSelection();
     
-    // Reset preview
-    document.getElementById('permissionsPreview').style.display = 'none';
+    // Show current role permissions immediately
+    console.log('🔍 Selected user roles:', selectedUser.roles);
+    if (selectedUser.roles && selectedUser.roles.length > 0) {
+        const currentRoleIds = selectedUser.roles.map(r => r.id);
+        console.log('🔍 Current role IDs:', currentRoleIds);
+        showCurrentRolePermissions(currentRoleIds);
+    } else {
+        console.log('⚠️ No current roles found for user');
+        // Hide preview if no current roles
+        document.getElementById('permissionsPreview').style.display = 'none';
+    }
+    
     selectedRole = null;
     
     new bootstrap.Modal(document.getElementById('roleModal')).show();
@@ -315,17 +325,26 @@ function updateRoleSelection() {
     const selectedRoles = Array.from(checkboxes).map(cb => parseInt(cb.value));
     
     if (selectedRoles.length > 0) {
-        // Show permissions preview
+        // Show permissions preview for selected roles
         document.getElementById('permissionsPreview').style.display = 'block';
         previewMultipleRolePermissions(selectedRoles);
     } else {
-        // Hide permissions preview
-        document.getElementById('permissionsPreview').style.display = 'none';
+        // If no roles selected, show current role permissions
+        if (selectedUser && selectedUser.roles && selectedUser.roles.length > 0) {
+            const currentRoleIds = selectedUser.roles.map(r => r.id);
+            showCurrentRolePermissions(currentRoleIds);
+        } else {
+            // Hide permissions preview if no current roles
+            document.getElementById('permissionsPreview').style.display = 'none';
+        }
     }
 }
 
 async function previewMultipleRolePermissions(roleIds) {
     try {
+        console.log('🔍 Previewing permissions for role IDs:', roleIds);
+        console.log('🔍 Available roles:', availableRoles);
+        
         const permissionsList = document.getElementById('permissionsList');
         permissionsList.innerHTML = '<div class="text-muted">Loading permissions...</div>';
         
@@ -335,13 +354,19 @@ async function previewMultipleRolePermissions(roleIds) {
         
         for (const roleId of roleIds) {
             const role = availableRoles.find(r => r.id === roleId);
+            console.log('🔍 Found role:', role);
             if (role) {
                 roleNames.push(role.name);
                 if (role.permissions) {
+                    console.log('🔍 Role permissions:', role.permissions);
                     role.permissions.forEach(perm => allPermissions.add(perm));
+                } else {
+                    console.log('⚠️ No permissions found for role:', role.name);
                 }
             }
         }
+        
+        console.log('🔍 All permissions collected:', Array.from(allPermissions));
         
         if (allPermissions.size > 0) {
             permissionsList.innerHTML = `
@@ -363,6 +388,67 @@ async function previewMultipleRolePermissions(roleIds) {
     } catch (error) {
         console.error('Error loading permissions:', error);
         document.getElementById('permissionsPreview').style.display = 'none';
+    }
+}
+
+async function showCurrentRolePermissions(roleIds) {
+    try {
+        console.log('🔍 Showing current role permissions for:', roleIds);
+        console.log('🔍 Available roles:', availableRoles);
+        
+        const permissionsList = document.getElementById('permissionsList');
+        const permissionsPreview = document.getElementById('permissionsPreview');
+        
+        console.log('🔍 Permissions list element:', permissionsList);
+        console.log('🔍 Permissions preview element:', permissionsPreview);
+        
+        // Show the permissions preview section
+        permissionsPreview.style.display = 'block';
+        console.log('🔍 Set permissions preview to display: block');
+        
+        // Get permissions for current roles
+        const allPermissions = new Set();
+        const roleNames = [];
+        
+        for (const roleId of roleIds) {
+            const role = availableRoles.find(r => r.id === roleId);
+            console.log('🔍 Found role for ID', roleId, ':', role);
+            if (role) {
+                roleNames.push(role.name);
+                if (role.permissions) {
+                    console.log('🔍 Role permissions:', role.permissions);
+                    role.permissions.forEach(perm => allPermissions.add(perm));
+                } else {
+                    console.log('⚠️ No permissions found for role:', role.name);
+                }
+            }
+        }
+        
+        console.log('🔍 All permissions collected:', Array.from(allPermissions));
+        console.log('🔍 Role names:', roleNames);
+        
+        if (allPermissions.size > 0) {
+            const permissionsHtml = `
+                <div class="mb-2">
+                    <strong>Current Role Permissions:</strong> ${roleNames.join(', ')}
+                </div>
+                <div class="mb-2">
+                    <strong>Permissions:</strong>
+                </div>
+                <div class="permissions-grid">
+                    ${Array.from(allPermissions).map(perm => 
+                        `<span class="permission-badge">${perm}</span>`
+                    ).join('')}
+                </div>
+            `;
+            console.log('🔍 Setting permissions HTML:', permissionsHtml);
+            permissionsList.innerHTML = permissionsHtml;
+        } else {
+            console.log('⚠️ No permissions found, showing no permissions message');
+            permissionsList.innerHTML = '<div class="text-muted">No specific permissions defined for current role.</div>';
+        }
+    } catch (error) {
+        console.error('Error showing current role permissions:', error);
     }
 }
 

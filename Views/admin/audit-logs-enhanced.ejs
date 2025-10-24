@@ -99,7 +99,7 @@
 
 <!-- Details Modal -->
 <div class="modal fade" id="detailsModal" tabindex="-1">
-    <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header modern-modal">
                 <h5 class="modal-title"><i class="fas fa-info-circle me-2"></i>Log Details</h5>
@@ -134,13 +134,13 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // Ensure modals are properly centered when shown
+    // Ensure modals are properly positioned when shown
     document.addEventListener('shown.bs.modal', function(event) {
         const modal = event.target;
         const modalDialog = modal.querySelector('.modal-dialog');
         if (modalDialog) {
-            // Force centering
-            modalDialog.style.margin = '1.75rem auto';
+            // Set proper positioning without centering
+            modalDialog.style.margin = '1rem auto';
         }
     });
 });
@@ -467,7 +467,7 @@ function showLastError(scriptName, errorMessage) {
     const modal = document.createElement('div');
     modal.className = 'modal fade';
     modal.innerHTML = `
-        <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-dialog">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">Last Error - ${scriptName}</h5>
