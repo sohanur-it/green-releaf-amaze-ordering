@@ -46,18 +46,18 @@ const METRC_CONFIG = {
 // Field mapping for outgoing transfers (production schema)
 const OUTGOING_TRANSFER_FIELDS = {
     metrcid: 'id',
-    transfer_type: 'transferType',
-    state: 'state',
-    estimated_departure_date_time: 'estimatedDepartureDateTime',
-    estimated_arrival_date_time: 'estimatedArrivalDateTime',
-    actual_departure_date_time: 'actualDepartureDateTime',
-    actual_arrival_date_time: 'actualArrivalDateTime',
-    delivery_count: 'deliveryCount',
-    package_count: 'packageCount',
-    created_by_user_id: 'createdByUserId',
-    created_date_time: 'createdDateTime',
+    deliveryid: 'deliveryId',
+    shipmenttypename: 'shipmentTypeName',
+    estimateddeparturedatetime: 'estimatedDepartureDateTime',
+    estimatedarrivaldatetime: 'estimatedArrivalDateTime',
+    actualdeparturedatetime: 'actualDepartureDateTime',
+    actualarrivaldatetime: 'actualArrivalDateTime',
+    deliverycount: 'deliveryCount',
+    packagecount: 'packageCount',
+    createdbyusername: 'createdByUsername',
+    createddatetime: 'createdDateTime',
     lastmodified: 'lastModified',  // Production uses lastmodified (one word)
-    sync_license: 'license_number'
+    synclicense: 'license_number'
 };
 
 // Create database pool
@@ -112,8 +112,8 @@ async function getLatestLastModified(client) {
     try {
         const query = `
             SELECT MAX(lastmodified) as latest_timestamp 
-            FROM outgoingtransfers 
-            WHERE sync_license = $1
+            FROM activeoutgoingtransfers 
+            WHERE synclicense = $1
         `;
         
         const result = await client.query(query, [METRC_CONFIG.licenseNumber]);
@@ -235,9 +235,23 @@ function prepareValue(value, fieldName) {
     }
     
     // Handle date fields - ensure UTC storage
-    if (fieldName.includes('date') || fieldName.includes('Date')) {
+    if (fieldName.includes('date') || fieldName.includes('Date') || fieldName.includes('time') || fieldName.includes('Time') || fieldName.includes('datetime') || fieldName.includes('DateTime')) {
         if (value === '') return null;
+        
+        // Check for invalid dates (like "0000-12-31T17:58:20.000Z" or "0001-01-01T00:00:00.000")
+        if (typeof value === 'string' && (value.includes('0000-') || value.includes('1900-') || value.includes('0001-01-01'))) {
+            console.log(`⚠️ Invalid date detected: ${value} for field ${fieldName}, returning null`);
+            return null; // Return null for invalid dates
+        }
+        
         const date = new Date(value);
+        
+        // Check if the date is valid
+        if (isNaN(date.getTime())) {
+            console.log(`⚠️ Invalid date detected: ${value} for field ${fieldName}, returning null`);
+            return null; // Return null for invalid dates
+        }
+        
         // Return UTC timestamp for consistent storage
         return date.toISOString();
     }
@@ -295,11 +309,11 @@ async function performBulkUpsert(client, records) {
     const fieldList = fields.join(', ');
     const valuePlaceholders = fields.map((_, index) => `$${index + 1}`).join(', ');
     
-    const updateFields = fields.filter(field => field !== 'metrcid' && field !== 'sync_license');
+    const updateFields = fields.filter(field => field !== 'metrcid' && field !== 'synclicense');
     const updateClause = updateFields.map(field => `${field} = EXCLUDED.${field}`).join(', ');
     
     const upsertQuery = `
-        INSERT INTO outgoingtransfers (${fieldList})
+        INSERT INTO activeoutgoingtransfers (${fieldList})
         VALUES ${records.map((_, recordIndex) => 
             `(${fields.map((_, fieldIndex) => 
                 `$${recordIndex * fields.length + fieldIndex + 1}`
@@ -312,7 +326,7 @@ async function performBulkUpsert(client, records) {
     const values = [];
     records.forEach(record => {
         fields.forEach(field => {
-            if (field === 'sync_license') {
+            if (field === 'synclicense') {
                 values.push(METRC_CONFIG.licenseNumber);
             } else {
                 const apiField = OUTGOING_TRANSFER_FIELDS[field];
@@ -515,7 +529,7 @@ async function syncOutgoingTransfersEnhanced() {
         
         // Get existing transfers for comparison
         const existingResult = await client.query(
-            'SELECT metrcid, lastmodified FROM outgoingtransfers WHERE sync_license = $1',
+            'SELECT metrcid, lastmodified FROM activeoutgoingtransfers WHERE synclicense = $1',
             [METRC_CONFIG.licenseNumber]
         );
         
@@ -585,8 +599,8 @@ async function syncOutgoingTransfersEnhanced() {
         if (transfersToDelete.length > 0) {
             console.log(`🗑️ Deleting ${transfersToDelete.length} stale transfers...`);
             const deleteQuery = `
-                DELETE FROM outgoingtransfers 
-                WHERE metrcid = ANY($1) AND sync_license = $2
+                DELETE FROM activeoutgoingtransfers 
+                WHERE metrcid = ANY($1) AND synclicense = $2
             `;
             await client.query(deleteQuery, [transfersToDelete, METRC_CONFIG.licenseNumber]);
         }

@@ -44,12 +44,12 @@ async function checkProductionSchema() {
             console.log(`  - ${row.column_name}: ${row.data_type}`);
         });
         
-        // Check outgoingtransfers table structure
-        console.log('\n📋 Outgoing Transfers Table Structure:');
+        // Check activeoutgoingtransfers table structure
+        console.log('\n📋 Active Outgoing Transfers Table Structure:');
         const outgoingTransfersResult = await client.query(`
             SELECT column_name, data_type 
             FROM information_schema.columns 
-            WHERE table_name = 'outgoingtransfers' 
+            WHERE table_name = 'activeoutgoingtransfers' 
             ORDER BY ordinal_position
         `);
         

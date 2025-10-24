@@ -11,18 +11,18 @@ ALTER TABLE activepackages RENAME COLUMN unitofmeasureabbreviation TO unit_of_me
 ALTER TABLE activepackages RENAME COLUMN createdbyuserid TO created_by_user_id;
 ALTER TABLE activepackages RENAME COLUMN createddatetime TO created_date_time;
 
--- Update outgoingtransfers table columns
-ALTER TABLE outgoingtransfers RENAME COLUMN lastmodified TO last_modified;
-ALTER TABLE outgoingtransfers RENAME COLUMN synclicense TO sync_license;
-ALTER TABLE outgoingtransfers RENAME COLUMN transfertype TO transfer_type;
-ALTER TABLE outgoingtransfers RENAME COLUMN estimateddeparturedatetime TO estimated_departure_date_time;
-ALTER TABLE outgoingtransfers RENAME COLUMN estimatedarrivaldatetime TO estimated_arrival_date_time;
-ALTER TABLE outgoingtransfers RENAME COLUMN actualdeparturedatetime TO actual_departure_date_time;
-ALTER TABLE outgoingtransfers RENAME COLUMN actualarrivaldatetime TO actual_arrival_date_time;
-ALTER TABLE outgoingtransfers RENAME COLUMN deliverycount TO delivery_count;
-ALTER TABLE outgoingtransfers RENAME COLUMN packagecount TO package_count;
-ALTER TABLE outgoingtransfers RENAME COLUMN createdbyuserid TO created_by_user_id;
-ALTER TABLE outgoingtransfers RENAME COLUMN createddatetime TO created_date_time;
+-- Update activeoutgoingtransfers table columns
+ALTER TABLE activeoutgoingtransfers RENAME COLUMN lastmodified TO last_modified;
+ALTER TABLE activeoutgoingtransfers RENAME COLUMN synclicense TO sync_license;
+ALTER TABLE activeoutgoingtransfers RENAME COLUMN transfertype TO transfer_type;
+ALTER TABLE activeoutgoingtransfers RENAME COLUMN estimateddeparturedatetime TO estimated_departure_date_time;
+ALTER TABLE activeoutgoingtransfers RENAME COLUMN estimatedarrivaldatetime TO estimated_arrival_date_time;
+ALTER TABLE activeoutgoingtransfers RENAME COLUMN actualdeparturedatetime TO actual_departure_date_time;
+ALTER TABLE activeoutgoingtransfers RENAME COLUMN actualarrivaldatetime TO actual_arrival_date_time;
+ALTER TABLE activeoutgoingtransfers RENAME COLUMN deliverycount TO delivery_count;
+ALTER TABLE activeoutgoingtransfers RENAME COLUMN packagecount TO package_count;
+ALTER TABLE activeoutgoingtransfers RENAME COLUMN createdbyuserid TO created_by_user_id;
+ALTER TABLE activeoutgoingtransfers RENAME COLUMN createddatetime TO created_date_time;
 
 -- Update strains table columns
 ALTER TABLE strains RENAME COLUMN lastmodified TO last_modified;
@@ -63,8 +63,8 @@ ALTER TABLE intransitpackages RENAME COLUMN createddatetime TO created_date_time
 -- Update indexes to match new column names
 DROP INDEX IF EXISTS idx_activepackages_lastmodified;
 DROP INDEX IF EXISTS idx_activepackages_synclicense;
-DROP INDEX IF EXISTS idx_outgoingtransfers_lastmodified;
-DROP INDEX IF EXISTS idx_outgoingtransfers_synclicense;
+DROP INDEX IF EXISTS idx_activeoutgoingtransfers_lastmodified;
+DROP INDEX IF EXISTS idx_activeoutgoingtransfers_synclicense;
 DROP INDEX IF EXISTS idx_strains_lastmodified;
 DROP INDEX IF EXISTS idx_strains_synclicense;
 DROP INDEX IF EXISTS idx_items_lastmodified;
@@ -77,8 +77,8 @@ DROP INDEX IF EXISTS idx_intransitpackages_synclicense;
 -- Recreate indexes with new column names
 CREATE INDEX idx_activepackages_last_modified ON activepackages(last_modified);
 CREATE INDEX idx_activepackages_sync_license ON activepackages(sync_license);
-CREATE INDEX idx_outgoingtransfers_last_modified ON outgoingtransfers(last_modified);
-CREATE INDEX idx_outgoingtransfers_sync_license ON outgoingtransfers(sync_license);
+CREATE INDEX idx_activeoutgoingtransfers_last_modified ON activeoutgoingtransfers(last_modified);
+CREATE INDEX idx_activeoutgoingtransfers_sync_license ON activeoutgoingtransfers(sync_license);
 CREATE INDEX idx_strains_last_modified ON strains(last_modified);
 CREATE INDEX idx_strains_sync_license ON strains(sync_license);
 CREATE INDEX idx_items_last_modified ON items(last_modified);
@@ -92,8 +92,8 @@ CREATE INDEX idx_intransitpackages_sync_license ON intransitpackages(sync_licens
 ALTER TABLE activepackages DROP CONSTRAINT IF EXISTS activepackages_metrcid_key;
 ALTER TABLE activepackages ADD CONSTRAINT activepackages_metrcid_key UNIQUE (metrcid);
 
-ALTER TABLE outgoingtransfers DROP CONSTRAINT IF EXISTS outgoingtransfers_metrcid_key;
-ALTER TABLE outgoingtransfers ADD CONSTRAINT outgoingtransfers_metrcid_key UNIQUE (metrcid);
+ALTER TABLE activeoutgoingtransfers DROP CONSTRAINT IF EXISTS activeactiveoutgoingtransfers_metrcid_key;
+ALTER TABLE activeoutgoingtransfers ADD CONSTRAINT activeactiveoutgoingtransfers_metrcid_key UNIQUE (metrcid);
 
 ALTER TABLE strains DROP CONSTRAINT IF EXISTS strains_metrcid_key;
 ALTER TABLE strains ADD CONSTRAINT strains_metrcid_key UNIQUE (metrcid);

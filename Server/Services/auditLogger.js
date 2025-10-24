@@ -5,17 +5,11 @@
  * Ensures accountability, troubleshooting, security, and compliance
  */
 
-const { Pool } = require('pg');
+const { pool } = require('../config/database');
 
 class AuditLogger {
     constructor() {
-        this.pool = new Pool({
-            user: process.env.DB_USER || 'postgres',
-            host: process.env.DB_HOST || 'localhost',
-            database: process.env.DB_DATABASE || 'green_releaf_dev',
-            password: process.env.DB_PASSWORD || 'dev_password_123',
-            port: parseInt(process.env.DB_PORT, 10) || 5432,
-        });
+        this.pool = pool; // Use shared connection pool
     }
 
     /**
@@ -43,6 +37,36 @@ class AuditLogger {
         const client = await this.pool.connect();
         
         try {
+            // Get user information if userId is provided
+            let userInfo = null;
+            if (userId) {
+                try {
+                    const userResult = await client.query(`
+                        SELECT username, first_name, last_name, email
+                        FROM users WHERE id = $1
+                    `, [userId]);
+                    
+                    if (userResult.rows.length > 0) {
+                        const user = userResult.rows[0];
+                        userInfo = {
+                            userId: userId,
+                            username: user.username,
+                            firstName: user.first_name,
+                            lastName: user.last_name,
+                            email: user.email
+                        };
+                    }
+                } catch (userError) {
+                    console.warn('⚠️ Could not fetch user info for audit log:', userError.message);
+                }
+            }
+
+            // Merge user info into details
+            const enhancedDetails = {
+                ...(details || {}),
+                ...(userInfo ? { userInfo } : {})
+            };
+
             const query = `
                 INSERT INTO "ORDERS-audit_log" 
                 (user_id, action, resource_type, resource_id, details, status, source_ip)
@@ -55,7 +79,7 @@ class AuditLogger {
                 action,
                 resourceType,
                 resourceId,
-                details ? JSON.stringify(details) : null,
+                JSON.stringify(enhancedDetails),
                 status,
                 sourceIp
             ];
@@ -337,10 +361,10 @@ class AuditLogger {
     }
 
     /**
-     * Close database connection
+     * Close database connection (no-op since using shared pool)
      */
     async close() {
-        await this.pool.end();
+        // No-op: Using shared pool, don't close it here
     }
 
     /**
@@ -426,19 +450,36 @@ class AuditLogger {
             
             const result = await client.query(query, values);
             
-            return result.rows.map(row => ({
-                id: row.id,
-                userId: row.user_id,
-                username: row.username,
-                userFullName: row.firstname && row.lastname ? `${row.firstname} ${row.lastname}` : null,
-                action: row.action,
-                resourceType: row.resource_type,
-                resourceId: row.resource_id,
-                details: row.details ? (typeof row.details === 'string' ? JSON.parse(row.details) : row.details) : null,
-                status: row.status,
-                sourceIp: row.source_ip,
-                timestamp: row.timestamp
-            }));
+            return result.rows.map(row => {
+                const details = row.details ? (typeof row.details === 'string' ? JSON.parse(row.details) : row.details) : null;
+                
+                // Use user info from details if user table data is not available
+                let userFullName = null;
+                let username = row.username;
+                
+                if (row.firstname && row.lastname) {
+                    userFullName = `${row.firstname} ${row.lastname}`;
+                } else if (details && details.userInfo) {
+                    userFullName = details.userInfo.firstName && details.userInfo.lastName 
+                        ? `${details.userInfo.firstName} ${details.userInfo.lastName}` 
+                        : details.userInfo.username || 'Unknown User';
+                    username = details.userInfo.username || username;
+                }
+                
+                return {
+                    id: row.id,
+                    userId: row.user_id,
+                    username: username,
+                    userFullName: userFullName,
+                    action: row.action,
+                    resourceType: row.resource_type,
+                    resourceId: row.resource_id,
+                    details: details,
+                    status: row.status,
+                    sourceIp: row.source_ip,
+                    timestamp: row.timestamp
+                };
+            });
             
         } catch (error) {
             console.error('❌ Failed to get audit logs:', error.message);
@@ -658,15 +699,30 @@ class AuditLogger {
             }
             
             const row = result.rows[0];
+            const details = row.details ? (typeof row.details === 'string' ? JSON.parse(row.details) : row.details) : null;
+            
+            // Use user info from details if user table data is not available
+            let userFullName = null;
+            let username = row.username;
+            
+            if (row.firstname && row.lastname) {
+                userFullName = `${row.firstname} ${row.lastname}`;
+            } else if (details && details.userInfo) {
+                userFullName = details.userInfo.firstName && details.userInfo.lastName 
+                    ? `${details.userInfo.firstName} ${details.userInfo.lastName}` 
+                    : details.userInfo.username || 'Unknown User';
+                username = details.userInfo.username || username;
+            }
+            
             return {
                 id: row.id,
                 userId: row.user_id,
-                username: row.username,
-                userFullName: row.firstname && row.lastname ? `${row.firstname} ${row.lastname}` : null,
+                username: username,
+                userFullName: userFullName,
                 action: row.action,
                 resourceType: row.resource_type,
                 resourceId: row.resource_id,
-                details: row.details ? (typeof row.details === 'string' ? JSON.parse(row.details) : row.details) : null,
+                details: details,
                 status: row.status,
                 sourceIp: row.source_ip,
                 timestamp: row.timestamp

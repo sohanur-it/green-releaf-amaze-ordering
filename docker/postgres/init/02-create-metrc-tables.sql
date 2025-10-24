@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS intransitpackages (
 );
 
 -- Outgoing Transfers Table
-CREATE TABLE IF NOT EXISTS outgoingtransfers (
+CREATE TABLE IF NOT EXISTS activeoutgoingtransfers (
     id SERIAL PRIMARY KEY,
     metrcid INTEGER UNIQUE NOT NULL,
     manifestnumber VARCHAR(255),
@@ -266,10 +266,10 @@ CREATE INDEX IF NOT EXISTS idx_intransitpackages_metrcid ON intransitpackages(me
 CREATE INDEX IF NOT EXISTS idx_intransitpackages_label ON intransitpackages(label);
 CREATE INDEX IF NOT EXISTS idx_intransitpackages_synclicense ON intransitpackages(synclicense);
 
-CREATE INDEX IF NOT EXISTS idx_outgoingtransfers_metrcid ON outgoingtransfers(metrcid);
-CREATE INDEX IF NOT EXISTS idx_outgoingtransfers_manifestnumber ON outgoingtransfers(manifestnumber);
-CREATE INDEX IF NOT EXISTS idx_outgoingtransfers_synclicense ON outgoingtransfers(synclicense);
-CREATE INDEX IF NOT EXISTS idx_outgoingtransfers_lastmodified ON outgoingtransfers(lastmodified);
+CREATE INDEX IF NOT EXISTS idx_activeoutgoingtransfers_metrcid ON activeoutgoingtransfers(metrcid);
+CREATE INDEX IF NOT EXISTS idx_activeoutgoingtransfers_manifestnumber ON activeoutgoingtransfers(manifestnumber);
+CREATE INDEX IF NOT EXISTS idx_activeoutgoingtransfers_synclicense ON activeoutgoingtransfers(synclicense);
+CREATE INDEX IF NOT EXISTS idx_activeoutgoingtransfers_lastmodified ON activeoutgoingtransfers(lastmodified);
 
 CREATE INDEX IF NOT EXISTS idx_items_metrcid ON items(metrcid);
 CREATE INDEX IF NOT EXISTS idx_items_name ON items(name);
@@ -286,7 +286,7 @@ CREATE TRIGGER update_activepackages_updated_at BEFORE UPDATE ON activepackages 
 CREATE TRIGGER update_inactivepackages_updated_at BEFORE UPDATE ON inactivepackages FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_transferredpackages_updated_at BEFORE UPDATE ON transferredpackages FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_intransitpackages_updated_at BEFORE UPDATE ON intransitpackages FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
-CREATE TRIGGER update_outgoingtransfers_updated_at BEFORE UPDATE ON outgoingtransfers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+CREATE TRIGGER update_activeoutgoingtransfers_updated_at BEFORE UPDATE ON activeoutgoingtransfers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_items_updated_at BEFORE UPDATE ON items FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 CREATE TRIGGER update_strains_updated_at BEFORE UPDATE ON strains FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
@@ -298,4 +298,4 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO postgres;
 
 -- Log successful creation
 INSERT INTO audit_log (action, resource, details) VALUES
-    ('metrc.tables.create', 'database', '{"message": "METRC sync tables created successfully", "tables": ["activepackages", "inactivepackages", "transferredpackages", "intransitpackages", "outgoingtransfers", "items", "strains"]}');
+    ('metrc.tables.create', 'database', '{"message": "METRC sync tables created successfully", "tables": ["activepackages", "inactivepackages", "transferredpackages", "intransitpackages", "activeoutgoingtransfers", "items", "strains"]}');

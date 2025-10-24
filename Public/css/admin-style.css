@@ -224,6 +224,211 @@ html.sidebar-is-collapsed .sidebar-title-full {
     height: 40px;
 }
 
+/* -- RESPONSIVE DESIGN FIXES -- */
+/* Fix modal positioning issues on different screen sizes */
+.modal-dialog {
+    margin: 1.75rem auto !important;
+    max-height: calc(100vh - 3.5rem);
+    display: flex;
+    align-items: center;
+}
+
+.modal-content {
+    max-height: calc(100vh - 3.5rem);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-body {
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* Bootstrap modal fixes for better positioning */
+.modal {
+    z-index: 1055 !important;
+}
+
+.modal-backdrop {
+    z-index: 1050 !important;
+}
+
+/* Fix for modals appearing at bottom on small screens */
+@media (max-width: 768px) {
+    .modal-dialog {
+        margin: 0.5rem !important;
+        max-width: calc(100vw - 1rem) !important;
+        max-height: calc(100vh - 1rem) !important;
+    }
+    
+    .modal-content {
+        max-height: calc(100vh - 1rem) !important;
+    }
+    
+    /* Ensure modals are centered on mobile */
+    .modal {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+}
+
+/* Fix for tablets */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .modal-dialog {
+        margin: 1rem auto !important;
+        max-width: 90vw !important;
+    }
+}
+
+/* Fix for very small screens */
+@media (max-width: 480px) {
+    .modal-dialog {
+        margin: 0.25rem !important;
+        max-width: calc(100vw - 0.5rem) !important;
+    }
+    
+    .modal-header {
+        padding: 0.75rem 1rem !important;
+    }
+    
+    .modal-body {
+        padding: 1rem !important;
+    }
+    
+    .modal-footer {
+        padding: 0.75rem 1rem !important;
+    }
+}
+
+/* Fix for large screens to prevent modals from being too wide */
+@media (min-width: 1200px) {
+    .modal-dialog.modal-lg {
+        max-width: 800px !important;
+    }
+    
+    .modal-dialog.modal-xl {
+        max-width: 1000px !important;
+    }
+}
+
+/* Ensure proper stacking context */
+.modal.show {
+    display: flex !important;
+    align-items: center !important;
+}
+
+/* Fix for Bootstrap 5 modal positioning */
+.modal-dialog-centered {
+    display: flex !important;
+    align-items: center !important;
+    min-height: calc(100% - 3.5rem) !important;
+}
+
+/* Additional fixes for role assignment modal */
+#roleModal .modal-dialog {
+    max-width: 800px !important;
+}
+
+#roleModal .modal-content {
+    border-radius: 20px !important;
+}
+
+/* Fix for audit logs modal */
+#detailsModal .modal-dialog {
+    max-width: 900px !important;
+}
+
+/* Ensure proper z-index stacking */
+.modal.fade .modal-dialog {
+    transform: translate(0, -50px) !important;
+    transition: transform 0.3s ease-out !important;
+}
+
+.modal.show .modal-dialog {
+    transform: none !important;
+}
+
+/* Fix for success messages positioning */
+.alert.position-fixed {
+    z-index: 1060 !important;
+}
+
+/* Responsive table fixes */
+@media (max-width: 768px) {
+    .table-responsive {
+        border: none !important;
+    }
+    
+    .modern-table {
+        font-size: 0.875rem;
+    }
+    
+    .modern-table th,
+    .modern-table td {
+        padding: 0.5rem !important;
+    }
+    
+    /* Hide less important columns on mobile */
+    .modern-table th:nth-child(n+4),
+    .modern-table td:nth-child(n+4) {
+        display: none;
+    }
+}
+
+/* Fix for sidebar on mobile */
+@media (max-width: 768px) {
+    .sidebar {
+        transform: translateX(-100%);
+        transition: transform 0.3s ease;
+    }
+    
+    .sidebar.show {
+        transform: translateX(0);
+    }
+    
+    .main-content {
+        margin-left: 0 !important;
+        padding: 1rem !important;
+    }
+    
+    .app-container.sidebar-collapsed .main-content {
+        margin-left: 0 !important;
+    }
+}
+
+/* Fix for stats cards on mobile */
+@media (max-width: 768px) {
+    .stats-card h3 {
+        font-size: 2rem !important;
+    }
+    
+    .stats-card {
+        padding: 1rem !important;
+        margin-bottom: 1rem !important;
+    }
+}
+
+/* Fix for dashboard cards on mobile */
+@media (max-width: 768px) {
+    .dashboard-card {
+        padding: 1rem !important;
+        margin-bottom: 1rem !important;
+    }
+}
+
+/* Fix for modern filter on mobile */
+@media (max-width: 768px) {
+    .modern-filter {
+        padding: 1rem !important;
+    }
+    
+    .modern-filter .row > div {
+        margin-bottom: 0.5rem;
+    }
+}
+
 /* -- STYLES FOR TAGS -- */
 .tag-pill-wrapper {
     position: relative;

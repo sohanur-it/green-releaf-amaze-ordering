@@ -203,15 +203,15 @@
 
 <!-- Modern Role Assignment Modal -->
 <div class="modal fade modern-modal" id="roleModal" tabindex="-1">
-    <div class="modal-dialog modal-lg" style="max-width: 800px; margin: 1.75rem auto;">
-        <div class="modal-content" style="max-height: calc(100vh - 3.5rem);">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">
                     <i class="fas fa-user-shield me-2"></i>Assign Role
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body p-4" style="max-height: calc(100vh - 12rem); overflow-y: auto;">
+            <div class="modal-body p-4">
                 <div class="mb-4">
                     <h6 class="mb-3">User Information</h6>
                     <div class="d-flex align-items-center mb-3">
@@ -275,6 +275,28 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         renderUsers();
     });
+    
+    // Fix modal positioning on window resize
+    window.addEventListener('resize', function() {
+        const modals = document.querySelectorAll('.modal.show');
+        modals.forEach(modal => {
+            const modalInstance = bootstrap.Modal.getInstance(modal);
+            if (modalInstance) {
+                // Force modal to recalculate position
+                modalInstance._adjustDialog();
+            }
+        });
+    });
+    
+    // Ensure modals are properly centered when shown
+    document.addEventListener('shown.bs.modal', function(event) {
+        const modal = event.target;
+        const modalDialog = modal.querySelector('.modal-dialog');
+        if (modalDialog) {
+            // Force centering
+            modalDialog.style.margin = '1.75rem auto';
+        }
+    });
 });
 
 async function loadUsers() {
@@ -333,14 +355,14 @@ function renderUsers() {
             '<span class="text-muted">No roles</span>';
         
         const actionsHtml = user.status === 'pending' ? `
-            <button class="btn btn-sm btn-success me-1" onclick="approveUser(${user.id})">
+            <button class="btn btn-sm btn-success me-1 mb-1" onclick="approveUser(${user.id})">
                 <i class="fas fa-check"></i> Approve
             </button>
             <button class="btn btn-sm btn-danger" onclick="revokeUser(${user.id})">
                 <i class="fas fa-times"></i> Reject
             </button>
         ` : `
-            <button class="btn btn-sm btn-primary me-1" onclick="openRoleModal(${user.id})">
+            <button class="btn btn-sm btn-primary me-1 mb-1" onclick="openRoleModal(${user.id})">
                 <i class="fas fa-user-cog"></i> Assign Role
             </button>
             <button class="btn btn-sm btn-warning" onclick="revokeUser(${user.id})">
@@ -372,13 +394,23 @@ function renderUsers() {
 }
 
 function openRoleModal(userId) {
+    console.log('Opening role modal for userId:', userId);
+    console.log('Available users:', allUsers.map(u => ({ id: u.id, username: u.username, firstname: u.firstname, lastname: u.lastname })));
+    
     selectedUser = allUsers.find(u => u.id === userId);
-    if (!selectedUser) return;
+    if (!selectedUser) {
+        console.error('User not found with ID:', userId);
+        return;
+    }
+    
+    console.log('Selected user:', selectedUser);
     
     const initials = (selectedUser.firstname?.[0] || '') + (selectedUser.lastname?.[0] || '');
-    document.getElementById('modalUserAvatar').textContent = initials;
-    document.getElementById('modalUserName').textContent = `${selectedUser.firstname} ${selectedUser.lastname}`;
-    document.getElementById('modalUserEmail').textContent = selectedUser.email;
+    const fullName = `${selectedUser.firstname || ''} ${selectedUser.lastname || ''}`.trim() || selectedUser.username || 'Unknown User';
+    
+    document.getElementById('modalUserAvatar').textContent = initials || '?';
+    document.getElementById('modalUserName').textContent = fullName;
+    document.getElementById('modalUserEmail').textContent = selectedUser.email || 'No email';
     
     // Display current role
     const currentRoleName = document.getElementById('currentRoleName');
