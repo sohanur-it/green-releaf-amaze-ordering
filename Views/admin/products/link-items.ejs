@@ -1,6 +1,19 @@
 <!-- Views/admin/products/link-items.ejs -->
 
-<div class="link-items-container">
+<!-- Loading Overlay -->
+<div id="pageLoader" class="page-loader">
+    <div class="loader-content">
+        <div class="spinner"></div>
+        <h3>Loading Product Items...</h3>
+        <p>Please wait while we load METRC items</p>
+    </div>
+</div>
+<script>
+// Prevent scrolling while loader is visible
+document.body.style.overflow = 'hidden';
+</script>
+
+<div class="link-items-container" id="pageContent" style="visibility: hidden; position: absolute;">
     <div class="page-header">
         <div>
             <a href="/admin/products" class="back-link">&larr;</a>
@@ -20,9 +33,9 @@
             <div class="panel-body" id="availableItems">
                 <% availableItems.forEach(itemName => { 
                     if (!linkedItems.includes(itemName)) { %>
-                        <div class="item-card available" data-item="<%= itemName %>" draggable="true">
+                        <div class="item-card available" data-item='<%- JSON.stringify(itemName) %>' draggable="true">
                             <div class="item-name"><%= itemName %></div>
-                            <button class="link-btn" onclick="linkItem(this, '<%= itemName %>')">
+                            <button class="link-btn" data-action="link" data-item='<%- JSON.stringify(itemName) %>'>
                                 <i class="fas fa-arrow-right"></i> Link
                             </button>
                         </div>
@@ -46,9 +59,9 @@
                     </div>
                 <% } else { %>
                     <% linkedItems.forEach(itemName => { %>
-                        <div class="item-card linked" data-item="<%= itemName %>">
+                        <div class="item-card linked" data-item='<%- JSON.stringify(itemName) %>'>
                             <div class="item-name"><%= itemName %></div>
-                            <button class="unlink-btn" onclick="unlinkItem(this, '<%= itemName %>')">
+                            <button class="unlink-btn" data-action="unlink" data-item='<%- JSON.stringify(itemName) %>'>
                                 <i class="fas fa-times"></i> Unlink
                             </button>
                         </div>
@@ -87,38 +100,202 @@
 
 <script>
 // Store product ID and current state
-const productId = <%= product.entry_id %>;
-let linkedItemsList = <%= JSON.stringify(linkedItems) %>;
+const productId = <%- JSON.stringify(product.entry_id) %>;
+let linkedItemsList = <%- JSON.stringify(linkedItems) %>;
 
-// Search functionality
-document.getElementById('searchInput').addEventListener('input', function(e) {
-    const searchTerm = e.target.value.toLowerCase();
-    const items = document.querySelectorAll('#availableItems .item-card');
+// Helper functions for escaping
+function escapeHtml(text) {
+    const map = {
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    };
+    return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+function escapeAttr(text) {
+    return escapeHtml(text).replace(/"/g, '&quot;');
+}
+
+// Event delegation for link/unlink buttons
+document.addEventListener('click', function(e) {
+    // Stop propagation to prevent double-clicks on child elements
+    if (e.target.closest('[data-action]')) {
+        e.stopPropagation();
+    }
     
-    let visibleCount = 0;
-    items.forEach(item => {
-        const itemName = item.dataset.item.toLowerCase();
-        if (itemName.includes(searchTerm)) {
-            item.style.display = 'flex';
-            visibleCount++;
-        } else {
-            item.style.display = 'none';
-        }
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    
+    // Prevent double-triggering
+    if (btn.dataset.processing === 'true') return;
+    btn.dataset.processing = 'true';
+    
+    const action = btn.dataset.action;
+    let itemName;
+    try {
+        itemName = JSON.parse(btn.dataset.item || '""');
+    } catch (e) {
+        itemName = btn.dataset.item; // Fallback to raw value
+    }
+    
+    if (action === 'link') {
+        linkItem(btn, itemName);
+    } else if (action === 'unlink') {
+        unlinkItem(btn, itemName);
+    }
+    
+    // Reset after a short delay
+    setTimeout(() => {
+        btn.dataset.processing = 'false';
+    }, 100);
+});
+
+// Hide loader and show content only when everything is ready
+function showContent() {
+    const loader = document.getElementById('pageLoader');
+    const content = document.getElementById('pageContent');
+    
+    if (loader && content && !content.classList.contains('shown')) {
+        // Mark as shown to prevent multiple calls
+        content.classList.add('shown');
+        
+        // Reset positioning to normal
+        content.style.visibility = 'visible';
+        content.style.position = 'static';
+        
+        // Hide loader with smooth transition
+        setTimeout(function() {
+            loader.classList.add('hidden');
+            // Re-enable scrolling
+            document.body.style.overflow = '';
+        }, 50);
+    }
+}
+
+// Wait for everything to load: DOM, images, fonts, etc.
+if (document.readyState === 'complete') {
+    // Page already loaded
+    setTimeout(showContent, 300);
+} else {
+    // Wait for full page load
+    window.addEventListener('load', function() {
+        // Small delay to ensure all styles are applied
+        setTimeout(showContent, 200);
     });
+}
+
+// Safety fallback - always show after max 3 seconds
+setTimeout(showContent, 3000);
+
+// All DOM-dependent functionality
+document.addEventListener('DOMContentLoaded', function() {
+    // Search functionality
+    const searchInput = document.getElementById('searchInput');
+    if (searchInput) {
+        searchInput.addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            const items = document.querySelectorAll('#availableItems .item-card');
+            
+            let visibleCount = 0;
+            items.forEach(item => {
+                const itemName = item.dataset.item.toLowerCase();
+                if (itemName.includes(searchTerm)) {
+                    item.style.display = 'flex';
+                    visibleCount++;
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+            
+            document.getElementById('availableCount').textContent = visibleCount;
+        });
+    }
     
-    document.getElementById('availableCount').textContent = visibleCount;
+    // Drag and drop support
+    const availablePanel = document.getElementById('availableItems');
+    const linkedPanel = document.getElementById('linkedItems');
+    
+    if (availablePanel && linkedPanel) {
+        // Drag start
+        availablePanel.addEventListener('dragstart', function(e) {
+            if (e.target.classList.contains('item-card')) {
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', e.target.getAttribute('data-item'));
+                e.target.style.opacity = '0.5';
+            }
+        });
+        
+        // Drag end
+        availablePanel.addEventListener('dragend', function(e) {
+            if (e.target.classList.contains('item-card')) {
+                e.target.style.opacity = '1';
+            }
+        });
+        
+        // Allow drop on linked panel
+        linkedPanel.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            linkedPanel.style.background = '#f0f8ff';
+        });
+        
+        linkedPanel.addEventListener('dragleave', function(e) {
+            linkedPanel.style.background = '';
+        });
+        
+        linkedPanel.addEventListener('drop', function(e) {
+            e.preventDefault();
+            linkedPanel.style.background = '';
+            
+            const itemNameJson = e.dataTransfer.getData('text/plain');
+            let itemName;
+            try {
+                itemName = JSON.parse(itemNameJson);
+            } catch (e) {
+                itemName = itemNameJson;
+            }
+            
+            const itemCard = availablePanel.querySelector(`[data-item='${itemNameJson}']`);
+            
+            if (itemCard) {
+                const linkBtn = itemCard.querySelector('.link-btn');
+                linkItem(linkBtn, itemName);
+            }
+        });
+    }
 });
 
 // Link item
 function linkItem(button, itemName) {
-    const itemCard = button.closest('.item-card');
+    console.log('Linking item:', itemName);
+    console.log('Current linked items before:', linkedItemsList);
+    
+    // Check if item is already linked to prevent duplicates
+    if (linkedItemsList.includes(itemName)) {
+        console.warn('Item already linked:', itemName);
+        alert(`⚠️ This item is already linked!\n\n"${itemName}"\n\nPlease unlink it first if you want to relink it.`);
+        return; // Already linked, don't add again
+    }
+    
+    const itemCard = button?.closest('.item-card');
     const linkedPanel = document.getElementById('linkedItems');
+    
+    // Validate button exists
+    if (!itemCard) {
+        console.error('Item card not found');
+        return;
+    }
     
     // Remove from available
     itemCard.remove();
     
     // Add to linked
     linkedItemsList.push(itemName);
+    
+    console.log('Current linked items after:', linkedItemsList);
     
     // Clear empty state if exists
     const emptyState = linkedPanel.querySelector('.empty-state');
@@ -129,10 +306,10 @@ function linkItem(button, itemName) {
     // Create linked card
     const linkedCard = document.createElement('div');
     linkedCard.className = 'item-card linked';
-    linkedCard.dataset.item = itemName;
+    linkedCard.setAttribute('data-item', JSON.stringify(itemName));
     linkedCard.innerHTML = `
-        <div class="item-name">${itemName}</div>
-        <button class="unlink-btn" onclick="unlinkItem(this, '${itemName}')">
+        <div class="item-name">${escapeHtml(itemName)}</div>
+        <button class="unlink-btn" data-action="unlink" data-item='${JSON.stringify(itemName)}'>
             <i class="fas fa-times"></i> Unlink
         </button>
     `;
@@ -143,21 +320,36 @@ function linkItem(button, itemName) {
 
 // Unlink item
 function unlinkItem(button, itemName) {
+    console.log('Unlinking item:', itemName);
+    console.log('Current linked items:', linkedItemsList);
+    
     const itemCard = button.closest('.item-card');
     const availablePanel = document.getElementById('availableItems');
     
-    // Remove from linked
+    // Remove ONLY the first occurrence to prevent removing duplicates
+    const indexToRemove = linkedItemsList.findIndex(item => item === itemName);
+    
+    if (indexToRemove === -1) {
+        console.warn('Item not found in linkedItemsList:', itemName);
+        return; // Already removed or doesn't exist
+    }
+    
+    // Remove from array (only first occurrence)
+    linkedItemsList.splice(indexToRemove, 1);
+    
+    // Remove from UI
     itemCard.remove();
-    linkedItemsList = linkedItemsList.filter(item => item !== itemName);
+    
+    console.log('After removal, linked items:', linkedItemsList);
     
     // Add back to available
     const availableCard = document.createElement('div');
     availableCard.className = 'item-card available';
-    availableCard.dataset.item = itemName;
+    availableCard.setAttribute('data-item', JSON.stringify(itemName));
     availableCard.draggable = true;
     availableCard.innerHTML = `
-        <div class="item-name">${itemName}</div>
-        <button class="link-btn" onclick="linkItem(this, '${itemName}')">
+        <div class="item-name">${escapeHtml(itemName)}</div>
+        <button class="link-btn" data-action="link" data-item='${JSON.stringify(itemName)}'>
             <i class="fas fa-arrow-right"></i> Link
         </button>
     `;
@@ -178,10 +370,35 @@ function unlinkItem(button, itemName) {
     updateCounts();
 }
 
+// Sync UI with linkedItemsList state (call this before critical operations)
+function syncUIWithState() {
+    const linkedPanel = document.getElementById('linkedItems');
+    const uiLinkedItems = Array.from(linkedPanel.querySelectorAll('.item-card[data-item]')).map(card => {
+        try {
+            return JSON.parse(card.getAttribute('data-item'));
+        } catch (e) {
+            return card.getAttribute('data-item');
+        }
+    });
+    
+    console.log('Syncing UI with state:');
+    console.log('  UI has items:', uiLinkedItems);
+    console.log('  linkedItemsList has:', linkedItemsList);
+    
+    // If there's a mismatch, update linkedItemsList to match actual UI
+    if (JSON.stringify(uiLinkedItems.sort()) !== JSON.stringify(linkedItemsList.sort())) {
+        console.warn('State mismatch detected! Syncing linkedItemsList to match UI.');
+        linkedItemsList = uiLinkedItems;
+    }
+}
+
 // Update counts
 function updateCounts() {
     const availableCount = document.querySelectorAll('#availableItems .item-card').length;
     const linkedCount = linkedItemsList.length;
+    
+    console.log('Updating counts - Available:', availableCount, 'Linked:', linkedCount);
+    console.log('linkedItemsList:', linkedItemsList);
     
     document.getElementById('availableCount').textContent = availableCount;
     document.getElementById('linkedCount').textContent = linkedCount;
@@ -189,6 +406,12 @@ function updateCounts() {
 
 // Preview impact
 async function previewImpact() {
+    // Sync linkedItemsList with actual UI state before preview
+    syncUIWithState();
+    
+    console.log('Preview impact - linkedItemsList:', linkedItemsList);
+    console.log('Preview impact - count:', linkedItemsList.length);
+    
     if (linkedItemsList.length === 0) {
         alert('Please link at least one METRC item before saving.');
         return;
@@ -203,10 +426,13 @@ async function previewImpact() {
     `;
     
     try {
+        const payload = { metrc_item_names: linkedItemsList };
+        console.log('Sending payload:', payload);
+        
         const response = await fetch(`/api/v1/products/master/${productId}/link-items`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ metrc_item_names: linkedItemsList })
+            body: JSON.stringify(payload)
         });
         
         const data = await response.json();
@@ -327,6 +553,12 @@ function displayImpactPreview(preview) {
 
 // Confirm link
 async function confirmLink() {
+    // Sync linkedItemsList with actual UI state before saving
+    syncUIWithState();
+    
+    console.log('Confirming link - linkedItemsList:', linkedItemsList);
+    console.log('Confirming link - count:', linkedItemsList.length);
+    
     const modalBody = document.getElementById('impactPreview');
     modalBody.innerHTML = `
         <div class="loading">
@@ -400,54 +632,60 @@ function closeImpactModal() {
     document.getElementById('impactModal').style.display = 'none';
 }
 
-// Drag and drop support
-document.addEventListener('DOMContentLoaded', function() {
-    const availablePanel = document.getElementById('availableItems');
-    const linkedPanel = document.getElementById('linkedItems');
-    
-    // Drag start
-    availablePanel.addEventListener('dragstart', function(e) {
-        if (e.target.classList.contains('item-card')) {
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/plain', e.target.dataset.item);
-            e.target.style.opacity = '0.5';
-        }
-    });
-    
-    // Drag end
-    availablePanel.addEventListener('dragend', function(e) {
-        if (e.target.classList.contains('item-card')) {
-            e.target.style.opacity = '1';
-        }
-    });
-    
-    // Allow drop on linked panel
-    linkedPanel.addEventListener('dragover', function(e) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        linkedPanel.style.background = '#f0f8ff';
-    });
-    
-    linkedPanel.addEventListener('dragleave', function(e) {
-        linkedPanel.style.background = '';
-    });
-    
-    linkedPanel.addEventListener('drop', function(e) {
-        e.preventDefault();
-        linkedPanel.style.background = '';
-        
-        const itemName = e.dataTransfer.getData('text/plain');
-        const itemCard = availablePanel.querySelector(`[data-item="${itemName}"]`);
-        
-        if (itemCard) {
-            const linkBtn = itemCard.querySelector('.link-btn');
-            linkItem(linkBtn, itemName);
-        }
-    });
-});
 </script>
 
 <style>
+/* Page Loader */
+.page-loader {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.95);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+
+.page-loader.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.loader-content {
+    text-align: center;
+}
+
+.spinner {
+    width: 60px;
+    height: 60px;
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #667eea;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 1.5rem;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.loader-content h3 {
+    color: #333;
+    margin: 0 0 0.5rem 0;
+    font-size: 1.5rem;
+}
+
+.loader-content p {
+    color: #666;
+    margin: 0;
+}
+
 .link-items-container {
     max-width: 1400px;
     margin: 0 auto;

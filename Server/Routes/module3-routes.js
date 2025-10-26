@@ -127,10 +127,10 @@ router.post('/products/master/:id/link-items/confirm', async (req, res) => {
         
         const productName = productInfo.rows[0]?.name || 'Unknown Product';
 
-        // Update the Master Product's JSONB array
+        // Update the Master Product's JSONB array (REPLACE, not append)
         await client.query(`
             UPDATE "ORDERS-products"
-            SET metrc_linked_items = metrc_linked_items || $1::jsonb
+            SET metrc_linked_items = $1::jsonb
             WHERE entry_id = $2
         `, [JSON.stringify(metrc_item_names), productId]);
 

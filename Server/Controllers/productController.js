@@ -177,10 +177,31 @@ exports.getProductById = async (req, res) => {
             ORDER BY status, production_date DESC
         `, [productId]);
 
+        // Helper function to decode HTML entities
+        function decodeHtmlEntities(str) {
+            if (!str) return str;
+            return str.replace(/&nbsp;/g, ' ')
+                .replace(/&amp;/g, '&')
+                .replace(/&lt;/g, '<')
+                .replace(/&gt;/g, '>')
+                .replace(/&quot;/g, '"')
+                .replace(/&#39;/g, "'");
+        }
+
+        const product = productResult.rows[0];
+        
+        // Decode HTML entities in description and lineage if they exist
+        if (product.description) {
+            product.description = decodeHtmlEntities(product.description);
+        }
+        if (product.lineage) {
+            product.lineage = decodeHtmlEntities(product.lineage);
+        }
+
         res.render('admin/products/details', {
             title: 'Product Details',
             layout: 'layouts/main',
-            product: productResult.rows[0],
+            product: product,
             batches: batchesResult.rows,
             user: req.session.user
         });

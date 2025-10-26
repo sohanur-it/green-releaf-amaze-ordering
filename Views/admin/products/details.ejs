@@ -1,5 +1,9 @@
 <!-- Modern Product Details Page -->
 <style>
+body {
+    overflow-x: hidden;
+}
+
 .stats-card {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
@@ -26,6 +30,40 @@
     padding: 1.5rem;
     box-shadow: 0 5px 15px rgba(0,0,0,0.08);
     margin-bottom: 1.5rem;
+    max-width: 100%;
+    overflow-x: hidden;
+}
+
+.product-info-wrapper {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    width: 100%;
+    max-width: 100%;
+}
+
+.description-text {
+    white-space: normal;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    line-height: 1.6;
+    color: #333;
+}
+
+.description-text p {
+    margin-bottom: 0.5rem;
+}
+
+.description-text strong {
+    font-weight: 600;
+}
+
+.description-text span {
+    display: inline;
+}
+
+.container-fluid {
+    max-width: 100%;
+    overflow-x: hidden;
 }
 
 .modern-table {
@@ -130,7 +168,7 @@
 
     <!-- Product Information and Linked Items -->
     <div class="row mb-4">
-        <div class="col-md-8">
+        <div class="col-md-8 product-info-wrapper">
             <div class="dashboard-card">
                 <h5 class="mb-4"><i class="fas fa-info-circle me-2"></i>Product Information</h5>
                 <div class="row">
@@ -140,12 +178,17 @@
                     </div>
                     <div class="col-md-6 mb-3">
                         <label class="text-muted small">Default Price</label>
-                        <div class="fw-bold">
-                            <% if (product.default_price) { %>
-                                $<%= parseFloat(product.default_price).toFixed(2) %>
-                            <% } else { %>
-                                <span class="text-muted">Not set</span>
-                            <% } %>
+                        <div class="d-flex align-items-center justify-content-between">
+                            <div class="fw-bold">
+                                <% if (product.default_price) { %>
+                                    $<%= parseFloat(product.default_price).toFixed(2) %>
+                                <% } else { %>
+                                    <span class="text-muted">Not set</span>
+                                <% } %>
+                            </div>
+                            <button class="btn btn-sm btn-outline-primary" onclick="showEditPriceModal()">
+                                <i class="fas fa-edit"></i> Edit Price
+                            </button>
                         </div>
                     </div>
                     <div class="col-md-6 mb-3">
@@ -159,13 +202,13 @@
                     <% if (product.lineage) { %>
                         <div class="col-12 mb-3">
                             <label class="text-muted small">Lineage</label>
-                            <div class="fw-bold"><%= product.lineage %></div>
+                            <div class="fw-bold"><%- product.lineage %></div>
                         </div>
                     <% } %>
                     <% if (product.description) { %>
                         <div class="col-12 mb-3">
                             <label class="text-muted small">Description</label>
-                            <div><%= product.description %></div>
+                            <div class="description-text"><%- product.description %></div>
                         </div>
                     <% } %>
                 </div>
@@ -271,9 +314,260 @@
     </div>
 </div>
 
+<!-- Edit Price Modal -->
+<div id="editPriceModal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3>Edit Product Price</h3>
+            <button class="modal-close" onclick="closeEditPriceModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group mb-3">
+                <label for="newPrice">New Price ($)</label>
+                <input type="number" id="newPrice" class="form-control" step="0.01" min="0" 
+                       value="<%= product.default_price || '' %>" placeholder="0.00">
+                <small class="text-muted">Enter the new default price for this product</small>
+            </div>
+            
+            <div id="bulkUpdatePrompt" style="display: none;">
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle"></i>
+                    <strong>Apply to category?</strong>
+                    <p class="mb-0 mt-2">You've changed the price of this product. Would you like to apply this new price to <span id="siblingsCount">0</span> other products in the '<span id="categoryName"></span>' category?</p>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="btn btn-secondary" onclick="closeEditPriceModal()">Cancel</button>
+            <button class="btn btn-primary" onclick="updatePrice()">
+                <i class="fas fa-save"></i> Update Price
+            </button>
+            <button id="bulkUpdateBtn" class="btn btn-success" onclick="updateCategoryPrices()" style="display: none;">
+                <i class="fas fa-layer-group"></i> Apply to Category
+            </button>
+        </div>
+    </div>
+</div>
+
+<style>
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 8px;
+    padding: 0;
+    width: 90%;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    border-bottom: 1px solid #eee;
+}
+
+.modal-header h3 {
+    margin: 0;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 2rem;
+    cursor: pointer;
+    color: #666;
+}
+
+.modal-body {
+    padding: 1.5rem;
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+    padding: 1.5rem;
+    border-top: 1px solid #eee;
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+}
+
+.form-control {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 1rem;
+}
+
+.btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.btn-primary {
+    background: #007bff;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #0056b3;
+}
+
+.btn-success {
+    background: #28a745;
+    color: white;
+}
+
+.btn-success:hover {
+    background: #218838;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #545b62;
+}
+
+.alert {
+    padding: 1rem;
+    border-radius: 4px;
+}
+
+.alert-info {
+    background: #d1ecf1;
+    border: 1px solid #bee5eb;
+    color: #0c5460;
+}
+</style>
+
+<script>
+const productId = <%= product.entry_id %>;
+let categorySiblings = [];
+
+function showEditPriceModal() {
+    document.getElementById('editPriceModal').style.display = 'flex';
+}
+
+function closeEditPriceModal() {
+    document.getElementById('editPriceModal').style.display = 'none';
+}
+
+async function updatePrice() {
+    const newPrice = parseFloat(document.getElementById('newPrice').value);
+    
+    if (!newPrice || newPrice <= 0) {
+        alert('Please enter a valid price');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/v1/products/master/${productId}/price`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ default_price: newPrice })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Check if there are siblings to apply to
+            if (data.prompt_bulk_update && data.category_siblings.length > 0) {
+                categorySiblings = data.category_siblings;
+                showBulkUpdatePrompt(data.category, data.category_siblings.length);
+            } else {
+                // No siblings, just reload
+                alert('Price updated successfully!');
+                location.reload();
+            }
+        } else {
+            alert('Error updating price: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error updating price: ' + error.message);
+    }
+}
+
+function showBulkUpdatePrompt(categoryName, siblingsCount) {
+    document.getElementById('categoryName').textContent = categoryName;
+    document.getElementById('siblingsCount').textContent = siblingsCount;
+    document.getElementById('bulkUpdatePrompt').style.display = 'block';
+    document.getElementById('bulkUpdateBtn').style.display = 'inline-block';
+}
+
+async function updateCategoryPrices() {
+    const categoryName = document.getElementById('categoryName').textContent;
+    const newPrice = parseFloat(document.getElementById('newPrice').value);
+    
+    try {
+        const response = await fetch(`/api/v1/products/categories/${encodeURIComponent(categoryName)}/bulk-price-update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                new_price: newPrice,
+                exclude_product_ids: [productId] // Exclude current product as it's already updated
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert(`Price updated successfully!\n\nUpdated ${data.updated_count} products in the '${categoryName}' category`);
+            location.reload();
+        } else {
+            alert('Error bulk updating prices: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Error bulk updating prices: ' + error.message);
+    }
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const modal = document.getElementById('editPriceModal');
+    if (event.target === modal) {
+        closeEditPriceModal();
+    }
+}
+</script>
+
 <script>
 // Search functionality for batches
 document.addEventListener('DOMContentLoaded', function() {
+    // HTML entities are already decoded by the server, content will render with styling
+    
+    // Search functionality for batches
     const searchInput = document.getElementById('searchBatches');
     if (searchInput) {
         searchInput.addEventListener('input', function(e) {
