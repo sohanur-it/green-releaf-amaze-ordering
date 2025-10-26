@@ -1,0 +1,294 @@
+<!-- Modern Product Details Page -->
+<style>
+.stats-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 15px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+}
+
+.stats-card h3 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.stats-card p {
+    margin: 0;
+    opacity: 0.9;
+}
+
+.dashboard-card {
+    background: white;
+    border-radius: 15px;
+    padding: 1.5rem;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+    margin-bottom: 1.5rem;
+}
+
+.modern-table {
+    margin: 0;
+}
+
+.modern-table thead {
+    background: #f8f9fa;
+}
+
+.modern-table th {
+    font-weight: 600;
+    color: #4b5563;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    padding: 1rem;
+    border: none;
+}
+
+.modern-table td {
+    padding: 1rem;
+    vertical-align: middle;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.modern-table tbody tr:hover {
+    background: #f9fafb;
+}
+
+.back-link {
+    font-size: 1.5rem;
+    color: #667eea;
+    text-decoration: none;
+    padding: 0.5rem;
+    margin-right: 0.5rem;
+}
+
+.back-link:hover {
+    color: #764ba2;
+}
+
+.empty-state-small {
+    text-align: center;
+    padding: 2rem;
+    color: #9ca3af;
+}
+</style>
+
+<div class="container-fluid p-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex align-items-center">
+            <a href="/admin/products" class="back-link">&larr; Back</a>
+            <div>
+                <h2 class="mb-0"><%= product.name %></h2>
+                <% if (product.brand_name) { %>
+                    <span class="badge bg-secondary mt-2"><%= product.brand_name %></span>
+                <% } %>
+            </div>
+        </div>
+        <a href="/admin/products/<%= product.entry_id %>/link-items" class="btn btn-primary">
+            <i class="fas fa-link me-1"></i> Manage Linked Items
+        </a>
+    </div>
+
+    <% 
+    // Calculate stats
+    const linkedCount = (product.metrc_linked_items || []).length;
+    const totalBatches = batches.length;
+    const sellableBatches = batches.filter(b => b.status === 'Sellable').length;
+    const availableUnits = batches.filter(b => b.status === 'Sellable').reduce((sum, b) => sum + (b.quantity - b.allocated_quantity), 0);
+    %>
+
+    <!-- Stats Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                <p>Linked METRC Items</p>
+                <h3><%= linkedCount %></h3>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                <p>Total Batches</p>
+                <h3><%= totalBatches %></h3>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                <p>Sellable Batches</p>
+                <h3><%= sellableBatches %></h3>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
+                <p>Available Units</p>
+                <h3><%= Math.round(availableUnits) %></h3>
+            </div>
+        </div>
+    </div>
+
+    <!-- Product Information and Linked Items -->
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <div class="dashboard-card">
+                <h5 class="mb-4"><i class="fas fa-info-circle me-2"></i>Product Information</h5>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="text-muted small">Category</label>
+                        <div class="fw-bold"><%= product.category_name || 'Not specified' %></div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="text-muted small">Default Price</label>
+                        <div class="fw-bold">
+                            <% if (product.default_price) { %>
+                                $<%= parseFloat(product.default_price).toFixed(2) %>
+                            <% } else { %>
+                                <span class="text-muted">Not set</span>
+                            <% } %>
+                        </div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="text-muted small">Product Type</label>
+                        <div class="fw-bold"><%= product.product_type_name || 'Not specified' %></div>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="text-muted small">Cultivar/Strain</label>
+                        <div class="fw-bold"><%= product.cultivar_name || 'Not specified' %></div>
+                    </div>
+                    <% if (product.lineage) { %>
+                        <div class="col-12 mb-3">
+                            <label class="text-muted small">Lineage</label>
+                            <div class="fw-bold"><%= product.lineage %></div>
+                        </div>
+                    <% } %>
+                    <% if (product.description) { %>
+                        <div class="col-12 mb-3">
+                            <label class="text-muted small">Description</label>
+                            <div><%= product.description %></div>
+                        </div>
+                    <% } %>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-4">
+            <div class="dashboard-card">
+                <h5 class="mb-4"><i class="fas fa-link me-2"></i>Linked METRC Items (<%= linkedCount %>)</h5>
+                <% if (linkedCount === 0) { %>
+                    <div class="empty-state-small">
+                        <i class="fas fa-box-open fa-3x mb-3"></i>
+                        <p>No METRC items linked yet</p>
+                        <a href="/admin/products/<%= product.entry_id %>/link-items" class="btn btn-sm btn-primary">
+                            <i class="fas fa-link me-1"></i> Link Items
+                        </a>
+                    </div>
+                <% } else { %>
+                    <ul class="list-unstyled">
+                        <% (product.metrc_linked_items || []).forEach(item => { %>
+                            <li class="mb-2">
+                                <i class="fas fa-check-circle text-success me-2"></i>
+                                <small><%= item %></small>
+                            </li>
+                        <% }); %>
+                    </ul>
+                <% } %>
+            </div>
+        </div>
+    </div>
+
+    <!-- Batches Table -->
+    <div class="dashboard-card">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0"><i class="fas fa-boxes me-2"></i>Batches (<%= totalBatches %>)</h5>
+            <input type="text" id="searchBatches" class="form-control" style="max-width: 300px;" placeholder="Search batches...">
+        </div>
+
+        <% if (totalBatches === 0) { %>
+            <div class="empty-state-small">
+                <i class="fas fa-box-open fa-4x mb-3"></i>
+                <p>No batches found for this product</p>
+                <small class="text-muted">Batches will appear here after running batch sync</small>
+            </div>
+        <% } else { %>
+            <div class="table-responsive">
+                <table class="table table-hover modern-table">
+                    <thead>
+                        <tr>
+                            <th>Batch Name</th>
+                            <th>Status</th>
+                            <th>Quantity</th>
+                            <th>Allocated</th>
+                            <th>Available</th>
+                            <th>THC %</th>
+                            <th>Production Date</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="batchesTableBody">
+                        <% batches.forEach(batch => { %>
+                            <tr>
+                                <td><%= batch.metrc_item_name %></td>
+                                <td>
+                                    <% 
+                                    let statusClass = 'secondary';
+                                    if (batch.status === 'Sellable') statusClass = 'success';
+                                    else if (batch.status === 'On Deck') statusClass = 'warning';
+                                    else if (batch.status === 'On Hold') statusClass = 'secondary';
+                                    %>
+                                    <span class="badge bg-<%= statusClass %>"><%= batch.status %></span>
+                                </td>
+                                <td><strong><%= batch.quantity %></strong></td>
+                                <td><%= batch.allocated_quantity %></td>
+                                <td>
+                                    <strong class="text-success"><%= batch.quantity - batch.allocated_quantity %></strong>
+                                </td>
+                                <td>
+                                    <% if (batch.thc_percentage) { %>
+                                        <%= parseFloat(batch.thc_percentage).toFixed(2) %>%
+                                    <% } else { %>
+                                        <span class="text-muted">-</span>
+                                    <% } %>
+                                </td>
+                                <td>
+                                    <% if (batch.production_date) { %>
+                                        <small><%= new Date(batch.production_date).toLocaleDateString() %></small>
+                                    <% } else { %>
+                                        <span class="text-muted">-</span>
+                                    <% } %>
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="alert('Batch management coming soon')">
+                                        <i class="fas fa-cog"></i> Manage
+                                    </button>
+                                </td>
+                            </tr>
+                        <% }); %>
+                    </tbody>
+                </table>
+            </div>
+        <% } %>
+    </div>
+</div>
+
+<script>
+// Search functionality for batches
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('searchBatches');
+    if (searchInput) {
+        searchInput.addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            const rows = document.querySelectorAll('#batchesTableBody tr');
+            
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                if (text.includes(searchTerm)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        });
+    }
+});
+</script>

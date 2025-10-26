@@ -1,0 +1,219 @@
+<!-- Modern Master Products List -->
+<style>
+.stats-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 15px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+}
+
+.stats-card h3 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 0;
+}
+
+.stats-card p {
+    margin: 0;
+    opacity: 0.9;
+}
+
+.dashboard-card {
+    background: white;
+    border-radius: 15px;
+    padding: 1.5rem;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+}
+
+.modern-table {
+    margin: 0;
+}
+
+.modern-table thead {
+    background: #f8f9fa;
+}
+
+.modern-table th {
+    font-weight: 600;
+    color: #4b5563;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    padding: 1rem;
+    border: none;
+}
+
+.modern-table td {
+    padding: 1rem;
+    vertical-align: middle;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.modern-table tbody tr:hover {
+    background: #f9fafb;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+}
+
+.empty-state i {
+    color: #d1d5db;
+    margin-bottom: 1rem;
+}
+
+.empty-state h3 {
+    color: #6b7280;
+    margin-bottom: 0.5rem;
+}
+
+.empty-state p {
+    color: #9ca3af;
+    margin-bottom: 2rem;
+}
+</style>
+
+<div class="container-fluid p-4">
+    <!-- Action Buttons -->
+    <div class="d-flex justify-content-end mb-4">
+        <a href="/admin/products/new" class="btn btn-primary">
+            <i class="fas fa-plus me-1"></i> Create Product
+        </a>
+    </div>
+
+    <% 
+    // Calculate stats
+    const totalProducts = products.length;
+    const totalBatches = products.reduce((sum, p) => sum + (parseInt(p.batch_count) || 0), 0);
+    const totalAvailable = products.reduce((sum, p) => sum + (parseFloat(p.available_quantity) || 0), 0);
+    const linkedItems = products.reduce((sum, p) => sum + ((p.metrc_linked_items || []).length), 0);
+    %>
+
+    <!-- Statistics Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+                <p>Total Products</p>
+                <h3><%= totalProducts %></h3>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+                <p>Total Batches</p>
+                <h3><%= totalBatches %></h3>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                <p>Linked METRC Items</p>
+                <h3><%= linkedItems %></h3>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="stats-card" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
+                <p>Available Units</p>
+                <h3><%= Math.round(totalAvailable) %></h3>
+            </div>
+        </div>
+    </div>
+
+    <!-- Products Table -->
+    <div class="dashboard-card">
+        <% if (products.length === 0) { %>
+            <div class="empty-state">
+                <i class="fas fa-box-open fa-4x"></i>
+                <h3>No Products Yet</h3>
+                <p>Create your first master product to get started</p>
+                <a href="/admin/products/new" class="btn btn-primary">
+                    <i class="fas fa-plus me-1"></i> Create Product
+                </a>
+            </div>
+        <% } else { %>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">All Products</h5>
+                <input type="text" id="searchProducts" class="form-control" style="max-width: 300px;" placeholder="Search products...">
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover modern-table">
+                    <thead>
+                        <tr>
+                            <th>Product Name</th>
+                            <th>Category</th>
+                            <th>Price</th>
+                            <th>Linked Items</th>
+                            <th>Batches</th>
+                            <th>Available</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="productsTableBody">
+                        <% products.forEach(product => { %>
+                            <tr>
+                                <td>
+                                    <div>
+                                        <div class="fw-bold"><%= product.name %></div>
+                                        <% if (product.brand_name) { %>
+                                            <small class="text-muted"><%= product.brand_name %></small>
+                                        <% } %>
+                                    </div>
+                                </td>
+                                <td>
+                                    <span class="badge bg-secondary"><%= product.category_name || 'N/A' %></span>
+                                </td>
+                                <td>
+                                    <% if (product.default_price) { %>
+                                        <strong>$<%= parseFloat(product.default_price).toFixed(2) %></strong>
+                                    <% } else { %>
+                                        <span class="text-muted">-</span>
+                                    <% } %>
+                                </td>
+                                <td>
+                                    <span class="badge bg-info text-dark"><%= (product.metrc_linked_items || []).length %></span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-success"><%= product.batch_count || 0 %></span>
+                                </td>
+                                <td>
+                                    <%= Math.round(product.available_quantity || 0) %> units
+                                </td>
+                                <td>
+                                    <a href="/admin/products/<%= product.entry_id %>" class="btn btn-sm btn-outline-primary me-1">
+                                        <i class="fas fa-eye"></i> View
+                                    </a>
+                                    <a href="/admin/products/<%= product.entry_id %>/link-items" class="btn btn-sm btn-outline-success">
+                                        <i class="fas fa-link"></i> Link
+                                    </a>
+                                </td>
+                            </tr>
+                        <% }); %>
+                    </tbody>
+                </table>
+            </div>
+        <% } %>
+    </div>
+</div>
+
+<script>
+// Search functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('searchProducts');
+    if (searchInput) {
+        searchInput.addEventListener('input', function(e) {
+            const searchTerm = e.target.value.toLowerCase();
+            const rows = document.querySelectorAll('#productsTableBody tr');
+            
+            rows.forEach(row => {
+                const text = row.textContent.toLowerCase();
+                if (text.includes(searchTerm)) {
+                    row.style.display = '';
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+        });
+    }
+});
+</script>

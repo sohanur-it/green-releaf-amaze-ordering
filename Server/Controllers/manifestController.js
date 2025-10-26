@@ -136,6 +136,31 @@ class ManifestController {
             const result = await manifestService.createManifestFromOrderAndPackages(req.body, userId);
             
             if (result.success) {
+                // ✅ TRIGGER: Check inventory depletion after successful order/manifest creation
+                // This implements the required logic: "trigger every time an order is successfully created"
+                try {
+                    const batchStatusService = require('../Services/batchStatusService');
+                    
+                    // Get all affected products from the packages in the order
+                    const affectedProducts = await this.getAffectedProductsFromOrder(req.body.orderId);
+                    
+                    console.log(`🔄 Order ${req.body.orderId} created. Checking inventory depletion for ${affectedProducts.length} products...`);
+                    
+                    // Check each affected product for inventory depletion
+                    for (const productId of affectedProducts) {
+                        const isDepleted = await batchStatusService.isInventoryDepleted(productId);
+                        
+                        if (isDepleted) {
+                            console.log(`⚠️ Product ${productId} depleted! Promoting On Deck batches...`);
+                            await batchStatusService.promoteBatchesToSellable(productId);
+                        }
+                    }
+                } catch (promotionError) {
+                    // Log the error but don't fail the order creation
+                    console.error('❌ Error during post-order batch promotion:', promotionError.message);
+                    // Continue - the cron job will catch this later if needed
+                }
+                
                 res.status(201).json({
                     success: true,
                     data: {
@@ -348,6 +373,44 @@ class ManifestController {
         }
 
         return { valid: true };
+    }
+
+    /**
+     * Get affected product IDs from an order
+     * Helper function to identify which products need inventory depletion check
+     * @param {number} orderId - Order ID
+     * @returns {Promise<Array<number>>} - Array of product IDs
+     */
+    async getAffectedProductsFromOrder(orderId) {
+        const { Pool } = require('pg');
+        const pool = new Pool({
+            user: process.env.DB_USER,
+            host: process.env.DB_HOST,
+            database: process.env.DB_DATABASE,
+            password: process.env.DB_PASSWORD,
+            port: parseInt(process.env.DB_PORT, 10) || 5432,
+        });
+
+        try {
+            // Query to get all unique product IDs from batches allocated in this order
+            const query = `
+                SELECT DISTINCT b.fk_master_product_id as product_id
+                FROM "ORDERS-batches" b
+                INNER JOIN order_items oi ON oi.batch_id = b.id
+                WHERE oi.order_id = $1
+                  AND b.fk_master_product_id IS NOT NULL
+            `;
+            
+            const result = await pool.query(query, [orderId]);
+            const productIds = result.rows.map(row => row.product_id);
+            
+            return productIds;
+        } catch (error) {
+            console.error('Error fetching affected products:', error.message);
+            return []; // Return empty array on error
+        } finally {
+            await pool.end();
+        }
     }
 }
 

@@ -31,6 +31,7 @@ const userManagementRoutes = require('./Routes/user-management-routes');
 const auditLogRoutes = require('./Routes/audit-log-routes');
 const batchRoutes = require('./Routes/batch-routes');
 const alertRoutes = require('./Routes/alertRoutes');
+const module3Routes = require('./Routes/module3-routes');
 
 //import services
 const masterScheduler = require('./Services/masterScheduler');
@@ -94,6 +95,7 @@ app.use('/api/v1/manifests', manifestRoutes); // manifest creation API routes
 app.use('/api/v1/admin/users', userManagementRoutes); // user management API routes
 app.use('/api/v1/admin/audit-logs', auditLogRoutes); // audit log API routes
 app.use('/api/batches', batchRoutes); // batch status management API routes
+app.use('/api/v1', module3Routes); // Module 3: Product & Inventory Management API routes
 app.use('/api/alerts', alertRoutes); // sync failure alert API routes
 
 //root redirect
@@ -114,24 +116,30 @@ app.listen(PORT, async () => {
     logger.info(`📚 API Documentation: http://localhost:${PORT}/api-docs`);
     logger.info(`💚 Green Releaf Amaze Ordering System`);
     
-    // Start the master scheduler in production
-    if (process.env.NODE_ENV === 'production') {
+    // Start the master scheduler (configurable via environment variable)
+    const enableScheduler = process.env.ENABLE_SCHEDULER === 'true' || process.env.NODE_ENV === 'production';
+    if (enableScheduler) {
         try {
             await masterScheduler.start();
             logger.info(`⏰ Master scheduler started successfully`);
         } catch (error) {
             logger.error(`❌ Failed to start master scheduler: ${error.message}`);
         }
+    } else {
+        logger.info(`⏸️  Master scheduler disabled (set ENABLE_SCHEDULER=true to enable)`);
     }
     
-    // Start inventory monitoring in production
-    if (process.env.NODE_ENV === 'production') {
+    // Start inventory monitoring (configurable via environment variable)
+    const enableInventoryMonitoring = process.env.ENABLE_INVENTORY_MONITORING === 'true' || process.env.NODE_ENV === 'production';
+    if (enableInventoryMonitoring) {
         try {
             inventoryMonitorService.start();
             logger.info(`📦 Inventory monitoring started successfully`);
         } catch (error) {
             logger.error(`❌ Failed to start inventory monitoring: ${error.message}`);
         }
+    } else {
+        logger.info(`⏸️  Inventory monitoring disabled (set ENABLE_INVENTORY_MONITORING=true to enable)`);
     }
 });
 

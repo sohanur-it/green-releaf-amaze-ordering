@@ -4,6 +4,7 @@ const express = require('express');
 const router = express.Router();
 const buyerController = require('../Controllers/crm/buyerController');
 const salesRepController = require('../Controllers/crm/salesRepController');
+const productController = require('../Controllers/productController');
 const UserModel = require('../Models/userModel');
 const { requireAuth, requirePermission } = require('../Middleware/auth');
 
@@ -43,7 +44,26 @@ router.post('/crm/buyers/:id/delete', buyerController.deleteBuyer);
 // The ':id' part is a placeholder for the actual buyer's entry_id
 router.get('/crm/buyers/:id', buyerController.getBuyerById);
 
-// User management page (enhanced with Chart.js)
+// =============================================
+// PRODUCT MANAGEMENT ROUTES (Module 3)
+// =============================================
+
+// List all products
+router.get('/products', productController.getAllProducts);
+
+// Show create product form (must be before /:id route)
+router.get('/products/new', productController.showCreateProductForm);
+
+// Create new product
+router.post('/products', productController.createProduct);
+
+// Show link items page
+router.get('/products/:id/link-items', productController.showLinkItemsPage);
+
+// Show product details
+router.get('/products/:id', productController.getProductById);
+
+// User management page
 router.get('/users', requirePermission('admin', 'user'), (req, res) => {
     res.render('admin/user-management-enhanced', { 
         title: 'User Management',

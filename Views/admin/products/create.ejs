@@ -1,0 +1,254 @@
+<!-- Views/admin/products/create.ejs -->
+
+<div class="form-container">
+    <div class="form-header">
+        <a href="/admin/products" class="back-link" title="Back to Products">&larr;</a>
+        <h2>Create Master Product</h2>
+    </div>
+
+    <form action="/admin/products" method="POST" class="styled-form" id="createProductForm">
+        <div class="form-grid">
+            <!-- Product Name -->
+            <div class="form-group span-2">
+                <label for="name">Product Name <span class="required">*</span></label>
+                <input type="text" id="name" name="name" required 
+                       placeholder="e.g., Amaze Orange 3.5g">
+                <small>Customer-facing product name</small>
+            </div>
+
+            <!-- Category -->
+            <div class="form-group">
+                <label for="category_name">Category <span class="required">*</span></label>
+                <input list="categories" id="category_name" name="category_name" required 
+                       placeholder="e.g., Flower - 3.5g Jars">
+                <datalist id="categories">
+                    <% categories.forEach(category => { %>
+                        <option value="<%= category %>">
+                    <% }); %>
+                    <option value="Flower - 1g Jars">
+                    <option value="Flower - 3.5g Jars">
+                    <option value="Flower - 7g Jars">
+                    <option value="Flower - 14g Jars">
+                    <option value="Flower - 28g Jars">
+                    <option value="Concentrates - 1g">
+                    <option value="Edibles">
+                    <option value="Pre-Rolls">
+                    <option value="Vape Cartridges - 0.5g">
+                    <option value="Vape Cartridges - 1g">
+                </datalist>
+                <small>Select existing or type new category</small>
+            </div>
+
+            <!-- Default Price -->
+            <div class="form-group">
+                <label for="default_price">Default Price <span class="required">*</span></label>
+                <div class="input-group">
+                    <span class="input-prefix">$</span>
+                    <input type="number" id="default_price" name="default_price" 
+                           step="0.01" min="0" required placeholder="50.00">
+                </div>
+                <small>Base selling price for this product</small>
+            </div>
+
+            <!-- Brand Name -->
+            <div class="form-group">
+                <label for="brand_name">Brand Name</label>
+                <input type="text" id="brand_name" name="brand_name" 
+                       placeholder="e.g., Amaze">
+            </div>
+
+            <!-- Product Type -->
+            <div class="form-group">
+                <label for="product_type_name">Product Type</label>
+                <select id="product_type_name" name="product_type_name">
+                    <option value="">Select type...</option>
+                    <option value="Flower">Flower</option>
+                    <option value="Concentrate">Concentrate</option>
+                    <option value="Edible">Edible</option>
+                    <option value="Topical">Topical</option>
+                    <option value="Tincture">Tincture</option>
+                    <option value="Vape">Vape</option>
+                    <option value="Pre-Roll">Pre-Roll</option>
+                </select>
+            </div>
+
+            <!-- Cultivar Name -->
+            <div class="form-group">
+                <label for="cultivar_name">Cultivar/Strain Name</label>
+                <input type="text" id="cultivar_name" name="cultivar_name" 
+                       placeholder="e.g., Orange">
+            </div>
+
+            <!-- Lineage -->
+            <div class="form-group">
+                <label for="lineage">Lineage</label>
+                <input type="text" id="lineage" name="lineage" 
+                       placeholder="e.g., Orange x Unknown">
+                <small>Genetic lineage of the strain</small>
+            </div>
+
+            <!-- Description -->
+            <div class="form-group span-2">
+                <label for="description">Description</label>
+                <textarea id="description" name="description" rows="4" 
+                          placeholder="Enter product description..."></textarea>
+            </div>
+        </div>
+
+        <div class="form-actions">
+            <a href="/admin/products" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary">
+                Create Product & Link Items
+            </button>
+        </div>
+    </form>
+</div>
+
+<style>
+.form-container {
+    background: white;
+    padding: 2rem;
+    border-radius: 15px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+    max-width: 900px;
+    margin: 2rem auto;
+}
+
+.form-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid #f3f4f6;
+}
+
+.back-link {
+    font-size: 1.5rem;
+    color: #667eea;
+    text-decoration: none;
+    padding: 0.5rem;
+    margin-left: -0.5rem;
+    transition: color 0.3s;
+}
+
+.back-link:hover {
+    color: #764ba2;
+}
+
+.form-header h2 {
+    margin: 0;
+}
+
+.styled-form {
+    margin-top: 1.5rem;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.form-group.span-2 {
+    grid-column: span 2;
+}
+
+.form-group label {
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: #333;
+}
+
+.required {
+    color: #dc3545;
+}
+
+.form-group input,
+.form-group select,
+.form-group textarea {
+    padding: 0.75rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 1rem;
+    font-family: inherit;
+}
+
+.form-group input:focus,
+.form-group select:focus,
+.form-group textarea:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+}
+
+.form-group small {
+    margin-top: 0.25rem;
+    color: #666;
+    font-size: 0.875rem;
+}
+
+.input-group {
+    display: flex;
+    align-items: stretch;
+}
+
+.input-prefix {
+    background: #e9ecef;
+    border: 1px solid #ddd;
+    border-right: none;
+    border-radius: 4px 0 0 4px;
+    padding: 0.75rem;
+    display: flex;
+    align-items: center;
+}
+
+.input-group input {
+    border-radius: 0 4px 4px 0;
+    flex: 1;
+}
+
+.form-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid #eee;
+}
+
+.btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    font-size: 1rem;
+    transition: background-color 0.3s;
+}
+
+.btn-primary {
+    background: #007bff;
+    color: white;
+}
+
+.btn-primary:hover {
+    background: #0056b3;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #545b62;
+}
+</style>
+
