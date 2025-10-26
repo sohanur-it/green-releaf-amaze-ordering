@@ -16,6 +16,9 @@ const path = require('path');
 // Load environment variables
 require('dotenv').config();
 
+// Import sync failure tracker for halt mechanism
+const syncFailureTracker = require('../../Server/Services/syncFailureTracker');
+
 // Scheduler configuration
 const SCHEDULE_CONFIG = {
     // Active Packages - Full Mirror Sync (every 10 minutes)
@@ -82,20 +85,45 @@ function log(message, type = 'INFO') {
 }
 
 // Execute sync script
-function executeSyncScript(scriptName, description) {
-    return new Promise((resolve, reject) => {
-        log(`Starting ${description}...`, 'START');
+async function executeSyncScript(scriptName, description) {
+    try {
+        // HALT CHECK: Prevent scheduling if script has critical failures
+        const scriptMap = {
+            'sync:active:prod': 'sync-active-packages',
+            'sync:outgoing:prod': 'sync-outgoing-transfers',
+            'sync:intransit:prod': 'sync-intransit-packages',
+            'sync:transferred:prod': 'sync-transferred-packages',
+            'sync:items:prod': 'sync-items',
+            'sync:strains:prod': 'sync-strains'
+        };
         
-        const startTime = Date.now();
-        const jobId = `${scriptName}-${startTime}`;
+        const actualScriptName = scriptMap[scriptName];
+        if (actualScriptName) {
+            const alertLevel = await syncFailureTracker.getAlertLevel(actualScriptName, 'CUL000063');
+            if (alertLevel.level === 'critical') {
+                log(`🛑 HALTING: ${description} - Too many consecutive failures (${alertLevel.count})`, 'ERROR');
+                log(`🛑 Last Error: ${alertLevel.lastError}`, 'ERROR');
+                log(`🛑 Preventing data inconsistency by skipping sync`, 'ERROR');
+                return Promise.resolve(); // Skip this sync
+            } else if (alertLevel.level === 'warning') {
+                log(`⚠️ WARNING: ${description} has ${alertLevel.count} consecutive failures`, 'WARN');
+                log(`⚠️ Continuing but monitoring closely...`, 'WARN');
+            }
+        }
         
-        // Track running job
-        runningJobs.set(jobId, {
-            script: scriptName,
-            description,
-            startTime,
-            status: 'running'
-        });
+        return new Promise((resolve, reject) => {
+            log(`Starting ${description}...`, 'START');
+            
+            const startTime = Date.now();
+            const jobId = `${scriptName}-${startTime}`;
+            
+            // Track running job
+            runningJobs.set(jobId, {
+                script: scriptName,
+                description,
+                startTime,
+                status: 'running'
+            });
         
         // Execute npm script
         const npmProcess = spawn('npm', ['run', scriptName], {
@@ -154,6 +182,10 @@ function executeSyncScript(scriptName, description) {
             reject({ success: false, duration, error: error.message });
         });
     });
+    } catch (error) {
+        log(`Error in halt check for ${description}: ${error.message}`, 'ERROR');
+        return Promise.resolve(); // Skip sync if halt check fails
+    }
 }
 
 // Setup cron jobs

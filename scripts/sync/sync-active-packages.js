@@ -24,6 +24,9 @@ if (process.env.NODE_ENV === 'production') {
 // Import centralized METRC authentication service AFTER environment variables are loaded
 const metrcAuth = require('../../Server/Services/metrcAuth');
 
+// Import sync failure tracker for halt mechanism
+const syncFailureTracker = require('../../Server/Services/syncFailureTracker');
+
 // Database configuration
 const DB_CONFIG = {
     host: process.env.DB_HOST || 'localhost',
@@ -840,20 +843,43 @@ async function syncActivePackagesEnhanced() {
  * Main execution function
  */
 async function main() {
+    const scriptName = 'sync-active-packages';
+    const licenseNumber = METRC_CONFIG.licenseNumber;
+    
     try {
         console.log('🚀 Starting METRC Enhanced Active Packages Sync');
         console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-        console.log(`🏢 License: ${METRC_CONFIG.licenseNumber}`);
+        console.log(`🏢 License: ${licenseNumber}`);
+        
+        // HALT CHECK: Prevent operations if too many consecutive failures
+        const alertLevel = await syncFailureTracker.getAlertLevel(scriptName, licenseNumber);
+        if (alertLevel.level === 'critical') {
+            console.error('🛑 HALTING SYNC: Too many consecutive failures detected');
+            console.error(`❌ Script: ${scriptName}`);
+            console.error(`❌ Consecutive Failures: ${alertLevel.count}`);
+            console.error(`❌ Last Error: ${alertLevel.lastError}`);
+            console.error('🛑 Preventing data inconsistency by halting sync operations');
+            process.exit(1);
+        } else if (alertLevel.level === 'warning') {
+            console.warn(`⚠️ WARNING: ${scriptName} has ${alertLevel.count} consecutive failures`);
+            console.warn('⚠️ Continuing sync but monitoring closely...');
+        }
         
         await syncActivePackagesEnhanced();
         
+        // Record successful sync
+        await syncFailureTracker.recordSuccess(scriptName, licenseNumber);
         console.log('✅ Enhanced active packages sync completed successfully');
         
     } catch (error) {
         console.error('❌ Enhanced active packages sync failed:', error.message);
+        
+        // Record sync failure
+        await syncFailureTracker.recordFailure(scriptName, error.message, licenseNumber);
+        
         process.exit(1);
     } finally {
-            await pool.end();
+        await pool.end();
     }
 }
 

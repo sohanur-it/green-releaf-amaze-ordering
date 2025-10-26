@@ -648,10 +648,27 @@ async function syncOutgoingTransfersEnhanced() {
  * Main execution function
  */
 async function main() {
+    const scriptName = 'sync-outgoing-transfers';
+    const licenseNumber = METRC_CONFIG.licenseNumber;
+    
     try {
         console.log('🚀 Starting METRC Enhanced Outgoing Transfers Sync');
         console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-        console.log(`🏢 License: ${METRC_CONFIG.licenseNumber}`);
+        console.log(`🏢 License: ${licenseNumber}`);
+        
+        // HALT CHECK: Prevent operations if too many consecutive failures
+        const alertLevel = await syncFailureTracker.getAlertLevel(scriptName, licenseNumber);
+        if (alertLevel.level === 'critical') {
+            console.error('🛑 HALTING SYNC: Too many consecutive failures detected');
+            console.error(`❌ Script: ${scriptName}`);
+            console.error(`❌ Consecutive Failures: ${alertLevel.count}`);
+            console.error(`❌ Last Error: ${alertLevel.lastError}`);
+            console.error('🛑 Preventing data inconsistency by halting sync operations');
+            process.exit(1);
+        } else if (alertLevel.level === 'warning') {
+            console.warn(`⚠️ WARNING: ${scriptName} has ${alertLevel.count} consecutive failures`);
+            console.warn('⚠️ Continuing sync but monitoring closely...');
+        }
         
         await syncOutgoingTransfersEnhanced();
         
