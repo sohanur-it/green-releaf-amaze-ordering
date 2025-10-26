@@ -61,6 +61,13 @@ const SCHEDULE_CONFIG = {
         schedule: '30 8-18 * * 1-5', // Every hour at :30, 8 AM - 6 PM, Mon-Fri
         script: 'sync:strains:prod',
         description: 'Strains Sync (Incremental)'
+    },
+    
+    // Batches - Sync (every 15 minutes)
+    batches: {
+        schedule: '*/15 8-18 * * 1-5', // Every 15 minutes, 8 AM - 6 PM, Mon-Fri
+        script: 'sync:batches:prod',
+        description: 'Batch Sync (Module 3)'
     }
 };
 
@@ -94,7 +101,8 @@ async function executeSyncScript(scriptName, description) {
             'sync:intransit:prod': 'sync-intransit-packages',
             'sync:transferred:prod': 'sync-transferred-packages',
             'sync:items:prod': 'sync-items',
-            'sync:strains:prod': 'sync-strains'
+            'sync:strains:prod': 'sync-strains',
+            'sync:batches:prod': 'sync-batches'
         };
         
         const actualScriptName = scriptMap[scriptName];

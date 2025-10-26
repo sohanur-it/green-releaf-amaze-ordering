@@ -30,18 +30,17 @@ class BatchStatusService {
         try {
             const query = `
                 SELECT 
-                    COALESCE(SUM(quantity), 0) as total_sellable_quantity
-                FROM batches 
-                WHERE product_id = $1 
+                    COALESCE(SUM(quantity - allocated_quantity), 0) as available_quantity
+                FROM "ORDERS-batches" 
+                WHERE fk_master_product_id = $1 
                 AND status = 'Sellable'
-                AND quantity > 0
             `;
             
             const result = await client.query(query, [productId]);
-            const totalSellable = parseFloat(result.rows[0].total_sellable_quantity);
+            const availableQty = parseFloat(result.rows[0].available_quantity);
             
-            console.log(`📊 Product ${productId} sellable inventory: ${totalSellable}`);
-            return totalSellable <= 0;
+            console.log(`📊 Product ${productId} available sellable inventory: ${availableQty}`);
+            return availableQty <= 0;
             
         } catch (error) {
             console.error('❌ Error checking inventory depletion:', error.message);
@@ -63,15 +62,16 @@ class BatchStatusService {
             const query = `
                 SELECT 
                     id,
-                    batch_number,
+                    batch_name,
                     quantity,
-                    product_id,
+                    allocated_quantity,
+                    fk_master_product_id,
                     status,
                     created_at
-                FROM batches 
-                WHERE product_id = $1 
+                FROM "ORDERS-batches" 
+                WHERE fk_master_product_id = $1 
                 AND status = 'On Deck'
-                AND quantity > 0
+                AND (quantity - allocated_quantity) > 0
                 ORDER BY created_at ASC
             `;
             
@@ -113,13 +113,25 @@ class BatchStatusService {
             // Update batch statuses
             const batchIds = onDeckBatches.map(batch => batch.id);
             const updateQuery = `
-                UPDATE batches 
+                UPDATE "ORDERS-batches" 
                 SET status = 'Sellable', updated_at = NOW()
                 WHERE id = ANY($1)
-                RETURNING id, batch_number, quantity
+                RETURNING id, batch_name, quantity, allocated_quantity
             `;
             
             const updateResult = await client.query(updateQuery, [batchIds]);
+            
+            // Log to batch history for each promoted batch
+            for (const batch of updateResult.rows) {
+                await client.query(`
+                    INSERT INTO "ORDERS-batch-history" (
+                        batch_id, change_type, field_name,
+                        old_value, new_value, reason,
+                        changed_by_system
+                    ) VALUES ($1, 'status_changed', 'status', 'On Deck', 'Sellable', 
+                              'Auto-promoted: Sellable inventory depleted', true)
+                `, [batch.id]);
+            }
             
             await client.query('COMMIT');
             
@@ -132,7 +144,7 @@ class BatchStatusService {
                 details: {
                     message: `System automatically promoted ${updateResult.rows.length} batch(es) to Sellable for Product ID ${productId} due to inventory depletion`,
                     batch_count: updateResult.rows.length,
-                    batch_numbers: updateResult.rows.map(row => row.batch_number).join(', '),
+                    batch_names: updateResult.rows.map(row => row.batch_name).join(', '),
                     new_status: 'Sellable',
                     product_id: productId,
                     promotion_reason: 'Inventory depletion'
@@ -289,6 +301,59 @@ class BatchStatusService {
     }
 
     /**
+     * Validate batch can be marked as Sellable
+     * @param {number} batchId - Batch ID
+     * @param {Object} client - Database client
+     * @returns {Promise<Object>} - Validation result
+     */
+    async validateBatchForSellable(batchId, client) {
+        const batchQuery = await client.query(`
+            SELECT 
+                items_table_missing,
+                unit_weight_grams_missing,
+                unit_count_missing,
+                thc_percentage,
+                thc_override
+            FROM "ORDERS-batches"
+            WHERE id = $1
+        `, [batchId]);
+
+        const b = batchQuery.rows[0];
+        const warnings = [];
+
+        if (b.items_table_missing) {
+            warnings.push({
+                level: 'ERROR',
+                field: 'items_table_missing',
+                message: 'This batch is missing critical data from the Items table. Cannot mark as Sellable until resolved.'
+            });
+        }
+
+        if (b.unit_weight_grams_missing || b.unit_count_missing) {
+            warnings.push({
+                level: 'ERROR',
+                field: 'unit_specifications',
+                message: 'Unit weight or count is missing. Full/partial package detection may be inaccurate.'
+            });
+        }
+
+        if (!b.thc_percentage && !b.thc_override) {
+            warnings.push({
+                level: 'WARNING',
+                field: 'thc_percentage',
+                message: 'No THC data available. Consider adding a manual override before marking Sellable.'
+            });
+        }
+
+        const canBeSellable = warnings.filter(w => w.level === 'ERROR').length === 0;
+
+        return {
+            valid: canBeSellable,
+            warnings: warnings
+        };
+    }
+
+    /**
      * Manually update batch status (for admin use)
      * @param {number} batchId - Batch ID
      * @param {string} newStatus - New status
@@ -299,12 +364,20 @@ class BatchStatusService {
         const client = await this.pool.connect();
         
         try {
+            // Permission validation
+            if (!userId || userId === 'SYSTEM') {
+                return {
+                    success: false,
+                    error: 'Unauthorized: Valid user authentication required'
+                };
+            }
+
             await client.query('BEGIN');
             
             // Get current batch info
             const currentQuery = `
-                SELECT id, batch_number, status, quantity, product_id
-                FROM batches 
+                SELECT id, batch_name, status, quantity, allocated_quantity, fk_master_product_id
+                FROM "ORDERS-batches" 
                 WHERE id = $1
             `;
             
@@ -320,34 +393,60 @@ class BatchStatusService {
             
             const currentBatch = currentResult.rows[0];
             const oldStatus = currentBatch.status;
+
+            // Validate if trying to set to 'Sellable'
+            if (newStatus === 'Sellable') {
+                const validation = await this.validateBatchForSellable(batchId, client);
+                if (!validation.valid) {
+                    await client.query('ROLLBACK');
+                    return {
+                        success: false,
+                        error: `Cannot mark batch as Sellable: ${validation.warnings.map(w => w.message).join('; ')}`,
+                        validation_errors: validation.warnings
+                    };
+                }
+                // Include warnings even if valid
+                if (validation.warnings.length > 0) {
+                    console.log(`⚠️ Batch ${batchId} has validation warnings:`, validation.warnings);
+                }
+            }
             
             // Update batch status
             const updateQuery = `
-                UPDATE batches 
-                SET status = $1, updated_at = NOW()
+                UPDATE "ORDERS-batches" 
+                SET status = $1
                 WHERE id = $2
-                RETURNING id, batch_number, status, quantity, product_id
+                RETURNING id, batch_name, status, quantity, allocated_quantity, fk_master_product_id
             `;
             
             const updateResult = await client.query(updateQuery, [newStatus, batchId]);
+
+            // Log to batch history
+            await client.query(`
+                INSERT INTO "ORDERS-batch-history" (
+                    batch_id, change_type, field_name,
+                    old_value, new_value, reason,
+                    changed_by_user_id, changed_by_system
+                ) VALUES ($1, 'status_changed', 'status', $2, $3, 'Manual status change', $4, false)
+            `, [batchId, oldStatus, newStatus, userId]);
             
             await client.query('COMMIT');
             
             // Log the manual update
-            const userText = userId === 'SYSTEM' ? 'System' : `User ID ${userId}`;
             await auditLogger.logAction({
-                userId: userId === 'SYSTEM' ? null : userId,
+                userId: userId,
                 action: 'batch_status_update',
                 resourceType: 'Batch',
                 resourceId: batchId.toString(),
                 details: {
-                    message: `${userText} manually updated Batch ${currentBatch.batch_number} status from "${oldStatus}" to "${newStatus}" (Quantity: ${currentBatch.quantity})`,
+                    message: `User ID ${userId} manually updated Batch "${currentBatch.batch_name}" status from "${oldStatus}" to "${newStatus}" (Quantity: ${currentBatch.quantity})`,
                     batch_id: batchId,
-                    batch_number: currentBatch.batch_number,
+                    batch_name: currentBatch.batch_name,
                     old_status: oldStatus,
                     new_status: newStatus,
                     quantity: currentBatch.quantity,
-                    product_id: currentBatch.product_id,
+                    allocated_quantity: currentBatch.allocated_quantity,
+                    product_id: currentBatch.fk_master_product_id,
                     update_type: 'manual'
                 },
                 status: 'success',

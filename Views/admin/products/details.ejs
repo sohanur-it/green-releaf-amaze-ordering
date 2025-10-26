@@ -494,6 +494,7 @@ async function updatePrice() {
         const response = await fetch(`/api/v1/products/master/${productId}/price`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include', // Include cookies for session authentication
             body: JSON.stringify({ default_price: newPrice })
         });
         
@@ -533,6 +534,7 @@ async function updateCategoryPrices() {
         const response = await fetch(`/api/v1/products/categories/${encodeURIComponent(categoryName)}/bulk-price-update`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'include', // Include cookies for session authentication
             body: JSON.stringify({ 
                 new_price: newPrice,
                 exclude_product_ids: [productId] // Exclude current product as it's already updated

@@ -207,10 +207,68 @@ class BatchSyncService {
             console.log(`📝 Processing ${changes.new.length} new batches...`);
             let processedNew = 0;
             for (const batch of changes.new) {
-                processedNew++;
-                if (processedNew % 10 === 0 || processedNew === changes.new.length) {
-                    console.log(`   ✓ Processed ${processedNew}/${changes.new.length} new batches`);
+                try {
+                    processedNew++;
+                    if (processedNew % 10 === 0 || processedNew === changes.new.length) {
+                        console.log(`   ✓ Processed ${processedNew}/${changes.new.length} new batches`);
+                    }
+                    
+                    // Determine initial status
+                    let initialStatus = 'On Hold';
+                    
+                    // Check if there are already any Sellable batches for this metrc_item_name
+                const existingSellableCheck = await client.query(`
+                    SELECT COUNT(*) as count
+                    FROM "ORDERS-batches"
+                    WHERE metrc_item_name = $1 AND status = 'Sellable'
+                `, [batch.name]);
+                
+                if (existingSellableCheck.rows[0].count === '0') {
+                    // No Sellable batches exist - check if there are ANY existing batches
+                    const existingAnyCheck = await client.query(`
+                        SELECT COUNT(*) as count
+                        FROM "ORDERS-batches"
+                        WHERE metrc_item_name = $1
+                    `, [batch.name]);
+                    
+                    if (existingAnyCheck.rows[0].count === '0') {
+                        // First batch ever - make it Sellable!
+                        initialStatus = 'Sellable';
+                        console.log(`   ✨ Auto-promoting FIRST batch for item "${batch.name}" to Sellable`);
+                    } else {
+                        // Older batches exist but none are Sellable - promote the OLDEST one
+                        const oldestBatch = await client.query(`
+                            SELECT id, batch_name
+                            FROM "ORDERS-batches"
+                            WHERE metrc_item_name = $1
+                              AND status = 'On Hold'
+                            ORDER BY created_at ASC
+                            LIMIT 1
+                        `, [batch.name]);
+                        
+                        if (oldestBatch.rows.length > 0) {
+                            // Promote the oldest batch to Sellable
+                            await client.query(`
+                                UPDATE "ORDERS-batches"
+                                SET status = 'Sellable'
+                                WHERE id = $1
+                            `, [oldestBatch.rows[0].id]);
+                            
+                            await client.query(`
+                                INSERT INTO "ORDERS-batch-history" (
+                                    batch_id, change_type, field_name, old_value, new_value, reason, changed_by_system
+                                ) VALUES ($1, 'status_changed', 'status', 'On Hold', 'Sellable', 
+                                          'Auto-promoted: No Sellable batches existed', true)
+                            `, [oldestBatch.rows[0].id]);
+                            
+                            console.log(`   ✨ Auto-promoted OLDEST batch "${oldestBatch.rows[0].batch_name}" for item "${batch.name}" to Sellable`);
+                        }
+                        
+                        // NEW batch stays as 'On Hold'
+                        initialStatus = 'On Hold';
+                    }
                 }
+                
                 const result = await client.query(`
                     INSERT INTO "ORDERS-batches" (
                         batch_name, metrc_item_name, first_sourcepackage_label,
@@ -222,7 +280,7 @@ class BatchSyncService {
                         last_modified, items_table_missing, 
                         unit_weight_grams_missing, unit_count_missing,
                         status
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, 'On Hold')
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
                     RETURNING id
                 `, [
                     batch.batch_name,
@@ -246,65 +304,91 @@ class BatchSyncService {
                     batch.last_modified,
                     batch.items_table_missing,
                     batch.unit_weight_grams_missing,
-                    batch.unit_count_missing
+                    batch.unit_count_missing,
+                    initialStatus
                 ]);
 
-                // Log creation
-                await client.query(`
-                    INSERT INTO "ORDERS-batch-history" (
-                        batch_id, change_type, reason, 
-                        changed_by_system, timestamp
-                    ) VALUES ($1, 'batch_created', 'Discovered in METRC sync', true, NOW())
-                `, [result.rows[0].id]);
+                    // Log creation
+                    const reason = initialStatus === 'Sellable' 
+                        ? 'Discovered in METRC sync - Auto-promoted as first batch for product'
+                        : 'Discovered in METRC sync';
+                        
+                    await client.query(`
+                        INSERT INTO "ORDERS-batch-history" (
+                            batch_id, change_type, field_name, new_value, reason, 
+                            changed_by_system, timestamp
+                        ) VALUES ($1, 'batch_created', 'status', $2, $3, true, NOW())
+                    `, [result.rows[0].id, initialStatus, reason]);
+                } catch (error) {
+                    console.error(`   ❌ CRITICAL: Failed to create batch "${batch.batch_name}": ${error.message}`);
+                    console.error(`   ❌ Error details:`, JSON.stringify(batch, null, 2));
+                    throw error; // Abort transaction
+                }
             }
 
             // Process UPDATES
             console.log(`📝 Processing ${changes.updated.length} updated batches...`);
             let processedUpdates = 0;
             for (const change of changes.updated) {
-                processedUpdates++;
-                if (processedUpdates % 10 === 0 || processedUpdates === changes.updated.length) {
-                    console.log(`   ✓ Processed ${processedUpdates}/${changes.updated.length} updates`);
-                }
-                const batchId = await this.getBatchIdByName(change.batch_name, client);
+                try {
+                    processedUpdates++;
+                    if (processedUpdates % 10 === 0 || processedUpdates === changes.updated.length) {
+                        console.log(`   ✓ Processed ${processedUpdates}/${changes.updated.length} updates`);
+                    }
+                    const batchId = await this.getBatchIdByName(change.batch_name, client);
+                    
+                    if (!batchId) {
+                        console.log(`   ⚠️ Batch not found for update: ${change.batch_name}`);
+                        continue;
+                    }
 
-                // Update the batch (preserving the status)
-                await client.query(`
-                    UPDATE "ORDERS-batches"
-                    SET 
-                        quantity = $1,
-                        package_count = $2,
-                        full_package_count = $3,
-                        partial_package_count = $4,
-                        available_labels = $5,
-                        full_package_details = $6,
-                        partial_package_details = $7,
-                        thc_percentage = $8,
-                        last_modified = $9,
-                        last_synced = NOW()
-                    WHERE id = $10
-                `, [
-                    change.full_fresh_data.quantity,
-                    change.full_fresh_data.package_count,
-                    change.full_fresh_data.full_package_count,
-                    change.full_fresh_data.partial_package_count,
-                    JSON.stringify(change.full_fresh_data.available_labels),
-                    JSON.stringify(change.full_fresh_data.full_package_details),
-                    JSON.stringify(change.full_fresh_data.partial_package_details),
-                    change.full_fresh_data.thc_percentage,
-                    change.full_fresh_data.last_modified,
-                    batchId
-                ]);
-
-                // Log each field change
-                for (const [field, values] of Object.entries(change.updates)) {
+                    // Update the batch (preserving the status)
                     await client.query(`
-                        INSERT INTO "ORDERS-batch-history" (
-                            batch_id, change_type, field_name,
-                            old_value, new_value, reason,
-                            changed_by_system
-                        ) VALUES ($1, 'field_updated', $2, $3, $4, 'METRC sync detected change', true)
-                    `, [batchId, field, values.old?.toString() || 'null', values.new?.toString() || 'null']);
+                        UPDATE "ORDERS-batches"
+                        SET 
+                            quantity = $1,
+                            package_count = $2,
+                            full_package_count = $3,
+                            partial_package_count = $4,
+                            available_labels = $5,
+                            full_package_details = $6,
+                            partial_package_details = $7,
+                            thc_percentage = $8,
+                            last_modified = $9,
+                            last_synced = NOW()
+                        WHERE id = $10
+                    `, [
+                        change.full_fresh_data.quantity,
+                        change.full_fresh_data.package_count,
+                        change.full_fresh_data.full_package_count,
+                        change.full_fresh_data.partial_package_count,
+                        JSON.stringify(change.full_fresh_data.available_labels),
+                        JSON.stringify(change.full_fresh_data.full_package_details),
+                        JSON.stringify(change.full_fresh_data.partial_package_details),
+                        change.full_fresh_data.thc_percentage,
+                        change.full_fresh_data.last_modified,
+                        batchId
+                    ]);
+
+                    // Log each field change
+                    for (const [field, values] of Object.entries(change.updates || {})) {
+                        try {
+                            await client.query(`
+                                INSERT INTO "ORDERS-batch-history" (
+                                    batch_id, change_type, field_name,
+                                    old_value, new_value, reason,
+                                    changed_by_system
+                                ) VALUES ($1, 'field_updated', $2, $3, $4, 'METRC sync detected change', true)
+                            `, [batchId, field, values.old?.toString() || 'null', values.new?.toString() || 'null']);
+                        } catch (historyError) {
+                            console.log(`   ⚠️ Failed to log history for batch ${batchId}: ${historyError.message}`);
+                        }
+                    }
+                } catch (error) {
+                    console.error(`   ❌ CRITICAL: Failed to update batch "${change.batch_name}": ${error.message}`);
+                    console.error(`   ❌ Error stack: ${error.stack}`);
+                    // Abort immediately - transaction is already aborted
+                    throw new Error(`Transaction aborted due to batch update failure: ${error.message}`);
                 }
             }
 
@@ -316,30 +400,51 @@ class BatchSyncService {
                 if (processedPkgChanges % 10 === 0 || processedPkgChanges === changes.packageChanges.length) {
                     console.log(`   ✓ Processed ${processedPkgChanges}/${changes.packageChanges.length} package changes`);
                 }
+                
+                if (!packageChange.batch_name || !packageChange.removed_packages || packageChange.removed_packages.length === 0) {
+                    console.log(`   ⚠️ Skipping invalid package change`);
+                    continue;
+                }
+                
                 const batchId = await this.getBatchIdByName(packageChange.batch_name, client);
+                
+                if (!batchId) {
+                    console.log(`   ⚠️ Batch not found: ${packageChange.batch_name}`);
+                    continue;
+                }
 
                 for (const removedLabel of packageChange.removed_packages) {
-                    // Investigate WHY it was removed
-                    const investigation = await this.investigateRemovedPackage(
-                        removedLabel,
-                        packageChange.batch_name,
-                        client
-                    );
+                    try {
+                        // Investigate WHY it was removed
+                        const investigation = await this.investigateRemovedPackage(
+                            removedLabel,
+                            packageChange.batch_name,
+                            client
+                        );
 
-                    // Log detailed history
-                    await client.query(`
-                        INSERT INTO "ORDERS-batch-history" (
-                            batch_id, change_type, reason,
-                            related_package_label, related_invoice_id,
-                            change_details, changed_by_system
-                        ) VALUES ($1, 'package_removed', $2, $3, $4, $5, true)
-                    `, [
-                        batchId,
-                        investigation.reason,
-                        investigation.package_label,
-                        investigation.related_invoice,
-                        JSON.stringify(investigation)
-                    ]);
+                        // Ensure we have a valid reason
+                        if (!investigation.reason) {
+                            investigation.reason = 'unknown_removal';
+                        }
+
+                        // Log detailed history
+                        await client.query(`
+                            INSERT INTO "ORDERS-batch-history" (
+                                batch_id, change_type, reason,
+                                related_package_label, related_invoice_id,
+                                change_details, changed_by_system
+                            ) VALUES ($1, 'package_removed', $2, $3, $4, $5, true)
+                        `, [
+                            batchId,
+                            investigation.reason,
+                            investigation.package_label,
+                            investigation.related_invoice,
+                            JSON.stringify(investigation)
+                        ]);
+                    } catch (error) {
+                        console.log(`   ⚠️ Failed to investigate package ${removedLabel}: ${error.message}`);
+                        // Continue with next package
+                    }
                 }
             }
 
@@ -379,50 +484,10 @@ class BatchSyncService {
             metrc_status: null
         };
 
-        // Check if package was allocated to an order
-        const allocation = await client.query(`
-            SELECT invoice_id, allocated_at
-            FROM order_line_items
-            WHERE package_label = $1
-            ORDER BY allocated_at DESC
-            LIMIT 1
-        `, [packageLabel]);
-
-        if (allocation.rows.length > 0) {
-            investigation.reason = 'allocated_to_invoice';
-            investigation.related_invoice = allocation.rows[0].invoice_id;
-            return investigation;
-        }
-
-        // Check if package was transferred out
-        const transferred = await client.query(`
-            SELECT metrcid, destination_license
-            FROM transferredpackages
-            WHERE label = $1
-            LIMIT 1
-        `, [packageLabel]);
-
-        if (transferred.rows.length > 0) {
-            investigation.reason = 'transferred_out';
-            investigation.metrc_status = 'transferred';
-            return investigation;
-        }
-
-        // Check if package was made inactive
-        const inactive = await client.query(`
-            SELECT metrcid, finisheddate
-            FROM inactivepackages
-            WHERE label = $1
-            LIMIT 1
-        `, [packageLabel]);
-
-        if (inactive.rows.length > 0) {
-            investigation.reason = 'made_inactive';
-            investigation.metrc_status = 'finished';
-            return investigation;
-        }
-
-        // Unknown reason
+        // Skip order_line_items check (Module 4 not implemented yet)
+        // Skip transferredpackages and inactivepackages checks due to schema differences
+        // Just mark as unknown removal for now
+        
         investigation.reason = 'unknown_removal';
         return investigation;
     }
@@ -522,9 +587,15 @@ class BatchSyncService {
     /**
      * Main sync method
      */
-    async syncBatches() {
+    async syncBatches(options = {}) {
         const startTime = Date.now();
         console.log('🔄 Starting batch synchronization...');
+        
+        // Add test limit if specified
+        const testLimit = process.env.TEST_SYNC_LIMIT ? parseInt(process.env.TEST_SYNC_LIMIT) : null;
+        if (testLimit) {
+            console.log(`🧪 TEST MODE: Processing first ${testLimit} items only`);
+        }
 
         try {
             // 1. Execute extraction query
@@ -537,6 +608,22 @@ class BatchSyncService {
             const changes = this.detectChanges(freshBatches, existingBatches);
 
             console.log(`📊 Sync plan: ${changes.new.length} new, ${changes.updated.length} updated, ${changes.removed.length} removed, ${changes.packageChanges.length} package changes`);
+
+            // 4. Apply test limit if specified
+            if (testLimit) {
+                if (changes.new.length > testLimit) {
+                    console.log(`🧪 Limiting new batches from ${changes.new.length} to ${testLimit}`);
+                    changes.new = changes.new.slice(0, testLimit);
+                }
+                if (changes.updated.length > testLimit) {
+                    console.log(`🧪 Limiting updated batches from ${changes.updated.length} to ${testLimit}`);
+                    changes.updated = changes.updated.slice(0, testLimit);
+                }
+                if (changes.packageChanges.length > testLimit) {
+                    console.log(`🧪 Limiting package changes from ${changes.packageChanges.length} to ${testLimit}`);
+                    changes.packageChanges = changes.packageChanges.slice(0, testLimit);
+                }
+            }
 
             // 4. Execute updates in transaction
             await this.applyChangesWithHistory(changes);

@@ -80,6 +80,16 @@ class MasterScheduler {
                 lastRun: null,
                 nextRun: null,
                 status: 'idle'
+            },
+            {
+                name: 'batches',
+                description: 'Batch Sync (Module 3)',
+                schedule: '*/15 8-18 * * 1-5', // Every 15 minutes, 8 AM - 6 PM, weekdays
+                script: 'sync:batches:prod',
+                enabled: true,
+                lastRun: null,
+                nextRun: null,
+                status: 'idle'
             }
         ];
     }
