@@ -7,7 +7,7 @@ The **Incremental/Delta Sync** strategy is a highly efficient approach that dram
 ## Strategy Details
 
 ### 1. **Query Local Database First**
-- Retrieves the **most recent `lastmodified` timestamp** from the local `outgoingtransfers` table
+- Retrieves the **most recent `lastmodified` timestamp** from the local `activeoutgoingtransfers` table
 - Uses `MAX(lastmodified)` to find the latest sync point
 - If no previous sync exists, fetches all records (initial sync)
 
@@ -70,7 +70,7 @@ The **Incremental/Delta Sync** strategy is a highly efficient approach that dram
 // Query local database for last sync time
 const query = `
     SELECT MAX(lastmodified) as last_sync_time 
-    FROM outgoingtransfers 
+    FROM activeoutgoingtransfers 
     WHERE synclicense = $1
 `;
 
@@ -85,7 +85,7 @@ const params = {
 
 ### Bulk UPSERT Operation
 ```sql
-INSERT INTO outgoingtransfers (metrcid, manifestnumber, state, ...)
+INSERT INTO activeoutgoingtransfers (metrcid, manifestnumber, state, ...)
 VALUES ($1, $2, $3, ...)
 ON CONFLICT (metrcid)
 DO UPDATE SET
@@ -156,12 +156,12 @@ curl http://localhost:3000/api/v1/admin/sync/history
 ```sql
 -- Check last sync time
 SELECT MAX(lastmodified) as last_sync_time 
-FROM outgoingtransfers 
+FROM activeactiveoutgoingtransfers 
 WHERE synclicense = 'CUL000063';
 
 -- Check recent updates
 SELECT COUNT(*) as recent_updates
-FROM outgoingtransfers 
+FROM activeactiveoutgoingtransfers 
 WHERE synclicense = 'CUL000063' 
 AND lastmodified > NOW() - INTERVAL '1 hour';
 ```
@@ -212,7 +212,7 @@ DB_PORT=5432
 
 ### Table Structure
 ```sql
-CREATE TABLE outgoingtransfers (
+CREATE TABLE activeoutgoingtransfers (
     id SERIAL PRIMARY KEY,
     metrcid INTEGER NOT NULL UNIQUE,
     lastmodified TIMESTAMP,
@@ -220,8 +220,8 @@ CREATE TABLE outgoingtransfers (
     -- ... other columns
 );
 
-CREATE INDEX idx_outgoingtransfers_lastmodified ON outgoingtransfers(lastmodified);
-CREATE INDEX idx_outgoingtransfers_synclicense ON outgoingtransfers(synclicense);
+CREATE INDEX idx_activeoutgoingtransfers_lastmodified ON activeoutgoingtransfers(lastmodified);
+CREATE INDEX idx_activeoutgoingtransfers_synclicense ON activeoutgoingtransfers(synclicense);
 ```
 
 ## Best Practices

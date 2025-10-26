@@ -1,144 +1,4 @@
 <!-- Modern User Management with Chart.js -->
-<style>
-.stats-card {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    border-radius: 15px;
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
-    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-}
-
-.stats-card h3 {
-    font-size: 2.5rem;
-    font-weight: 700;
-    margin: 0;
-}
-
-.stats-card p {
-    margin: 0;
-    opacity: 0.9;
-}
-
-.dashboard-card {
-    background: white;
-    border-radius: 15px;
-    padding: 1.5rem;
-    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
-}
-
-.modern-table {
-    margin: 0;
-}
-
-.modern-table thead {
-    background: #f8f9fa;
-}
-
-.modern-table th {
-    font-weight: 600;
-    color: #4b5563;
-    text-transform: uppercase;
-    font-size: 0.75rem;
-    letter-spacing: 0.05em;
-    padding: 1rem;
-    border: none;
-}
-
-.modern-table td {
-    padding: 1rem;
-    vertical-align: middle;
-    border-bottom: 1px solid #f3f4f6;
-}
-
-.modern-table tbody tr:hover {
-    background: #f9fafb;
-}
-
-.user-avatar {
-    width: 60px;
-    height: 60px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: white;
-    font-size: 1.5rem;
-    font-weight: 700;
-}
-
-.status-badge {
-    padding: 0.5rem 1rem;
-    border-radius: 20px;
-    font-weight: 600;
-    font-size: 0.875rem;
-}
-
-.status-active {
-    background: #10b981;
-    color: white;
-}
-
-.status-pending {
-    background: #f59e0b;
-    color: white;
-}
-
-.status-revoked {
-    background: #ef4444;
-    color: white;
-}
-
-.modern-modal .modal-content {
-    border-radius: 20px;
-    border: none;
-    overflow: hidden;
-}
-
-.modern-modal .modal-header {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 1.5rem;
-}
-
-.role-option {
-    border: 2px solid #e5e7eb;
-    border-radius: 10px;
-    padding: 1rem;
-    margin-bottom: 0.5rem;
-    cursor: pointer;
-    transition: all 0.3s;
-}
-
-.role-option:hover {
-    border-color: #667eea;
-    background: #f3f4f6;
-}
-
-.role-option.selected {
-    border-color: #667eea;
-    background: #eef2ff;
-}
-
-.permission-badge {
-    display: inline-block;
-    padding: 0.25rem 0.75rem;
-    border-radius: 15px;
-    background: #e0e7ff;
-    color: #4f46e5;
-    font-size: 0.75rem;
-    margin: 0.25rem;
-}
-
-.permissions-list {
-    background: #f8f9fa;
-    padding: 1rem;
-    border-radius: 10px;
-    border: 1px solid #e5e7eb;
-}
-</style>
-
 <div class="container-fluid p-4">
     <!-- Refresh Button -->
     <div class="d-flex justify-content-end mb-4">
@@ -150,25 +10,25 @@
     <!-- Statistics Row -->
     <div class="row mb-4">
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+            <div class="stats-card">
                 <p>Total Users</p>
                 <h3 id="totalUsers">0</h3>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+            <div class="stats-card success">
                 <p>Active Users</p>
                 <h3 id="activeUsers">0</h3>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+            <div class="stats-card warning">
                 <p>Pending Approval</p>
                 <h3 id="pendingUsers">0</h3>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+            <div class="stats-card danger">
                 <p>Revoked</p>
                 <h3 id="revokedUsers">0</h3>
             </div>
@@ -203,18 +63,18 @@
 
 <!-- Modern Role Assignment Modal -->
 <div class="modal fade modern-modal" id="roleModal" tabindex="-1">
-    <div class="modal-dialog modal-lg" style="max-width: 800px; margin: 1.75rem auto;">
-        <div class="modal-content" style="max-height: calc(100vh - 3.5rem);">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
             <div class="modal-header">
                 <h5 class="modal-title">
                     <i class="fas fa-user-shield me-2"></i>Assign Role
                 </h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body p-4" style="max-height: calc(100vh - 12rem); overflow-y: auto;">
-                <div class="mb-4">
-                    <h6 class="mb-3">User Information</h6>
-                    <div class="d-flex align-items-center mb-3">
+            <div class="modal-body">
+                <div class="mb-3">
+                    <h6 class="mb-2">User Information</h6>
+                    <div class="d-flex align-items-center mb-2">
                         <div class="user-avatar me-3" id="modalUserAvatar">A</div>
                         <div>
                             <h6 class="mb-0" id="modalUserName">User Name</h6>
@@ -223,7 +83,7 @@
                     </div>
                 </div>
 
-                <div class="mb-3">
+                <div class="mb-2">
                     <label class="form-label">Current Role</label>
                     <div id="currentRoleDisplay" class="alert alert-info">
                         <i class="fas fa-info-circle me-2"></i>
@@ -231,22 +91,22 @@
                     </div>
                 </div>
 
-                <div class="mb-3">
-                    <label for="roleSelect" class="form-label">Select New Role</label>
-                    <select class="form-select" id="roleSelect" onchange="previewRolePermissions()">
-                        <option value="">-- Select a role --</option>
-                    </select>
+                <div class="mb-2">
+                    <label class="form-label">Select Roles</label>
+                    <div id="rolesList" class="roles-selection">
+                        <!-- Roles will be loaded here as checkboxes -->
+                    </div>
                 </div>
 
-                <div id="permissionsPreview" class="mt-4" style="display: none;">
-                    <h6 class="mb-3">Role Permissions</h6>
+                <div id="permissionsPreview" class="mt-3" style="display: none;">
+                    <h6 class="mb-2">Selected Role Permissions</h6>
                     <div id="permissionsList" class="permissions-list"></div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" onclick="assignRole()">
-                    <i class="fas fa-check me-1"></i>Assign Role
+                <button type="button" class="btn btn-primary" onclick="assignRoles()">
+                    <i class="fas fa-check me-1"></i>Assign Roles
                 </button>
             </div>
         </div>
@@ -274,6 +134,28 @@ document.addEventListener('DOMContentLoaded', function() {
                    user.username?.toLowerCase().includes(searchTerm);
         });
         renderUsers();
+    });
+    
+    // Fix modal positioning on window resize
+    window.addEventListener('resize', function() {
+        const modals = document.querySelectorAll('.modal.show');
+        modals.forEach(modal => {
+            const modalInstance = bootstrap.Modal.getInstance(modal);
+            if (modalInstance) {
+                // Force modal to recalculate position
+                modalInstance._adjustDialog();
+            }
+        });
+    });
+    
+    // Ensure modals are properly positioned when shown
+    document.addEventListener('shown.bs.modal', function(event) {
+        const modal = event.target;
+        const modalDialog = modal.querySelector('.modal-dialog');
+        if (modalDialog) {
+            // Set proper positioning without centering
+            modalDialog.style.margin = '1rem auto';
+        }
     });
 });
 
@@ -333,17 +215,17 @@ function renderUsers() {
             '<span class="text-muted">No roles</span>';
         
         const actionsHtml = user.status === 'pending' ? `
-            <button class="btn btn-sm btn-success me-1" onclick="approveUser(${user.id})">
+            <button class="btn btn-sm btn-success me-1 mb-1" onclick="approveUser(${user.id})">
                 <i class="fas fa-check"></i> Approve
             </button>
-            <button class="btn btn-sm btn-danger" onclick="revokeUser(${user.id})">
+            <button class="btn btn-sm btn-danger mb-1" onclick="revokeUser(${user.id})">
                 <i class="fas fa-times"></i> Reject
             </button>
         ` : `
-            <button class="btn btn-sm btn-primary me-1" onclick="openRoleModal(${user.id})">
+            <button class="btn btn-sm btn-primary me-1 mb-1" onclick="openRoleModal(${user.id})">
                 <i class="fas fa-user-cog"></i> Assign Role
             </button>
-            <button class="btn btn-sm btn-warning" onclick="revokeUser(${user.id})">
+            <button class="btn btn-sm btn-warning mb-1" onclick="revokeUser(${user.id})">
                 <i class="fas fa-ban"></i> Revoke
             </button>
         `;
@@ -372,13 +254,23 @@ function renderUsers() {
 }
 
 function openRoleModal(userId) {
+    console.log('Opening role modal for userId:', userId);
+    console.log('Available users:', allUsers.map(u => ({ id: u.id, username: u.username, firstname: u.firstname, lastname: u.lastname })));
+    
     selectedUser = allUsers.find(u => u.id === userId);
-    if (!selectedUser) return;
+    if (!selectedUser) {
+        console.error('User not found with ID:', userId);
+        return;
+    }
+    
+    console.log('Selected user:', selectedUser);
     
     const initials = (selectedUser.firstname?.[0] || '') + (selectedUser.lastname?.[0] || '');
-    document.getElementById('modalUserAvatar').textContent = initials;
-    document.getElementById('modalUserName').textContent = `${selectedUser.firstname} ${selectedUser.lastname}`;
-    document.getElementById('modalUserEmail').textContent = selectedUser.email;
+    const fullName = `${selectedUser.firstname || ''} ${selectedUser.lastname || ''}`.trim() || selectedUser.username || 'Unknown User';
+    
+    document.getElementById('modalUserAvatar').textContent = initials || '?';
+    document.getElementById('modalUserName').textContent = fullName;
+    document.getElementById('modalUserEmail').textContent = selectedUser.email || 'No email';
     
     // Display current role
     const currentRoleName = document.getElementById('currentRoleName');
@@ -388,71 +280,110 @@ function openRoleModal(userId) {
         currentRoleName.textContent = 'No role assigned';
     }
     
-    // Populate role dropdown
-    const roleSelect = document.getElementById('roleSelect');
-    roleSelect.innerHTML = '<option value="">-- Select a role --</option>';
+    // Populate role checkboxes
+    const rolesList = document.getElementById('rolesList');
+    rolesList.innerHTML = '';
     
     availableRoles.forEach(role => {
-        const option = document.createElement('option');
-        option.value = role.id;
-        option.textContent = role.name;
-        option.dataset.description = role.description || '';
-        roleSelect.appendChild(option);
+        const roleItem = document.createElement('div');
+        roleItem.className = 'role-checkbox-item';
+        
+        // Check if user already has this role
+        const hasRole = selectedUser.roles && selectedUser.roles.some(r => r.id === role.id);
+        
+        roleItem.innerHTML = `
+            <input type="checkbox" id="role_${role.id}" value="${role.id}" ${hasRole ? 'checked' : ''} onchange="updateRoleSelection()">
+            <label for="role_${role.id}">${role.name}</label>
+            ${role.description ? `<div class="role-description">${role.description}</div>` : ''}
+        `;
+        
+        rolesList.appendChild(roleItem);
     });
     
-    // Reset preview
-    document.getElementById('permissionsPreview').style.display = 'none';
+    // Update permission preview
+    updateRoleSelection();
+    
+    // Show current role permissions immediately
+    console.log('🔍 Selected user roles:', selectedUser.roles);
+    if (selectedUser.roles && selectedUser.roles.length > 0) {
+        const currentRoleIds = selectedUser.roles.map(r => r.id);
+        console.log('🔍 Current role IDs:', currentRoleIds);
+        showCurrentRolePermissions(currentRoleIds);
+    } else {
+        console.log('⚠️ No current roles found for user');
+        // Hide preview if no current roles
+        document.getElementById('permissionsPreview').style.display = 'none';
+    }
+    
     selectedRole = null;
     
     new bootstrap.Modal(document.getElementById('roleModal')).show();
 }
 
-async function previewRolePermissions() {
-    const roleSelect = document.getElementById('roleSelect');
-    selectedRole = roleSelect.value;
+function updateRoleSelection() {
+    const checkboxes = document.querySelectorAll('#rolesList input[type="checkbox"]:checked');
+    const selectedRoles = Array.from(checkboxes).map(cb => parseInt(cb.value));
     
-    if (!selectedRole) {
-        document.getElementById('permissionsPreview').style.display = 'none';
-        return;
-    }
-    
-    // Load permissions for selected role
-    try {
-        const response = await fetch(`/api/v1/admin/users/roles/${selectedRole}/permissions`);
-        
-        // Check if response is ok
-        if (!response.ok) {
-            console.error('Failed to fetch permissions:', response.status);
-            document.getElementById('permissionsPreview').style.display = 'none';
-            return;
-        }
-        
-        // Check content type
-        const contentType = response.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-            console.error('Response is not JSON:', contentType);
-            document.getElementById('permissionsPreview').style.display = 'none';
-            return;
-        }
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            const permissions = data.data || [];
-            const permissionsContainer = document.getElementById('permissionsList');
-            
-            if (permissions.length === 0) {
-                permissionsContainer.innerHTML = '<span class="text-muted">No permissions assigned to this role</span>';
-            } else {
-                permissionsContainer.innerHTML = permissions.map(p => 
-                    `<span class="permission-badge">${p.resource}: ${p.action}</span>`
-                ).join('');
-            }
-            
-            document.getElementById('permissionsPreview').style.display = 'block';
+    if (selectedRoles.length > 0) {
+        // Show permissions preview for selected roles
+        document.getElementById('permissionsPreview').style.display = 'block';
+        previewMultipleRolePermissions(selectedRoles);
+    } else {
+        // If no roles selected, show current role permissions
+        if (selectedUser && selectedUser.roles && selectedUser.roles.length > 0) {
+            const currentRoleIds = selectedUser.roles.map(r => r.id);
+            showCurrentRolePermissions(currentRoleIds);
         } else {
-            console.error('API returned error:', data.error || 'Unknown error');
+            // Hide permissions preview if no current roles
             document.getElementById('permissionsPreview').style.display = 'none';
+        }
+    }
+}
+
+async function previewMultipleRolePermissions(roleIds) {
+    try {
+        console.log('🔍 Previewing permissions for role IDs:', roleIds);
+        console.log('🔍 Available roles:', availableRoles);
+        
+        const permissionsList = document.getElementById('permissionsList');
+        permissionsList.innerHTML = '<div class="text-muted">Loading permissions...</div>';
+        
+        // Get permissions for all selected roles
+        const allPermissions = new Set();
+        const roleNames = [];
+        
+        for (const roleId of roleIds) {
+            const role = availableRoles.find(r => r.id === roleId);
+            console.log('🔍 Found role:', role);
+            if (role) {
+                roleNames.push(role.name);
+                if (role.permissions) {
+                    console.log('🔍 Role permissions:', role.permissions);
+                    role.permissions.forEach(perm => allPermissions.add(perm));
+                } else {
+                    console.log('⚠️ No permissions found for role:', role.name);
+                }
+            }
+        }
+        
+        console.log('🔍 All permissions collected:', Array.from(allPermissions));
+        
+        if (allPermissions.size > 0) {
+            permissionsList.innerHTML = `
+                <div class="mb-2">
+                    <strong>Selected Roles:</strong> ${roleNames.join(', ')}
+                </div>
+                <div class="mb-2">
+                    <strong>Combined Permissions:</strong>
+                </div>
+                <div class="permissions-grid">
+                    ${Array.from(allPermissions).map(perm => 
+                        `<span class="permission-badge">${perm}</span>`
+                    ).join('')}
+                </div>
+            `;
+        } else {
+            permissionsList.innerHTML = '<div class="text-muted">No specific permissions defined for selected roles.</div>';
         }
     } catch (error) {
         console.error('Error loading permissions:', error);
@@ -460,21 +391,92 @@ async function previewRolePermissions() {
     }
 }
 
-async function assignRole() {
-    if (!selectedRole || !selectedUser) {
-        alert('Please select a role');
+async function showCurrentRolePermissions(roleIds) {
+    try {
+        console.log('🔍 Showing current role permissions for:', roleIds);
+        console.log('🔍 Available roles:', availableRoles);
+        
+        const permissionsList = document.getElementById('permissionsList');
+        const permissionsPreview = document.getElementById('permissionsPreview');
+        
+        console.log('🔍 Permissions list element:', permissionsList);
+        console.log('🔍 Permissions preview element:', permissionsPreview);
+        
+        // Show the permissions preview section
+        permissionsPreview.style.display = 'block';
+        console.log('🔍 Set permissions preview to display: block');
+        
+        // Get permissions for current roles
+        const allPermissions = new Set();
+        const roleNames = [];
+        
+        for (const roleId of roleIds) {
+            const role = availableRoles.find(r => r.id === roleId);
+            console.log('🔍 Found role for ID', roleId, ':', role);
+            if (role) {
+                roleNames.push(role.name);
+                if (role.permissions) {
+                    console.log('🔍 Role permissions:', role.permissions);
+                    role.permissions.forEach(perm => allPermissions.add(perm));
+                } else {
+                    console.log('⚠️ No permissions found for role:', role.name);
+                }
+            }
+        }
+        
+        console.log('🔍 All permissions collected:', Array.from(allPermissions));
+        console.log('🔍 Role names:', roleNames);
+        
+        if (allPermissions.size > 0) {
+            const permissionsHtml = `
+                <div class="mb-2">
+                    <strong>Current Role Permissions:</strong> ${roleNames.join(', ')}
+                </div>
+                <div class="mb-2">
+                    <strong>Permissions:</strong>
+                </div>
+                <div class="permissions-grid">
+                    ${Array.from(allPermissions).map(perm => 
+                        `<span class="permission-badge">${perm}</span>`
+                    ).join('')}
+                </div>
+            `;
+            console.log('🔍 Setting permissions HTML:', permissionsHtml);
+            permissionsList.innerHTML = permissionsHtml;
+        } else {
+            console.log('⚠️ No permissions found, showing no permissions message');
+            permissionsList.innerHTML = '<div class="text-muted">No specific permissions defined for current role.</div>';
+        }
+    } catch (error) {
+        console.error('Error showing current role permissions:', error);
+    }
+}
+
+async function assignRoles() {
+    if (!selectedUser) {
+        alert('Please select a user');
         return;
     }
     
-    // Get selected role name
-    const roleSelect = document.getElementById('roleSelect');
-    const selectedRoleName = roleSelect.options[roleSelect.selectedIndex].text;
+    const checkboxes = document.querySelectorAll('#rolesList input[type="checkbox"]:checked');
+    const selectedRoleIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+    
+    if (selectedRoleIds.length === 0) {
+        alert('Please select at least one role');
+        return;
+    }
+    
+    // Get selected role names for display
+    const selectedRoleNames = selectedRoleIds.map(roleId => {
+        const role = availableRoles.find(r => r.id === roleId);
+        return role ? role.name : 'Unknown Role';
+    });
     
     try {
         const response = await fetch(`/api/v1/admin/users/${selectedUser.id}/roles`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ roles: [parseInt(selectedRole)] })
+            body: JSON.stringify({ roles: selectedRoleIds })
         });
         
         const data = await response.json();
@@ -484,16 +486,17 @@ async function assignRole() {
             bootstrap.Modal.getInstance(document.getElementById('roleModal')).hide();
             
             // Show success message
-            showSuccessMessage(`User ${selectedUser.firstname} ${selectedUser.lastname}'s new role "${selectedRoleName}" assigned successfully!`);
+            const roleText = selectedRoleNames.length === 1 ? 'role' : 'roles';
+            showSuccessMessage(`User ${selectedUser.firstname} ${selectedUser.lastname}'s ${roleText} "${selectedRoleNames.join(', ')}" assigned successfully!`);
             
             // Refresh data
             refreshData();
         } else {
-            alert('Failed to assign role: ' + (data.message || 'Unknown error'));
+            alert('Failed to assign roles: ' + (data.message || 'Unknown error'));
         }
     } catch (error) {
         console.error('Error:', error);
-        alert('Error assigning role: ' + error.message);
+        alert('Error assigning roles: ' + error.message);
     }
 }
 

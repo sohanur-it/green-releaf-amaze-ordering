@@ -28,7 +28,7 @@ psql -h your-rds-endpoint.amazonaws.com -U postgres -d green_releaf_prod < produ
 ```
 
 This script will:
-- ✅ Create all required METRC tables (`activepackages`, `outgoingtransfers`, `strains`, `items`, `transferredpackages`, `intransitpackages`)
+- ✅ Create all required METRC tables (`activepackages`, `activeoutgoingtransfers`, `strains`, `items`, `transferredpackages`, `intransitpackages`)
 - ✅ Add all necessary columns and indexes
 - ✅ Create update triggers for `updated_at` columns
 - ✅ Ensure schema consistency with development environment
@@ -41,7 +41,7 @@ This script will:
 
 -- Verify table structures
 \d activepackages
-\d outgoingtransfers
+\d activeoutgoingtransfers
 \d strains
 ```
 
@@ -115,7 +115,7 @@ This will test:
 
 --- Running Required Tables Test ---
 ✅ Table exists: activepackages
-✅ Table exists: outgoingtransfers
+✅ Table exists: activeoutgoingtransfers
 ✅ Table exists: strains
 ✅ Table exists: items
 ✅ Table exists: transferredpackages
@@ -223,7 +223,7 @@ WHERE synclicense = 'CUL000063';
 SELECT 
     COUNT(*) as total_transfers,
     COUNT(CASE WHEN lastmodified > NOW() - INTERVAL '1 hour' THEN 1 END) as recently_updated
-FROM outgoingtransfers 
+FROM activeoutgoingtransfers 
 WHERE synclicense = 'CUL000063';
 ```
 

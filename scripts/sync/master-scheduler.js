@@ -4,7 +4,7 @@
  * Master Scheduler for METRC Sync Operations
  * 
  * Automatically triggers METRC sync operations at specified intervals
- * during business hours (8 AM - 6 PM, Monday-Friday)
+ * during business hours (8 AM - 6 PM CST/CDT, Monday-Friday)
  * 
  * Usage: node scripts/sync/master-scheduler.js
  */
@@ -15,6 +15,9 @@ const path = require('path');
 
 // Load environment variables
 require('dotenv').config();
+
+// Import sync failure tracker for halt mechanism
+const syncFailureTracker = require('../../Server/Services/syncFailureTracker');
 
 // Scheduler configuration
 const SCHEDULE_CONFIG = {
@@ -48,7 +51,7 @@ const SCHEDULE_CONFIG = {
     
     // Items - Incremental Sync (every 60 minutes)
     items: {
-        schedule: '0 8-18 * * 1-5', // Every hour, 8 AM - 6 PM, Mon-Fri
+        schedule: '0 8-18 * * 1-5', // Every hour at :00, 8 AM - 6 PM, Mon-Fri
         script: 'sync:items:prod',
         description: 'Items Sync (Incremental)'
     },
@@ -82,20 +85,45 @@ function log(message, type = 'INFO') {
 }
 
 // Execute sync script
-function executeSyncScript(scriptName, description) {
-    return new Promise((resolve, reject) => {
-        log(`Starting ${description}...`, 'START');
+async function executeSyncScript(scriptName, description) {
+    try {
+        // HALT CHECK: Prevent scheduling if script has critical failures
+        const scriptMap = {
+            'sync:active:prod': 'sync-active-packages',
+            'sync:outgoing:prod': 'sync-outgoing-transfers',
+            'sync:intransit:prod': 'sync-intransit-packages',
+            'sync:transferred:prod': 'sync-transferred-packages',
+            'sync:items:prod': 'sync-items',
+            'sync:strains:prod': 'sync-strains'
+        };
         
-        const startTime = Date.now();
-        const jobId = `${scriptName}-${startTime}`;
+        const actualScriptName = scriptMap[scriptName];
+        if (actualScriptName) {
+            const alertLevel = await syncFailureTracker.getAlertLevel(actualScriptName, 'CUL000063');
+            if (alertLevel.level === 'critical') {
+                log(`🛑 HALTING: ${description} - Too many consecutive failures (${alertLevel.count})`, 'ERROR');
+                log(`🛑 Last Error: ${alertLevel.lastError}`, 'ERROR');
+                log(`🛑 Preventing data inconsistency by skipping sync`, 'ERROR');
+                return Promise.resolve(); // Skip this sync
+            } else if (alertLevel.level === 'warning') {
+                log(`⚠️ WARNING: ${description} has ${alertLevel.count} consecutive failures`, 'WARN');
+                log(`⚠️ Continuing but monitoring closely...`, 'WARN');
+            }
+        }
         
-        // Track running job
-        runningJobs.set(jobId, {
-            script: scriptName,
-            description,
-            startTime,
-            status: 'running'
-        });
+        return new Promise((resolve, reject) => {
+            log(`Starting ${description}...`, 'START');
+            
+            const startTime = Date.now();
+            const jobId = `${scriptName}-${startTime}`;
+            
+            // Track running job
+            runningJobs.set(jobId, {
+                script: scriptName,
+                description,
+                startTime,
+                status: 'running'
+            });
         
         // Execute npm script
         const npmProcess = spawn('npm', ['run', scriptName], {
@@ -154,6 +182,10 @@ function executeSyncScript(scriptName, description) {
             reject({ success: false, duration, error: error.message });
         });
     });
+    } catch (error) {
+        log(`Error in halt check for ${description}: ${error.message}`, 'ERROR');
+        return Promise.resolve(); // Skip sync if halt check fails
+    }
 }
 
 // Setup cron jobs
@@ -171,7 +203,7 @@ function setupScheduler() {
             }
         }, {
             scheduled: true,
-            timezone: 'America/Los_Angeles' // PST/PDT timezone for US West Coast business hours
+            timezone: 'America/Chicago' // CST/CDT timezone for US Central business hours
         });
     });
     
@@ -230,7 +262,7 @@ process.on('SIGINT', () => {
 if (require.main === module) {
     log('=== METRC Sync Master Scheduler ===', 'SCHEDULER');
     log(`Environment: ${process.env.NODE_ENV || 'development'}`, 'INFO');
-    log(`Timezone: America/New_York`, 'INFO');
+    log(`Timezone: America/Chicago (CST/CDT)`, 'INFO');
     
     setupScheduler();
     

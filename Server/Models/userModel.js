@@ -416,14 +416,22 @@ class UserModel {
      */
     static async getAllRoles() {
         const sql = `
-            SELECT id, name
+            SELECT id, name, description
             FROM roles
             ORDER BY name
         `;
         
         try {
             const result = await query(sql);
-            return result.rows;
+            const roles = result.rows;
+            
+            // Get permissions for each role
+            for (let role of roles) {
+                const permissions = await this.getRolePermissions(role.id);
+                role.permissions = permissions.map(p => p.permission);
+            }
+            
+            return roles;
         } catch (error) {
             console.error('Database query error:', error);
             throw error;

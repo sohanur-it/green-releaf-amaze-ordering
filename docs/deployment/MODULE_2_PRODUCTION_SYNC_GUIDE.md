@@ -49,7 +49,7 @@ The system maintains 6 core tables synchronized from METRC:
 - **`activepackages`**: Currently active cannabis packages
 - **`transferredpackages`**: Packages that have been transferred
 - **`intransitpackages`**: Packages currently in transit
-- **`outgoingtransfers`**: Active outgoing transfer manifests
+- **`activeoutgoingtransfers`**: Active outgoing transfer manifests
 - **`items`**: Cannabis product items/catalog
 - **`strains`**: Cannabis strain information
 

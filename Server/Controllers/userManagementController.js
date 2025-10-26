@@ -225,6 +225,17 @@ class UserManagementController {
             const { roles } = req.body;
             const adminUserId = req.session.userId;
             
+            // Validate admin user ID
+            if (!adminUserId) {
+                console.error('❌ No admin user ID in session:', req.session);
+                return res.status(401).json({
+                    success: false,
+                    error: 'Admin user not authenticated'
+                });
+            }
+            
+            console.log('🔍 Admin user ID for audit log:', adminUserId);
+            
             if (!roles || !Array.isArray(roles)) {
                 return res.status(400).json({
                     success: false,
@@ -249,14 +260,21 @@ class UserManagementController {
                 await UserModel.removeRole(userId, role.id);
             }
             
-            // Assign new roles (only the first one if multiple are provided)
-            const roleToAssign = roles[0]; // Take only the first role
-            await UserModel.assignRole(userId, roleToAssign, adminUserId);
+            // Assign new roles
+            const assignedRoleNames = [];
+            for (const roleId of roles) {
+                await UserModel.assignRole(userId, roleId, adminUserId);
+                
+                // Get the assigned role details
+                const allRoles = await UserModel.getAllRoles();
+                const assignedRoleDetails = allRoles.find(r => r.id === parseInt(roleId));
+                if (assignedRoleDetails) {
+                    assignedRoleNames.push(assignedRoleDetails.name);
+                }
+            }
             
-            // Get the assigned role details
-            const allRoles = await UserModel.getAllRoles();
-            const assignedRoleDetails = allRoles.find(r => r.id === parseInt(roleToAssign));
-            const roleName = assignedRoleDetails ? assignedRoleDetails.name : 'Unknown Role';
+            const roleNamesText = assignedRoleNames.join(', ');
+            const roleText = assignedRoleNames.length === 1 ? 'role' : 'roles';
             
             // Log the role assignment with clear message
             await auditLogger.logUserAction(
@@ -265,21 +283,21 @@ class UserManagementController {
                 'User',
                 userId,
                 {
-                    message: `User ${user.firstname} ${user.lastname}'s new role "${roleName}" assigned successfully!`,
+                    message: `User ${user.firstname} ${user.lastname}'s new ${roleText} "${roleNamesText}" assigned successfully!`,
                     username: user.username,
                     previousRoles: currentRoles.map(r => r.name).join(', ') || 'None',
-                    newRole: roleName
+                    newRoles: roleNamesText
                 },
                 'success'
             );
             
             res.json({
                 success: true,
-                message: 'Role assigned successfully (previous roles removed)',
+                message: `${roleText.charAt(0).toUpperCase() + roleText.slice(1)} assigned successfully (previous roles removed)`,
                 data: {
                     userId,
                     username: user.username,
-                    assignedRole: roleToAssign,
+                    assignedRoles: assignedRoleNames,
                     previousRoles: currentRoles.map(r => r.name)
                 },
                 timestamp: new Date().toISOString()

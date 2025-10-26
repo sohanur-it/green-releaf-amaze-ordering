@@ -50,7 +50,7 @@ async function testSyncData() {
             SELECT COUNT(*) as count, 
                    MAX(lastmodified) as latest_sync,
                    MIN(lastmodified) as earliest_sync
-            FROM outgoingtransfers 
+            FROM activeoutgoingtransfers 
             WHERE sync_license = 'CUL000063'
         `);
         console.log(`  - Total Records: ${outgoingResult.rows[0].count}`);

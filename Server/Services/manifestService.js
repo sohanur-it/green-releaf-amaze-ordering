@@ -6,22 +6,20 @@
  */
 
 const axios = require('axios');
-const { Pool } = require('pg');
+const { pool } = require('../config/database');
 const metrcAuth = require('./metrcAuth');
 const auditLogger = require('./auditLogger');
 
 class ManifestService {
     constructor() {
         this.apiBaseUrl = process.env.T3_API_BASE_URL || 'https://api.trackandtrace.tools/v2';
-        this.shipperLicense = process.env.T3_LICENSE_NUMBER || 'CUL000063';
+        this.shipperLicense = process.env.T3_LICENSE_NUMBER;
         
-        this.pool = new Pool({
-            user: process.env.DB_USER || 'postgres',
-            host: process.env.DB_HOST || 'localhost',
-            database: process.env.DB_DATABASE || 'green_releaf_dev',
-            password: process.env.DB_PASSWORD || 'dev_password_123',
-            port: parseInt(process.env.DB_PORT, 10) || 5432,
-        });
+        if (!this.shipperLicense) {
+            throw new Error('T3_LICENSE_NUMBER environment variable is required');
+        }
+        
+        this.pool = pool; // Use shared connection pool
     }
 
     /**
@@ -157,7 +155,7 @@ class ManifestService {
                 const packageQuery = `
                     SELECT metrcid, label, quantity, item_name 
                     FROM activepackages 
-                    WHERE label = $1 AND synclicense = $2
+                    WHERE label = $1 AND sync_license = $2
                 `;
                 const packageResult = await client.query(packageQuery, [pkg.PackageLabel, this.shipperLicense]);
                 
@@ -187,9 +185,9 @@ class ManifestService {
         for (const pkg of manifestData.packages) {
             // Get package details from database
             const packageQuery = `
-                SELECT metrcid, label, quantity, item_name, unitofmeasurename
+                SELECT metrcid, label, quantity, item_name, item_unitofmeasurename
                 FROM activepackages 
-                WHERE label = $1 AND synclicense = $2
+                WHERE label = $1 AND sync_license = $2
             `;
             const packageResult = await client.query(packageQuery, [pkg.PackageLabel, this.shipperLicense]);
             const activePackage = packageResult.rows[0];
@@ -197,7 +195,7 @@ class ManifestService {
             packages.push({
                 PackageLabel: pkg.PackageLabel,
                 Quantity: pkg.Quantity,
-                UnitOfMeasureName: pkg.UnitOfMeasureName || activePackage.unitofmeasurename,
+                UnitOfMeasureName: pkg.UnitOfMeasureName || activePackage.item_unitofmeasurename,
                 WholesalePrice: pkg.WholesalePrice || 0
             });
         }
@@ -260,11 +258,11 @@ class ManifestService {
             `;
             await client.query(updateOrderQuery, [metrcData.manifestNumber, userId, manifestData.orderId]);
             
-            // Insert manifest data into outgoingtransfers table
+            // Insert manifest data into activeoutgoingtransfers table
             const insertManifestQuery = `
-                INSERT INTO outgoingtransfers (
-                    metrcid, manifestnumber, shipperfacilitylicense, 
-                    transporterlicensenumber, driverfirstname, vehiclemodel,
+                INSERT INTO activeoutgoingtransfers (
+                    metrcid, manifestnumber, shipperfacilitylicensenumber, 
+                    driveroccupationallicensenumber, drivername, vehiclemodel,
                     estimateddeparturedatetime, estimatedarrivaldatetime,
                     packagecount, synclicense
                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -274,7 +272,7 @@ class ManifestService {
                 metrcData.id,
                 metrcData.manifestNumber,
                 this.shipperLicense,
-                manifestData.transporterLicenseNumber,
+                manifestData.transporterLicenseNumber, // This maps to driveroccupationallicensenumber
                 manifestData.driverName,
                 manifestData.vehicleModel,
                 manifestData.estimatedDeparture,
@@ -317,10 +315,10 @@ class ManifestService {
     }
 
     /**
-     * Close database connection
+     * Close database connection (no-op since using shared pool)
      */
     async close() {
-        await this.pool.end();
+        // No-op: Using shared pool, don't close it here
     }
 }
 

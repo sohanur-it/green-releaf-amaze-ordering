@@ -36,7 +36,7 @@ This document describes the complete METRC synchronization system that includes 
 - **Endpoint**: `GET /v2/transfers/outgoing/active`
 - **Strategy**: Incremental (Delta)
 - **Frequency**: Every 5 minutes (Business Hours)
-- **Table**: `outgoingtransfers`
+- **Table**: `activeoutgoingtransfers`
 
 ### 5. Items
 - **Script**: `Sync/sync-items.js`
@@ -95,7 +95,7 @@ npm run sync:all
 1. **activepackages** - Active package data
 2. **transferredpackages** - Transferred package data
 3. **intransitpackages** - In-transit package data
-4. **outgoingtransfers** - Outgoing transfer data
+4. **activeoutgoingtransfers** - Outgoing transfer data
 5. **items** - Item catalog data
 6. **strains** - Strain catalog data
 

@@ -25,12 +25,16 @@ const dbConfig = {
         // Development settings
         max: 10,
         idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 10000,
+        connectionTimeoutMillis: 30000, // Increased from 10s to 30s
+        acquireTimeoutMillis: 60000, // Add acquire timeout
+        allowExitOnIdle: true,
     } : {
         // Production settings
-        max: 20,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 10000,
+        max: 50, // Increased from 20 to 50 for production
+        idleTimeoutMillis: 60000, // Increased from 30s to 60s
+        connectionTimeoutMillis: 30000, // Increased from 10s to 30s
+        acquireTimeoutMillis: 60000, // Add acquire timeout
+        allowExitOnIdle: true,
         ssl: {
             rejectUnauthorized: false
         }

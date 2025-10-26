@@ -199,11 +199,11 @@ html.sidebar-is-collapsed .sidebar-title-full {
     box-shadow: 0 5px 15px rgba(0,0,0,.5); transform: scale(0.95); transition: transform 0.3s ease;
 }
 .modal-overlay.active .modal-dialog { transform: scale(1); }
-.modal-header { padding: 16px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); }
-.modal-title { margin: 0; font-size: 20px; font-weight: 600; }
+.modal-header { padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); }
+.modal-title { margin: 0; font-size: 18px; font-weight: 600; }
 .modal-close-btn { background: none; border: none; font-size: 28px; font-weight: 300; cursor: pointer; color: var(--text-light); line-height: 1; }
-.modal-body { padding: 24px; font-size: 16px; line-height: 1.6; color: var(--text-light); }
-.modal-footer { padding: 16px 24px; border-top: 1px solid var(--border-color); background-color: var(--bg-color); }
+.modal-body { padding: 16px 20px; font-size: 16px; line-height: 1.6; color: var(--text-light); }
+.modal-footer { padding: 12px 20px; border-top: 1px solid var(--border-color); background-color: var(--bg-color); }
 .modal-footer form { display: flex; justify-content: flex-end; gap: 12px; }
 .btn-danger { background-color: #d73a49; color: #fff; }
 .btn-danger:hover { background-color: #cb2131; }
@@ -222,6 +222,215 @@ html.sidebar-is-collapsed .sidebar-title-full {
 .form-group input[type="color"] {
     padding: 2px;
     height: 40px;
+}
+
+/* -- RESPONSIVE DESIGN FIXES -- */
+/* Fix modal positioning issues on different screen sizes */
+.modal-dialog {
+    margin: 1.75rem auto !important;
+    max-height: calc(100vh - 3.5rem);
+    display: flex;
+    align-items: center;
+}
+
+.modal-content {
+    max-height: calc(100vh - 3.5rem);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-body {
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* Bootstrap modal fixes for better positioning */
+.modal {
+    z-index: 1055 !important;
+}
+
+.modal-backdrop {
+    z-index: 1050 !important;
+}
+
+/* Fix for modals appearing at bottom on small screens */
+@media (max-width: 768px) {
+    .modal-dialog {
+        margin: 0.5rem !important;
+        max-width: calc(100vw - 1rem) !important;
+        max-height: calc(100vh - 1rem) !important;
+    }
+    
+    .modal-content {
+        max-height: calc(100vh - 1rem) !important;
+    }
+    
+    /* Ensure modals are centered on mobile */
+    .modal {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+}
+
+/* Fix for tablets */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .modal-dialog {
+        margin: 1rem auto !important;
+        max-width: 90vw !important;
+    }
+}
+
+/* Fix for very small screens */
+@media (max-width: 480px) {
+    .modal-dialog {
+        margin: 0.25rem !important;
+        max-width: calc(100vw - 0.5rem) !important;
+    }
+    
+    .modal-header {
+        padding: 0.75rem 1rem !important;
+    }
+    
+    .modal-body {
+        padding: 1rem !important;
+    }
+    
+    .modal-footer {
+        padding: 0.75rem 1rem !important;
+    }
+}
+
+/* Fix for large screens to prevent modals from being too wide */
+@media (min-width: 1200px) {
+    .modal-dialog.modal-lg {
+        max-width: 800px !important;
+    }
+    
+    .modal-dialog.modal-xl {
+        max-width: 1000px !important;
+    }
+}
+
+/* Ensure proper stacking context */
+.modal.show {
+    display: flex !important;
+    align-items: center !important;
+}
+
+/* Fix for Bootstrap 5 modal positioning */
+.modal-dialog-centered {
+    display: flex !important;
+    align-items: center !important;
+    min-height: calc(100% - 3.5rem) !important;
+}
+
+/* Additional fixes for role assignment modal */
+#roleModal .modal-dialog {
+    max-width: 600px !important;
+    margin: 1rem auto !important;
+}
+
+#roleModal .modal-content {
+    border-radius: 12px !important;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+    border: none;
+}
+
+/* Fix for audit logs modal */
+#detailsModal .modal-dialog {
+    max-width: 900px !important;
+    margin: 1rem auto !important;
+}
+
+/* Ensure proper z-index stacking */
+.modal.fade .modal-dialog {
+    transform: translate(0, 0) !important;
+    transition: transform 0.3s ease-out !important;
+}
+
+.modal.show .modal-dialog {
+    transform: translate(0, 0) !important;
+}
+
+/* Fix for success messages positioning */
+.alert.position-fixed {
+    z-index: 1060 !important;
+}
+
+/* Responsive table fixes */
+@media (max-width: 768px) {
+    .table-responsive {
+        border: none !important;
+    }
+    
+    .modern-table {
+        font-size: 0.875rem;
+    }
+    
+    .modern-table th,
+    .modern-table td {
+        padding: 0.5rem !important;
+    }
+    
+    /* Hide less important columns on mobile */
+    .modern-table th:nth-child(n+4),
+    .modern-table td:nth-child(n+4) {
+        display: none;
+    }
+}
+
+/* Fix for sidebar on mobile */
+@media (max-width: 768px) {
+    .sidebar {
+        transform: translateX(-100%);
+        transition: transform 0.3s ease;
+    }
+    
+    .sidebar.show {
+        transform: translateX(0);
+    }
+    
+    .main-content {
+        margin-left: 0 !important;
+        padding: 1rem !important;
+    }
+    
+    .app-container.sidebar-collapsed .main-content {
+        margin-left: 0 !important;
+    }
+}
+
+/* Fix for stats cards on mobile */
+@media (max-width: 768px) {
+    .stats-card h3 {
+        font-size: 2rem !important;
+    }
+    
+    .stats-card {
+        padding: 1rem !important;
+        margin-bottom: 1rem !important;
+    }
+}
+
+/* Fix for dashboard cards on mobile */
+@media (max-width: 768px) {
+    .dashboard-card {
+        padding: 1rem !important;
+        margin-bottom: 1rem !important;
+    }
+}
+
+/* Fix for modern filter on mobile */
+@media (max-width: 768px) {
+    .modern-filter {
+        padding: 1rem !important;
+    }
+    
+    .modern-filter .row > div {
+        margin-bottom: 0.5rem;
+    }
 }
 
 /* -- STYLES FOR TAGS -- */
@@ -251,3 +460,491 @@ html.sidebar-is-collapsed .sidebar-title-full {
     padding: 2px 4px;
     font-size: 11px;
 }
+
+/* Audit Logs Enhanced Styles */
+/* Alert Styles */
+.alert-banner {
+    margin-bottom: 1.5rem;
+    border-radius: 10px;
+    padding: 1rem 1.5rem;
+    border-left: 5px solid;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    animation: slideInDown 0.5s ease-out;
+}
+
+.alert-banner.critical {
+    background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+    border-left-color: #dc3545;
+    color: white;
+}
+
+.alert-banner.warning {
+    background: linear-gradient(135deg, #ffd93d 0%, #ffb347 100%);
+    border-left-color: #ffc107;
+    color: #212529;
+}
+
+.alert-banner .alert-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.5rem;
+}
+
+.alert-banner .alert-title {
+    font-weight: 700;
+    font-size: 1.1rem;
+    margin: 0;
+}
+
+.alert-banner .alert-count {
+    background: rgba(255,255,255,0.2);
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+
+.alert-banner .alert-message {
+    margin: 0;
+    font-size: 0.9rem;
+    opacity: 0.9;
+}
+
+.alert-banner .alert-actions {
+    margin-top: 0.75rem;
+}
+
+.alert-banner .btn-reset {
+    background: rgba(255,255,255,0.2);
+    border: 1px solid rgba(255,255,255,0.3);
+    color: inherit;
+    padding: 0.375rem 0.75rem;
+    border-radius: 5px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.alert-banner .btn-reset:hover {
+    background: rgba(255,255,255,0.3);
+    transform: translateY(-1px);
+}
+
+@keyframes slideInDown {
+    from {
+        transform: translateY(-100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.no-alerts {
+    background: linear-gradient(135deg, #4ade80 0%, #22c55e 100%);
+    color: white;
+    text-align: center;
+    padding: 1rem;
+    border-radius: 10px;
+    margin-bottom: 1.5rem;
+}
+
+.no-alerts .alert-icon {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+.no-alerts .alert-text {
+    font-weight: 600;
+    margin: 0;
+}
+
+.dashboard-card {
+    background: white;
+    border-radius: 15px;
+    padding: 1.5rem;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+    margin-bottom: 1.5rem;
+}
+
+.stats-card {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 15px;
+    padding: 1.5rem;
+    text-align: center;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+}
+
+.stats-card.success {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.stats-card.danger {
+    background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+}
+
+.stats-card.info {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+}
+
+.stats-card.warning {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
+.stats-card h3 {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 0.5rem 0;
+}
+
+.stats-card p {
+    margin: 0;
+    opacity: 0.9;
+    font-size: 0.875rem;
+}
+
+.modern-table {
+    margin: 0;
+}
+
+.modern-table thead {
+    background: #f8f9fa;
+}
+
+.modern-table th {
+    font-weight: 600;
+    color: #4b5563;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    padding: 1rem;
+    border: none;
+}
+
+.modern-table td {
+    padding: 0.75rem 1rem;
+    vertical-align: middle;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.modern-table tbody tr:hover {
+    background: #f9fafb;
+    cursor: pointer;
+}
+
+.action-code {
+    background: #e0e7ff;
+    color: #4f46e5;
+    padding: 0.25rem 0.75rem;
+    border-radius: 15px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    font-family: monospace;
+}
+
+.modern-filter {
+    background: white;
+    border-radius: 15px;
+    padding: 1.5rem;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+    margin-bottom: 1.5rem;
+}
+
+.filter-badge {
+    display: inline-block;
+    background: #667eea;
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    margin: 0.25rem;
+    font-size: 0.875rem;
+}
+
+.filter-badge .remove {
+    margin-left: 0.5rem;
+    cursor: pointer;
+    opacity: 0.8;
+}
+
+.filter-badge .remove:hover {
+    opacity: 1;
+}
+
+/* User Management Enhanced Styles */
+.user-avatar {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+.status-badge {
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+
+.status-active {
+    background: #10b981;
+    color: white;
+}
+
+.status-pending {
+    background: #f59e0b;
+    color: white;
+}
+
+.status-revoked {
+    background: #ef4444;
+    color: white;
+}
+
+.modern-modal .modal-content {
+    border: none;
+    overflow: hidden;
+}
+
+.modern-modal .modal-header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 1rem 1.5rem;
+}
+
+/* Audit Log Modal Specific Styles */
+#detailsModal .modal-body {
+    padding: 0.75rem 1.25rem;
+}
+
+#detailsModal .modal-header {
+    padding: 0.75rem 1rem !important;
+    border-bottom: 1px solid #e5e7eb;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+#detailsModal .modal-title {
+    font-size: 1rem !important;
+    font-weight: 600;
+    margin: 0;
+}
+
+/* Role Assign Modal Specific Styles */
+#roleModal .modal-body {
+    padding: 1rem !important;
+}
+
+#roleModal .modal-header {
+    padding: 0.75rem 1rem !important;
+    border-bottom: 1px solid #e5e7eb;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+#roleModal .modal-title {
+    font-size: 1rem !important;
+    font-weight: 600;
+    margin: 0;
+}
+
+#roleModal .modal-footer {
+    padding: 0.75rem 1rem !important;
+    border-top: 1px solid #e5e7eb;
+    background: #f8f9fa;
+}
+
+/* Reduce spacing in modals */
+.modal-body .mb-3 {
+    margin-bottom: 0.5rem !important;
+}
+
+.modal-body .mb-2 {
+    margin-bottom: 0.25rem !important;
+}
+
+.modal-body .mt-3 {
+    margin-top: 0.5rem !important;
+}
+
+.modal-body .mt-4 {
+    margin-top: 0.5rem !important;
+}
+
+/* Make modals more compact */
+.modal-body h6 {
+    margin-bottom: 0.25rem !important;
+    font-size: 0.85rem;
+}
+
+.modal-body .form-label {
+    margin-bottom: 0.25rem !important;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.modal-body .alert {
+    padding: 0.5rem 0.75rem !important;
+    margin-bottom: 0.5rem !important;
+}
+
+.modal-body .form-select {
+    padding: 0.375rem 0.75rem !important;
+}
+
+.role-option {
+    border: 2px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 1rem;
+    margin-bottom: 0.5rem;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.role-option:hover {
+    border-color: #667eea;
+    background: #f3f4f6;
+}
+
+.role-option.selected {
+    border-color: #667eea;
+    background: #eef2ff;
+}
+
+.permission-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 15px;
+    background: #e0e7ff;
+    color: #4f46e5;
+    font-size: 0.75rem;
+    margin: 0.25rem;
+}
+
+.permissions-list {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 10px;
+    border: 1px solid #e5e7eb;
+}
+
+.permissions-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.permissions-grid .permission-badge {
+    background: #e3f2fd;
+    color: #1976d2;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    border: 1px solid #bbdefb;
+}
+
+/* Role Selection Styles */
+.roles-selection {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 0.75rem;
+    background: #f8f9fa;
+}
+
+.role-checkbox-item {
+    display: flex;
+    align-items: center;
+    padding: 0.5rem;
+    margin-bottom: 0.25rem;
+    border-radius: 6px;
+    transition: background-color 0.2s ease;
+}
+
+.role-checkbox-item:hover {
+    background: #e9ecef;
+}
+
+.role-checkbox-item input[type="checkbox"] {
+    margin-right: 0.75rem;
+    transform: scale(1.1);
+}
+
+.role-checkbox-item label {
+    margin: 0;
+    cursor: pointer;
+    flex: 1;
+    font-weight: 500;
+}
+
+.role-checkbox-item .role-description {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-left: 1.5rem;
+}
+
+/* Permissions Preview */
+#permissionsPreview {
+    margin-top: 0.5rem !important;
+}
+
+#permissionsPreview h6 {
+    margin-bottom: 0.5rem !important;
+    font-size: 0.9rem;
+    font-weight: 600;
+}
+
+/* User Management Legacy Styles */
+.permissions-display {
+    max-width: 300px;
+    max-height: 100px;
+    overflow-y: auto;
+    font-size: 0.8em;
+}
+
+.permissions-display .badge {
+    font-size: 0.7em;
+    margin: 1px;
+    display: inline-block;
+}
+
+.role-badges .badge {
+    font-size: 0.8em;
+    margin: 1px;
+}
+
+.table td {
+    vertical-align: middle;
+}
+
+/* Action Buttons Alignment */
+.table td .btn {
+    vertical-align: middle;
+    white-space: nowrap;
+}
+
+.table td .btn + .btn {
+    margin-left: 0.25rem;
+}
+
+/* Ensure consistent button heights */
+.btn-sm {
+    height: 2rem;
+    line-height: 1.2;
+    padding: 0.375rem 0.75rem;
+}/* Cache buster: Fri Oct 24 16:23:56 +06 2025 */
+/* Cache buster: 1761304982 */
+/* Modal spacing fix: 1761305160 */
+/* Modal spacing fix v2: 1761305492 */
+/* Multiple role assignment fix: 1761306375 */

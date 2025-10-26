@@ -81,7 +81,7 @@ async function checkRequiredTables() {
         
         const requiredTables = [
             'activepackages',
-            'outgoingtransfers', 
+            'activeoutgoingtransfers', 
             'strains',
             'items',
             'transferredpackages',

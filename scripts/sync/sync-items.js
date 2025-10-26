@@ -19,6 +19,9 @@ if (process.env.NODE_ENV === 'production') {
     require('dotenv').config({ path: path.join(__dirname, '../../config/local.env') });
 }
 
+// Import sync failure tracker for halt mechanism
+const syncFailureTracker = require('../../Server/Services/syncFailureTracker');
+
 // Import centralized METRC authentication service
 const metrcAuth = require('../../Server/Services/metrcAuth');
 
@@ -536,17 +539,40 @@ async function syncItems() {
  * Main execution function
  */
 async function main() {
+    const scriptName = 'sync-items';
+    const licenseNumber = metrcAuth.licenseNumber;
+    
     try {
         console.log('🚀 Starting METRC Items Sync');
         console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
-        console.log(`🏢 License: ${metrcAuth.licenseNumber}`);
+        console.log(`🏢 License: ${licenseNumber}`);
+        
+        // HALT CHECK: Prevent operations if too many consecutive failures
+        const alertLevel = await syncFailureTracker.getAlertLevel(scriptName, licenseNumber);
+        if (alertLevel.level === 'critical') {
+            console.error('🛑 HALTING SYNC: Too many consecutive failures detected');
+            console.error(`❌ Script: ${scriptName}`);
+            console.error(`❌ Consecutive Failures: ${alertLevel.count}`);
+            console.error(`❌ Last Error: ${alertLevel.lastError}`);
+            console.error('🛑 Preventing data inconsistency by halting sync operations');
+            process.exit(1);
+        } else if (alertLevel.level === 'warning') {
+            console.warn(`⚠️ WARNING: ${scriptName} has ${alertLevel.count} consecutive failures`);
+            console.warn('⚠️ Continuing sync but monitoring closely...');
+        }
         
         await syncItems();
         
+        // Record successful sync
+        await syncFailureTracker.recordSuccess(scriptName, licenseNumber);
         console.log('✅ Items sync completed successfully');
         
     } catch (error) {
         console.error('❌ Items sync failed:', error.message);
+        
+        // Record sync failure
+        await syncFailureTracker.recordFailure(scriptName, error.message, licenseNumber);
+        
         process.exit(1);
     } finally {
         await pool.end();

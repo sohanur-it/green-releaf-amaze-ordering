@@ -14,7 +14,9 @@ const bcrypt = require('bcrypt');
 const { Pool } = require('pg');
 
 // Load environment variables
-require('dotenv').config();
+const path = require('path');
+const envFile = process.env.NODE_ENV === 'production' ? 'config/production.env' : 'config/local.env';
+require('dotenv').config({ path: path.resolve(envFile) });
 
 // Database configuration
 const DB_CONFIG = {
@@ -72,19 +74,47 @@ async function createSuperuser() {
             process.exit(1);
         }
 
-        // Hash password
-        console.log('\n🔒 Hashing password...');
+        // Hash password and email
+        console.log('\n🔒 Hashing password and email...');
         const saltRounds = parseInt(process.env.BCRYPT_ROUNDS, 10) || 12;
         const passwordHash = await bcrypt.hash(password, saltRounds);
+        const emailHash = await bcrypt.hash(email, saltRounds);
 
         // Connect to database
         console.log('🗄️ Connecting to database...');
+        console.log(`   Host: ${DB_CONFIG.host}`);
+        console.log(`   Database: ${DB_CONFIG.database}`);
+        console.log(`   User: ${DB_CONFIG.user}`);
+        
         const client = await pool.connect();
 
         try {
+            // Test database connection and table structure
+            console.log('🔍 Testing database connection...');
+            const testQuery = await client.query('SELECT 1 as test');
+            console.log('✅ Database connection successful');
+            
+            // Check if users table exists and has correct structure
+            const tableCheck = await client.query(`
+                SELECT column_name, data_type 
+                FROM information_schema.columns 
+                WHERE table_name = 'users' 
+                AND column_name IN ('first_name', 'last_name', 'is_admin', 'is_active', 'email_hash')
+                ORDER BY column_name
+            `);
+            
+            if (tableCheck.rows.length < 5) {
+                console.error('❌ Users table does not have the expected structure');
+                console.error('Expected columns: first_name, last_name, is_admin, is_active, email_hash');
+                console.error('Found columns:', tableCheck.rows.map(r => r.column_name));
+                process.exit(1);
+            }
+            
+            console.log('✅ Users table structure verified');
+            
             // Check if superuser already exists
             const existingSuperuser = await client.query(
-                'SELECT id FROM users WHERE is_superuser = true'
+                'SELECT id FROM users WHERE is_admin = true'
             );
 
             if (existingSuperuser.rows.length > 0) {
@@ -110,12 +140,41 @@ async function createSuperuser() {
             // Create superuser
             console.log('👤 Creating superuser account...');
             const result = await client.query(`
-                INSERT INTO users (username, firstname, lastname, email, password_hash, status, is_superuser)
-                VALUES ($1, $2, $3, $4, $5, 'active', true)
+                INSERT INTO users (username, first_name, last_name, email, email_hash, password_hash, is_active, is_admin, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, true, true, NOW())
                 RETURNING id, username, email
-            `, [username, firstName, lastName, email, passwordHash]);
+            `, [username, firstName, lastName, email, emailHash, passwordHash]);
 
             const user = result.rows[0];
+
+            // Assign Administrator role to the superuser
+            console.log('🔑 Assigning Administrator role...');
+            
+            // Get or create Administrator role
+            let adminRole = await client.query(`
+                SELECT id FROM roles WHERE name = 'Administrator'
+            `);
+            
+            if (adminRole.rows.length === 0) {
+                console.log('📝 Creating Administrator role...');
+                const newRole = await client.query(`
+                    INSERT INTO roles (name, description) 
+                    VALUES ('Administrator', 'Full system access and user management')
+                    RETURNING id
+                `);
+                adminRole = newRole;
+            }
+            
+            const roleId = adminRole.rows[0].id;
+            
+            // Assign Administrator role to the superuser
+            await client.query(`
+                INSERT INTO user_roles (user_id, role_id, assigned_by)
+                VALUES ($1, $2, $1)
+                ON CONFLICT (user_id, role_id) DO NOTHING
+            `, [user.id, roleId]);
+            
+            console.log('✅ Administrator role assigned');
 
             console.log('\n✅ Superuser created successfully!');
             console.log('================================');
@@ -124,6 +183,7 @@ async function createSuperuser() {
             console.log(`📧 Email: ${user.email}`);
             console.log(`🔐 Status: Active`);
             console.log(`👑 Superuser: Yes`);
+            console.log(`🔑 Role: Administrator`);
             console.log('\n🎯 You can now log in to the application with these credentials.');
 
         } finally {
