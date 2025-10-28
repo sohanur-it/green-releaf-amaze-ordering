@@ -36,6 +36,7 @@ const module3Routes = require('./Routes/module3-routes');
 //import services
 const masterScheduler = require('./Services/masterScheduler');
 const inventoryMonitorService = require('./Services/inventoryMonitorService');
+const websocketService = require('./Services/websocketService');
 
 //create express app
 const app = express();
@@ -98,6 +99,11 @@ app.use('/api/batches', batchRoutes); // batch status management API routes
 app.use('/api/v1', module3Routes); // Module 3: Product & Inventory Management API routes
 app.use('/api/alerts', alertRoutes); // sync failure alert API routes
 
+// WebSocket test page
+app.get('/test-websocket', (req, res) => {
+    res.sendFile(path.join(__dirname, '../Public/test-websocket.html'));
+});
+
 //root redirect
 app.get('/', (req, res) => {
     res.redirect('/admin');
@@ -140,6 +146,19 @@ app.listen(PORT, async () => {
         }
     } else {
         logger.info(`⏸️  Inventory monitoring disabled (set ENABLE_INVENTORY_MONITORING=true to enable)`);
+    }
+    
+    // Start WebSocket server (configurable via environment variable)
+    const enableWebSocket = process.env.ENABLE_WEBSOCKET !== 'false';
+    if (enableWebSocket) {
+        try {
+            websocketService.start();
+            logger.info(`🔌 WebSocket server started successfully`);
+        } catch (error) {
+            logger.error(`❌ Failed to start WebSocket server: ${error.message}`);
+        }
+    } else {
+        logger.info(`⏸️  WebSocket server disabled (set ENABLE_WEBSOCKET=false to disable)`);
     }
 });
 

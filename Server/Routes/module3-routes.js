@@ -663,6 +663,47 @@ router.patch('/batches/:id/status', async (req, res) => {
 
         await client.query('COMMIT');
 
+        // If changed TO "Sellable", broadcast inventory availability
+        if (status === 'Sellable' && oldStatus !== 'Sellable') {
+            try {
+                const websocketService = require('../Services/websocketService');
+                
+                // Get batch details for broadcast
+                const batchDetails = await client.query(`
+                    SELECT 
+                        b.id,
+                        b.batch_name,
+                        b.quantity,
+                        b.thc_percentage,
+                        b.fk_master_product_id,
+                        p.name as product_name,
+                        p.category_name
+                    FROM "ORDERS-batches" b
+                    LEFT JOIN "ORDERS-products" p ON b.fk_master_product_id = p.entry_id
+                    WHERE b.id = $1
+                `, [batchId]);
+
+                if (batchDetails.rows.length > 0) {
+                    const batch = batchDetails.rows[0];
+                    await websocketService.broadcastNewInventoryAvailable({
+                        master_product_id: batch.fk_master_product_id,
+                        product_name: batch.product_name,
+                        category: batch.category_name,
+                        newly_available_batches: [{
+                            id: batch.id,
+                            batch_name: batch.batch_name,
+                            quantity: batch.quantity,
+                            thc_percentage: batch.thc_percentage
+                        }],
+                        total_quantity_available: parseInt(batch.quantity) || 0
+                    });
+                }
+            } catch (broadcastError) {
+                console.error('⚠️  Failed to broadcast new inventory:', broadcastError.message);
+                // Don't fail the response if broadcast fails
+            }
+        }
+
         res.json({
             success: true,
             changed: true,

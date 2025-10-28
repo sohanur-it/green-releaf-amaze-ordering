@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test - Real-Time Inventory</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .status-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .status-indicator.connected {
+            background: #10b981;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.disconnected {
+            background: #ef4444;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        button.connect {
+            background: #10b981;
+            color: white;
+        }
+
+        button.connect:hover {
+            background: #059669;
+        }
+
+        button.disconnect {
+            background: #ef4444;
+            color: white;
+        }
+
+        button.disconnect:hover {
+            background: #dc2626;
+        }
+
+        button.subscribe {
+            background: #3b82f6;
+            color: white;
+        }
+
+        button.subscribe:hover {
+            background: #2563eb;
+        }
+
+        input {
+            padding: 12px;
+            border: 2px solid #e5e7eb;
+            border-radius: 6px;
+            font-size: 1em;
+            flex: 1;
+            min-width: 200px;
+        }
+
+        .messages {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            max-height: 500px;
+            overflow-y: auto;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .message {
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 6px;
+            border-left: 4px solid;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .message.info {
+            background: #dbeafe;
+            border-color: #3b82f6;
+        }
+
+        .message.success {
+            background: #d1fae5;
+            border-color: #10b981;
+        }
+
+        .message.error {
+            background: #fee2e2;
+            border-color: #ef4444;
+        }
+
+        .message.warning {
+            background: #fef3c7;
+            border-color: #f59e0b;
+        }
+
+        .message h3 {
+            margin-bottom: 5px;
+            color: #1f2937;
+        }
+
+        .message pre {
+            background: rgba(0,0,0,0.05);
+            padding: 8px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-size: 0.9em;
+        }
+
+        .timestamp {
+            font-size: 0.8em;
+            color: #6b7280;
+            margin-top: 5px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #6b7280;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔌 WebSocket Test Panel</h1>
+            <p>Real-Time Inventory Updates Testing</p>
+        </div>
+
+        <div class="status-card">
+            <h2>
+                <span id="statusIndicator" class="status-indicator disconnected"></span>
+                <span id="statusText">Disconnected</span>
+            </h2>
+            <p id="connectionInfo">Not connected to WebSocket server</p>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="messageCount">0</div>
+                <div class="stat-label">Messages Received</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="subscriptionCount">0</div>
+                <div class="stat-label">Batch Subscriptions</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="lastUpdate">--:--</div>
+                <div class="stat-label">Last Update</div>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button class="connect" onclick="connectWebSocket()">Connect</button>
+            <button class="disconnect" onclick="disconnectWebSocket()">Disconnect</button>
+            <button class="subscribe" onclick="subscribeToBatch()">Subscribe to Batch</button>
+            <input type="number" id="batchId" placeholder="Enter Batch ID" value="1">
+        </div>
+
+        <div class="messages" id="messages">
+            <div class="message info">
+                <h3>ℹ️ Ready to Test</h3>
+                <p>Click "Connect" to start testing WebSocket connection</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let messageCount = 0;
+        let subscribedBatches = new Set();
+
+        function addMessage(type, title, content) {
+            const messagesDiv = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            
+            messageDiv.innerHTML = `
+                <h3>${title}</h3>
+                <pre>${JSON.stringify(content, null, 2)}</pre>
+                <div class="timestamp">${timestamp}</div>
+            `;
+            
+            messagesDiv.insertBefore(messageDiv, messagesDiv.firstChild);
+            
+            // Update stats
+            messageCount++;
+            document.getElementById('messageCount').textContent = messageCount;
+            document.getElementById('lastUpdate').textContent = timestamp.split(' ')[0];
+        }
+
+        function updateStatus(connected) {
+            const indicator = document.getElementById('statusIndicator');
+            const statusText = document.getElementById('statusText');
+            const connectionInfo = document.getElementById('connectionInfo');
+            
+            if (connected) {
+                indicator.className = 'status-indicator connected';
+                statusText.textContent = 'Connected';
+                connectionInfo.textContent = 'WebSocket server: ws://localhost:8080';
+            } else {
+                indicator.className = 'status-indicator disconnected';
+                statusText.textContent = 'Disconnected';
+                connectionInfo.textContent = 'Not connected to WebSocket server';
+            }
+        }
+
+        function connectWebSocket() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                addMessage('warning', '⚠️ Already Connected', 'WebSocket is already connected');
+                return;
+            }
+
+            const wsUrl = 'ws://localhost:8080';
+            addMessage('info', '🔄 Connecting...', { url: wsUrl });
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function() {
+                updateStatus(true);
+                addMessage('success', '✅ Connected!', { 
+                    status: 'WebSocket connection established',
+                    readyState: ws.readyState 
+                });
+            };
+
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                
+                switch(data.type) {
+                    case 'batch_current_state':
+                        addMessage('success', '📊 Current Batch State', data);
+                        break;
+                    case 'batch_inventory_update':
+                        addMessage('info', '📦 Inventory Updated', data);
+                        break;
+                    case 'new_inventory_available':
+                        addMessage('success', '🎉 NEW INVENTORY AVAILABLE!', data);
+                        break;
+                    default:
+                        addMessage('info', '📨 Message Received', data);
+                }
+            };
+
+            ws.onerror = function(error) {
+                addMessage('error', '❌ WebSocket Error', { error: 'Connection failed. Make sure WebSocket server is running on port 8080.' });
+                updateStatus(false);
+            };
+
+            ws.onclose = function() {
+                updateStatus(false);
+                addMessage('error', '🔌 Disconnected', { status: 'WebSocket connection closed' });
+            };
+        }
+
+        function disconnectWebSocket() {
+            if (ws) {
+                ws.close();
+                ws = null;
+                updateStatus(false);
+                addMessage('info', '🔌 Disconnecting...', { status: 'Closing WebSocket connection' });
+            } else {
+                addMessage('warning', '⚠️ Not Connected', 'No WebSocket connection to close');
+            }
+        }
+
+        function subscribeToBatch() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                addMessage('error', '❌ Not Connected', 'Please connect to WebSocket first');
+                return;
+            }
+
+            const batchId = document.getElementById('batchId').value;
+            if (!batchId || batchId === '0') {
+                addMessage('error', '❌ Invalid Batch ID', 'Please enter a valid batch ID');
+                return;
+            }
+
+            const message = {
+                type: 'subscribe_batch',
+                batch_id: parseInt(batchId)
+            };
+
+            ws.send(JSON.stringify(message));
+            subscribedBatches.add(batchId);
+            document.getElementById('subscriptionCount').textContent = subscribedBatches.size;
+            
+            addMessage('success', '📊 Subscribed to Batch', { 
+                batch_id: batchId,
+                message: 'You will receive updates for this batch' 
+            });
+        }
+
+        // Auto-connect on page load
+        window.addEventListener('load', function() {
+            addMessage('info', '🚀 Page Loaded', 'WebSocket Test Panel Ready');
+            // Uncomment the line below to auto-connect:
+            // connectWebSocket();
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey || e.metaKey) {
+                switch(e.key) {
+                    case 'k':
+                        e.preventDefault();
+                        connectWebSocket();
+                        break;
+                    case 'l':
+                        e.preventDefault();
+                        disconnectWebSocket();
+                        break;
+                    case 'Enter':
+                        e.preventDefault();
+                        subscribeToBatch();
+                        break;
+                }
+            }
+        });
+    </script>
+</body>
+</html>
+

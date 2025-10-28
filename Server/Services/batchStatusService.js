@@ -155,6 +155,41 @@ class BatchStatusService {
 
             console.log(`✅ Promoted ${updateResult.rows.length} batches to Sellable for product ${productId}`);
             
+            // Get product details for broadcast
+            const productInfo = await client.query(`
+                SELECT name, category_name
+                FROM "ORDERS-products"
+                WHERE entry_id = $1
+            `, [productId]);
+            
+            // Get full batch details with THC percentage for broadcast
+            const batchDetails = await client.query(`
+                SELECT 
+                    id,
+                    batch_name,
+                    quantity,
+                    thc_percentage
+                FROM "ORDERS-batches"
+                WHERE id = ANY($1)
+            `, [batchIds]);
+            
+            // Broadcast new inventory availability (if WebSocket service is available)
+            try {
+                const websocketService = require('./websocketService');
+                if (websocketService && websocketService.getServer()) {
+                    await websocketService.broadcastNewInventoryAvailable({
+                        master_product_id: productId,
+                        product_name: productInfo.rows[0]?.name || 'Unknown Product',
+                        category: productInfo.rows[0]?.category_name || 'Unknown Category',
+                        newly_available_batches: batchDetails.rows,
+                        total_quantity_available: batchDetails.rows.reduce((sum, b) => sum + (parseInt(b.quantity) || 0), 0)
+                    });
+                }
+            } catch (broadcastError) {
+                console.error('⚠️  Failed to broadcast new inventory:', broadcastError.message);
+                // Don't fail the promotion if broadcast fails
+            }
+            
             return {
                 success: true,
                 message: `Successfully promoted ${updateResult.rows.length} batches to Sellable`,

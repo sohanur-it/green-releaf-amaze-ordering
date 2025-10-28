@@ -28,7 +28,7 @@ exports.getAllProducts = async (req, res) => {
             FROM "ORDERS-products" p
             LEFT JOIN "ORDERS-batches" b ON p.entry_id = b.fk_master_product_id
             GROUP BY p.entry_id
-            ORDER BY p.name
+            ORDER BY p.created_at DESC NULLS LAST, p.entry_id DESC
         `);
 
         res.render('admin/products/index', {
