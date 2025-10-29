@@ -7,6 +7,8 @@
     padding: 1.5rem;
     margin-bottom: 1.5rem;
     box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
 }
 
 .stats-card h3 {
@@ -18,6 +20,65 @@
 .stats-card p {
     margin: 0;
     opacity: 0.9;
+}
+
+.stats-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 15px 40px rgba(0,0,0,0.15);
+}
+
+.stats-card.active {
+    border: 3px solid rgba(255,255,255,0.8);
+    transform: scale(1.05);
+}
+
+.filter-controls {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.filter-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.filter-group label {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: #4b5563;
+    margin: 0;
+}
+
+.filter-group select,
+.filter-group input {
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
+
+.btn-clear-filters {
+    padding: 0.5rem 1rem;
+    background: #6c757d;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+.btn-clear-filters:hover {
+    background: #545b62;
 }
 
 .dashboard-card {
@@ -95,27 +156,27 @@
     <!-- Statistics Cards -->
     <div class="row mb-4">
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
+            <div class="stats-card" id="filter-all" data-filter="all" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
                 <p>Total Products</p>
                 <h3><%= totalProducts %></h3>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
+            <div class="stats-card" id="filter-batches" data-filter="has-batches" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%);">
                 <p>Total Batches</p>
                 <h3><%= totalBatches %></h3>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+            <div class="stats-card" id="filter-linked" data-filter="has-linked-items" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
                 <p>Linked METRC Items</p>
                 <h3><%= linkedItems %></h3>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="stats-card" style="background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);">
-                <p>Available Units</p>
-                <h3><%= Math.round(totalAvailable) %></h3>
+            <div class="stats-card" id="filter-unlinked" data-filter="no-linked-items" style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);">
+                <p>Unlinked Products</p>
+                <h3><%= products.filter(p => (p.metrc_linked_items || []).length === 0).length %></h3>
             </div>
         </div>
     </div>
@@ -132,14 +193,65 @@
                 </a>
             </div>
         <% } else { %>
+            <!-- Filter and Sort Controls -->
+            <div class="filter-controls">
+                <div class="filter-row">
+                    <div class="filter-group">
+                        <label>Category:</label>
+                        <select id="filterCategory">
+                            <option value="">All Categories</option>
+                            <% 
+                            const categories = [...new Set(products.map(p => p.category_name).filter(Boolean))];
+                            categories.sort();
+                            categories.forEach(cat => { %>
+                                <option value="<%= cat %>"><%= cat %></option>
+                            <% }); %>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Linked Status:</label>
+                        <select id="filterLinkedStatus">
+                            <option value="">All Products</option>
+                            <option value="linked">Linked Items Only</option>
+                            <option value="unlinked">Unlinked Only</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Has Batches:</label>
+                        <select id="filterBatches">
+                            <option value="">All Products</option>
+                            <option value="yes">Has Batches</option>
+                            <option value="no">No Batches</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Sort By:</label>
+                        <select id="sortBy">
+                            <option value="created-desc">Newest First</option>
+                            <option value="created-asc">Oldest First</option>
+                            <option value="name-asc">Name (A-Z)</option>
+                            <option value="name-desc">Name (Z-A)</option>
+                            <option value="price-desc">Price (High-Low)</option>
+                            <option value="price-asc">Price (Low-High)</option>
+                            <option value="batches-desc">Batches (High-Low)</option>
+                            <option value="batches-asc">Batches (Low-High)</option>
+                        </select>
+                    </div>
+                    <button class="btn-clear-filters" onclick="clearFilters()">
+                        <i class="fas fa-times"></i> Clear Filters
+                    </button>
+                </div>
+            </div>
+            
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <h5 class="mb-0">All Products</h5>
+                <h5 class="mb-0">All Products (<span id="filteredCount"><%= totalProducts %></span>)</h5>
                 <input type="text" id="searchProducts" class="form-control" style="max-width: 300px;" placeholder="Search products...">
             </div>
             <div class="table-responsive">
                 <table class="table table-hover modern-table">
                     <thead>
                         <tr>
+                            <th>Product ID</th>
                             <th>Product Name</th>
                             <th>Category</th>
                             <th>Price</th>
@@ -151,7 +263,15 @@
                     </thead>
                     <tbody id="productsTableBody">
                         <% products.forEach(product => { %>
-                            <tr>
+                            <tr data-product-id="<%= product.entry_id %>"
+                                data-category="<%= product.category_name || '' %>"
+                                data-linked-items="<%= (product.metrc_linked_items || []).length %>"
+                                data-has-batches="<%= (parseInt(product.batch_count) || 0) > 0 ? 'yes' : 'no' %>"
+                                data-created-at="<%= product.created_at || '' %>"
+                                data-price="<%= product.default_price || 0 %>"
+                                data-name="<%= product.name.toLowerCase() %>"
+                                data-batches="<%= product.batch_count || 0 %>">
+                                <td><strong>#<%= product.entry_id %></strong></td>
                                 <td>
                                     <div>
                                         <div class="fw-bold"><%= product.name %></div>
@@ -197,23 +317,171 @@
 </div>
 
 <script>
-// Search functionality
+// Store all products data for filtering
+let allProducts = [];
+let currentFilter = 'all';
+
 document.addEventListener('DOMContentLoaded', function() {
+    // Store product data
+    const rows = document.querySelectorAll('#productsTableBody tr');
+    rows.forEach(row => {
+        allProducts.push({
+            element: row,
+            category: row.dataset.category || '',
+            linkedItems: parseInt(row.dataset.linkedItems) || 0,
+            hasBatches: row.dataset.hasBatches === 'yes',
+            createdAt: row.dataset.createdAt || '',
+            price: parseFloat(row.dataset.price) || 0,
+            name: row.dataset.name || '',
+            batches: parseInt(row.dataset.batches) || 0
+        });
+    });
+
+    // Stats card click handlers
+    document.querySelectorAll('.stats-card').forEach(card => {
+        card.addEventListener('click', function() {
+            // Remove active class from all cards
+            document.querySelectorAll('.stats-card').forEach(c => c.classList.remove('active'));
+            
+            // Add active to clicked card
+            this.classList.add('active');
+            
+            // Get filter type
+            const filter = this.dataset.filter;
+            currentFilter = filter;
+            
+            // Apply filter
+            applyFilters();
+        });
+    });
+
+    // Category filter
+    document.getElementById('filterCategory')?.addEventListener('change', applyFilters);
+    
+    // Linked status filter
+    document.getElementById('filterLinkedStatus')?.addEventListener('change', applyFilters);
+    
+    // Batches filter
+    document.getElementById('filterBatches')?.addEventListener('change', applyFilters);
+    
+    // Sort
+    document.getElementById('sortBy')?.addEventListener('change', applyFilters);
+    
+    // Search
     const searchInput = document.getElementById('searchProducts');
     if (searchInput) {
-        searchInput.addEventListener('input', function(e) {
-            const searchTerm = e.target.value.toLowerCase();
-            const rows = document.querySelectorAll('#productsTableBody tr');
-            
-            rows.forEach(row => {
-                const text = row.textContent.toLowerCase();
-                if (text.includes(searchTerm)) {
-                    row.style.display = '';
-                } else {
-                    row.style.display = 'none';
-                }
-            });
-        });
+        searchInput.addEventListener('input', applyFilters);
     }
+});
+
+function applyFilters() {
+    const categoryFilter = document.getElementById('filterCategory')?.value || '';
+    const linkedStatusFilter = document.getElementById('filterLinkedStatus')?.value || '';
+    const batchesFilter = document.getElementById('filterBatches')?.value || '';
+    const sortBy = document.getElementById('sortBy')?.value || 'created-desc';
+    const searchTerm = document.getElementById('searchProducts')?.value.toLowerCase() || '';
+
+    let visibleCount = 0;
+
+    // Filter products
+    allProducts.forEach(product => {
+        let visible = true;
+
+        // Card filter (stats card click)
+        if (currentFilter === 'has-batches') {
+            visible = visible && product.hasBatches;
+        } else if (currentFilter === 'has-linked-items') {
+            visible = visible && product.linkedItems > 0;
+        } else if (currentFilter === 'no-linked-items') {
+            visible = visible && product.linkedItems === 0;
+        }
+
+        // Category filter
+        if (categoryFilter && product.category !== categoryFilter) {
+            visible = false;
+        }
+
+        // Linked status filter
+        if (linkedStatusFilter === 'linked' && product.linkedItems === 0) {
+            visible = false;
+        } else if (linkedStatusFilter === 'unlinked' && product.linkedItems > 0) {
+            visible = false;
+        }
+
+        // Batches filter
+        if (batchesFilter === 'yes' && !product.hasBatches) {
+            visible = false;
+        } else if (batchesFilter === 'no' && product.hasBatches) {
+            visible = false;
+        }
+
+        // Search filter
+        if (searchTerm && !product.element.textContent.toLowerCase().includes(searchTerm)) {
+            visible = false;
+        }
+
+        // Show/hide row
+        product.element.style.display = visible ? '' : 'none';
+        if (visible) visibleCount++;
+    });
+
+    // Sort visible products
+    sortProducts(sortBy);
+
+    // Update count
+    document.getElementById('filteredCount').textContent = visibleCount;
+}
+
+function sortProducts(sortBy) {
+    const tbody = document.getElementById('productsTableBody');
+    const rows = Array.from(tbody.querySelectorAll('tr:not([style*="display: none"])'));
+
+    rows.sort((a, b) => {
+        switch(sortBy) {
+            case 'created-desc':
+                return (b.dataset.createdAt || '').localeCompare(a.dataset.createdAt || '');
+            case 'created-asc':
+                return (a.dataset.createdAt || '').localeCompare(b.dataset.createdAt || '');
+            case 'name-asc':
+                return a.dataset.name.localeCompare(b.dataset.name);
+            case 'name-desc':
+                return b.dataset.name.localeCompare(a.dataset.name);
+            case 'price-desc':
+                return parseFloat(b.dataset.price) - parseFloat(a.dataset.price);
+            case 'price-asc':
+                return parseFloat(a.dataset.price) - parseFloat(b.dataset.price);
+            case 'batches-desc':
+                return parseInt(b.dataset.batches) - parseInt(a.dataset.batches);
+            case 'batches-asc':
+                return parseInt(a.dataset.batches) - parseInt(b.dataset.batches);
+            default:
+                return 0;
+        }
+    });
+
+    // Reorder rows
+    rows.forEach(row => tbody.appendChild(row));
+}
+
+function clearFilters() {
+    // Reset all filters
+    document.getElementById('filterCategory').value = '';
+    document.getElementById('filterLinkedStatus').value = '';
+    document.getElementById('filterBatches').value = '';
+    document.getElementById('sortBy').value = 'created-desc';
+    document.getElementById('searchProducts').value = '';
+    
+    // Remove active from cards
+    document.querySelectorAll('.stats-card').forEach(c => c.classList.remove('active'));
+    currentFilter = 'all';
+    
+    // Apply filters (which will reset everything)
+    applyFilters();
+}
+
+// Initial filter setup
+document.addEventListener('DOMContentLoaded', function() {
+    // Make first card active by default
+    document.getElementById('filter-all')?.classList.add('active');
 });
 </script>
