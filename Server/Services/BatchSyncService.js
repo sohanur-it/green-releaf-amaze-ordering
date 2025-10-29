@@ -236,13 +236,16 @@ class BatchSyncService {
                         initialStatus = 'Sellable';
                         console.log(`   ✨ Auto-promoting FIRST batch for item "${batch.name}" to Sellable`);
                     } else {
-                        // Older batches exist but none are Sellable - promote the OLDEST one
+                        // Older batches exist but none are Sellable - promote the OLDEST one (by month then THC)
                         const oldestBatch = await client.query(`
                             SELECT id, batch_name
                             FROM "ORDERS-batches"
                             WHERE metrc_item_name = $1
-                              AND status = 'On Hold'
-                            ORDER BY created_at ASC
+                              AND status IN ('On Hold', 'On Deck')
+                            ORDER BY 
+                                DATE_TRUNC('month', production_date) ASC NULLS LAST,
+                                COALESCE(thc_override, thc_percentage) ASC NULLS LAST,
+                                created_at ASC
                             LIMIT 1
                         `, [batch.name]);
                         
@@ -257,15 +260,15 @@ class BatchSyncService {
                             await client.query(`
                                 INSERT INTO "ORDERS-batch-history" (
                                     batch_id, change_type, field_name, old_value, new_value, reason, changed_by_system
-                                ) VALUES ($1, 'status_changed', 'status', 'On Hold', 'Sellable', 
-                                          'Auto-promoted: No Sellable batches existed', true)
+                                ) VALUES ($1, 'status_changed', 'status', 'On Deck', 'Sellable', 
+                                          'Auto-promoted: No Sellable batches existed (oldest month + lowest THC)', true)
                             `, [oldestBatch.rows[0].id]);
                             
                             console.log(`   ✨ Auto-promoted OLDEST batch "${oldestBatch.rows[0].batch_name}" for item "${batch.name}" to Sellable`);
                         }
                         
-                        // NEW batch stays as 'On Hold'
-                        initialStatus = 'On Hold';
+                        // NEW batch stays as 'On Deck' (queued for auto-promotion)
+                        initialStatus = 'On Deck';
                     }
                 }
                 

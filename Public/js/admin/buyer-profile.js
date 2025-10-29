@@ -682,7 +682,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 closeModal(document.getElementById('confirmationModal'));
             } catch (error) {
-                alert(`Error: ${error.message}`);
+                if (typeof notify !== 'undefined') {
+                    notify.error(`Error: ${error.message}`);
+                } else {
+                    alert(`Error: ${error.message}`);
+                }
             }
         });
     }

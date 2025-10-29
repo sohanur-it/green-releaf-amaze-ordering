@@ -1831,7 +1831,11 @@ async function generateLinkingImpactPreview(masterProductId, newMetrcItemNames, 
             COUNT(*) as batch_count,
             SUM(quantity) as total_quantity,
             SUM(allocated_quantity) as total_allocated,
-            string_agg(DISTINCT status::text, ', ') as statuses_present
+            string_agg(DISTINCT status::text, ', ') as statuses_present,
+            (SELECT i.unitofmeasurename 
+             FROM items i 
+             WHERE i.name = ANY($1) 
+             LIMIT 1) as unit_of_measure
         FROM "ORDERS-batches"
         WHERE metrc_item_name = ANY($1)
     `, [newMetrcItemNames]);
@@ -1851,6 +1855,7 @@ async function generateLinkingImpactPreview(masterProductId, newMetrcItemNames, 
         quantity_aggregated: impact.total_quantity,
         allocated_quantity: impact.total_allocated,
         statuses: impact.statuses_present,
+        unit_of_measure: impact.unit_of_measure || 'units',
         conflicts: conflicts.rows,
         warning_messages: generateWarnings(impact, conflicts.rows)
     };
@@ -1869,15 +1874,17 @@ function generateWarnings(impact, conflicts) {
         });
     }
 
-    if (impact.batch_count === 0) {
+    if (impact.batch_count === 0 || !impact.batch_count) {
         warnings.push({
             level: 'INFO',
             message: 'No existing batches found for these METRC items. This product will appear empty until the next sync.'
         });
     } else {
+        const quantity = impact.total_quantity || impact.quantity_aggregated || 0;
+        const unit = impact.unit_of_measure || 'units';
         warnings.push({
             level: 'SUCCESS',
-            message: `${impact.batch_count} batches will be linked to this product, totaling ${impact.quantity_aggregated} units.`
+            message: `${impact.batch_count} ${impact.batch_count === 1 ? 'batch' : 'batches'} will be linked to this product, totaling ${quantity} ${unit}.`
         });
     }
 

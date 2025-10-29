@@ -276,7 +276,7 @@ function linkItem(button, itemName) {
     // Check if item is already linked to prevent duplicates
     if (linkedItemsList.includes(itemName)) {
         console.warn('Item already linked:', itemName);
-        alert(`⚠️ This item is already linked!\n\n"${itemName}"\n\nPlease unlink it first if you want to relink it.`);
+        notify.warning(`Item "${itemName}" is already linked. Unlink it first to relink.`, 4000);
         return; // Already linked, don't add again
     }
     
@@ -413,7 +413,7 @@ async function previewImpact() {
     console.log('Preview impact - count:', linkedItemsList.length);
     
     if (linkedItemsList.length === 0) {
-        alert('Please link at least one METRC item before saving.');
+        notify.warning('Please link at least one METRC item before saving');
         return;
     }
     
@@ -473,15 +473,15 @@ function displayImpactPreview(preview) {
             </div>
             <div class="impact-item">
                 <div class="impact-label">Total Quantity</div>
-                <div class="impact-value">${preview.quantity_aggregated || 0} units</div>
+                <div class="impact-value">${preview.quantity_aggregated || 0} ${preview.unit_of_measure || 'units'}</div>
             </div>
             <div class="impact-item">
                 <div class="impact-label">Allocated</div>
-                <div class="impact-value">${preview.allocated_quantity || 0} units</div>
+                <div class="impact-value">${preview.allocated_quantity || 0} ${preview.unit_of_measure || 'units'}</div>
             </div>
             <div class="impact-item">
                 <div class="impact-label">Available</div>
-                <div class="impact-value">${(preview.quantity_aggregated || 0) - (preview.allocated_quantity || 0)} units</div>
+                <div class="impact-value">${(preview.quantity_aggregated || 0) - (preview.allocated_quantity || 0)} ${preview.unit_of_measure || 'units'}</div>
             </div>
         </div>
     `;

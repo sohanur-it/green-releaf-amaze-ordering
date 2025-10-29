@@ -133,11 +133,14 @@ exports.showLinkItemsPage = async (req, res) => {
         const product = productResult.rows[0];
         const linkedItems = product.metrc_linked_items || [];
 
-        // Get all available METRC items
+        // Get all available METRC items - FILTERED by Bud/Flower Final Packaging only
         const itemsResult = await pool.query(`
-            SELECT DISTINCT name 
+            SELECT DISTINCT name, productcategoryname, unitofmeasurename
             FROM items 
             WHERE sync_license IN ('CUL000063', 'MAN000072')
+              AND productcategoryname ILIKE '%Final Packaging%'
+              AND name IS NOT NULL
+              AND name != ''
             ORDER BY name
         `);
 

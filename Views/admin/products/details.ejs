@@ -273,7 +273,7 @@ body {
                         <% batches.forEach(batch => { %>
                             <tr>
                                 <td><strong>#<%= batch.id %></strong></td>
-                                <td><%= batch.metrc_item_name %></td>
+                                <td><%= batch.batch_name %></td>
                                 <td>
                                     <% 
                                     let statusClass = 'secondary';
@@ -303,7 +303,7 @@ body {
                                     <% } %>
                                 </td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-secondary" onclick="alert('Batch management coming soon')">
+                                    <button class="btn btn-sm btn-outline-secondary" onclick="openBatchManagement(<%= batch.id %>, '<%= batch.batch_name %>', '<%= batch.status %>', <%= batch.thc_percentage || 'null' %>, <%= batch.thc_override || 'null' %>, <%= batch.override_price || 'null' %>)">
                                         <i class="fas fa-cog"></i> Manage
                                     </button>
                                 </td>
@@ -313,6 +313,76 @@ body {
                 </table>
             </div>
         <% } %>
+    </div>
+</div>
+
+<!-- Batch Management Modal -->
+<div id="batchManagementModal" class="modal" style="display: none;">
+    <div class="modal-content" style="max-width: 700px;">
+        <div class="modal-header">
+            <h3>Manage Batch: <span id="modalBatchName"></span></h3>
+            <button class="modal-close" onclick="closeBatchManagement()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <input type="hidden" id="modalBatchId">
+            
+            <!-- Status Management -->
+            <div class="mb-4">
+                <h6 style="color: #667eea; margin-bottom: 1rem;"><i class="fas fa-info-circle me-2"></i>Batch Status</h6>
+                <div class="form-group">
+                    <label for="batchStatus">Status</label>
+                    <select class="form-control" id="batchStatus" style="padding: 0.75rem;">
+                        <option value="Sellable">Sellable</option>
+                        <option value="On Deck">On Deck</option>
+                        <option value="On Hold">On Hold</option>
+                    </select>
+                </div>
+            </div>
+
+            <hr>
+
+            <!-- THC Override -->
+            <div class="mb-4">
+                <h6 style="color: #667eea; margin-bottom: 1rem;"><i class="fas fa-cannabis me-2"></i>THC Percentage</h6>
+                <div class="row">
+                    <div class="col-md-6">
+                        <label>Current THC %</label>
+                        <input type="text" class="form-control" id="currentTHC" readonly>
+                    </div>
+                    <div class="col-md-6">
+                        <label>Override THC %</label>
+                        <input type="number" step="0.01" class="form-control" id="thcOverride" placeholder="Enter new THC %">
+                    </div>
+                </div>
+                <div class="form-group mt-2">
+                    <label for="thcReason">Reason for THC Override</label>
+                    <textarea class="form-control" id="thcReason" rows="2" placeholder="Why is THC being overridden?"></textarea>
+                </div>
+            </div>
+
+            <hr>
+
+            <!-- Price Override -->
+            <div class="mb-4">
+                <h6 style="color: #667eea; margin-bottom: 1rem;"><i class="fas fa-dollar-sign me-2"></i>Pricing</h6>
+                <div class="row">
+                    <div class="col-md-6">
+                        <label>Product Default Price</label>
+                        <input type="text" class="form-control" value="$<%= product.default_price || 'Not Set' %>" readonly>
+                    </div>
+                    <div class="col-md-6">
+                        <label>Batch Override Price</label>
+                        <input type="number" step="0.01" class="form-control" id="priceOverride" placeholder="Override price">
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" onclick="closeBatchManagement()">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveBatchChanges()">
+                <i class="fas fa-save me-1"></i> Save Changes
+            </button>
+        </div>
     </div>
 </div>
 
@@ -488,9 +558,11 @@ async function updatePrice() {
     const newPrice = parseFloat(document.getElementById('newPrice').value);
     
     if (!newPrice || newPrice <= 0) {
-        alert('Please enter a valid price');
+        notify.warning('Please enter a valid price');
         return;
     }
+    
+    const loadingNotif = notify.loading('Updating product price...');
     
     try {
         const response = await fetch(`/api/v1/products/master/${productId}/price`, {
@@ -501,6 +573,7 @@ async function updatePrice() {
         });
         
         const data = await response.json();
+        notify.remove(loadingNotif);
         
         if (data.success) {
             // Check if there are siblings to apply to
@@ -509,15 +582,16 @@ async function updatePrice() {
                 showBulkUpdatePrompt(data.category, data.category_siblings.length);
             } else {
                 // No siblings, just reload
-                alert('Price updated successfully!');
-                location.reload();
+                notify.success('Price updated successfully!');
+                setTimeout(() => location.reload(), 1000);
             }
         } else {
-            alert('Error updating price: ' + (data.error || 'Unknown error'));
+            notify.error('Failed to update price: ' + (data.error || 'Unknown error'));
         }
     } catch (error) {
         console.error('Error:', error);
-        alert('Error updating price: ' + error.message);
+        notify.remove(loadingNotif);
+        notify.error('Error updating price: ' + error.message);
     }
 }
 
@@ -532,6 +606,8 @@ async function updateCategoryPrices() {
     const categoryName = document.getElementById('categoryName').textContent;
     const newPrice = parseFloat(document.getElementById('newPrice').value);
     
+    const loadingNotif = notify.loading(`Updating prices for ${categoryName} category...`);
+    
     try {
         const response = await fetch(`/api/v1/products/categories/${encodeURIComponent(categoryName)}/bulk-price-update`, {
             method: 'POST',
@@ -544,24 +620,153 @@ async function updateCategoryPrices() {
         });
         
         const data = await response.json();
+        notify.remove(loadingNotif);
         
         if (data.success) {
-            alert(`Price updated successfully!\n\nUpdated ${data.updated_count} products in the '${categoryName}' category`);
-            location.reload();
+            notify.success(`Updated ${data.updated_count} products in '${categoryName}' category`, 5000);
+            setTimeout(() => location.reload(), 1500);
         } else {
-            alert('Error bulk updating prices: ' + (data.error || 'Unknown error'));
+            notify.error('Failed to bulk update prices: ' + (data.error || 'Unknown error'));
         }
     } catch (error) {
         console.error('Error:', error);
-        alert('Error bulk updating prices: ' + error.message);
+        notify.remove(loadingNotif);
+        notify.error('Error bulk updating prices: ' + error.message);
+    }
+}
+
+// =============================================
+// BATCH MANAGEMENT FUNCTIONS
+// =============================================
+let currentBatchData = {};
+
+function openBatchManagement(batchId, batchName, status, thcPercentage, thcOverride, overridePrice) {
+    currentBatchData = {
+        id: batchId,
+        name: batchName,
+        status: status,
+        thcPercentage: thcPercentage,
+        thcOverride: thcOverride,
+        overridePrice: overridePrice
+    };
+    
+    document.getElementById('modalBatchId').value = batchId;
+    document.getElementById('modalBatchName').textContent = batchName;
+    document.getElementById('batchStatus').value = status;
+    document.getElementById('currentTHC').value = thcOverride || thcPercentage || 'Not Available';
+    document.getElementById('thcOverride').value = thcOverride || '';
+    document.getElementById('priceOverride').value = overridePrice || '';
+    document.getElementById('thcReason').value = '';
+    
+    document.getElementById('batchManagementModal').style.display = 'flex';
+}
+
+function closeBatchManagement() {
+    document.getElementById('batchManagementModal').style.display = 'none';
+}
+
+async function saveBatchChanges() {
+    const batchId = document.getElementById('modalBatchId').value;
+    const newStatus = document.getElementById('batchStatus').value;
+    const thcOverride = document.getElementById('thcOverride').value;
+    const thcReason = document.getElementById('thcReason').value;
+    const priceOverride = document.getElementById('priceOverride').value;
+    
+    const updates = [];
+    
+    // Show loading notification
+    const loadingNotif = notify.loading('Saving batch changes...');
+    
+    try {
+        // Update status if changed
+        if (newStatus !== currentBatchData.status) {
+            const statusResponse = await fetch(`/api/v1/batches/${batchId}/status`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    status: newStatus,
+                    reason: `Manual status change from batch management`
+                })
+            });
+            
+            const statusData = await statusResponse.json();
+            if (statusData.success) {
+                updates.push(`Status → ${newStatus}`);
+            } else {
+                notify.remove(loadingNotif);
+                notify.error('Failed to update status: ' + (statusData.error || 'Unknown error'));
+                return;
+            }
+        }
+        
+        // Update THC override if provided and changed
+        if (thcOverride && thcOverride != currentBatchData.thcOverride) {
+            const thcResponse = await fetch(`/api/v1/batches/${batchId}/thc-override`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    thc_override: parseFloat(thcOverride)
+                })
+            });
+            
+            const thcData = await thcResponse.json();
+            if (thcData.success) {
+                updates.push(`THC → ${thcOverride}%`);
+            } else {
+                notify.remove(loadingNotif);
+                notify.error('Failed to update THC: ' + (thcData.error || 'Unknown error'));
+                return;
+            }
+        }
+        
+        // Update price override if provided and changed
+        if (priceOverride && priceOverride != currentBatchData.overridePrice) {
+            const priceResponse = await fetch(`/api/v1/batches/${batchId}/price`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    override_price: parseFloat(priceOverride)
+                })
+            });
+            
+            const priceData = await priceResponse.json();
+            if (priceData.success) {
+                updates.push(`Price → $${priceOverride}`);
+            } else {
+                notify.remove(loadingNotif);
+                notify.error('Failed to update price: ' + (priceData.error || 'Unknown error'));
+                return;
+            }
+        }
+        
+        // Remove loading notification
+        notify.remove(loadingNotif);
+        
+        if (updates.length > 0) {
+            notify.success('Batch updated: ' + updates.join(', '), 4000);
+            closeBatchManagement();
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            notify.warning('No changes detected');
+        }
+        
+    } catch (error) {
+        console.error('Error updating batch:', error);
+        notify.remove(loadingNotif);
+        notify.error('Error updating batch: ' + error.message);
     }
 }
 
 // Close modal when clicking outside
 window.onclick = function(event) {
-    const modal = document.getElementById('editPriceModal');
-    if (event.target === modal) {
+    const editPriceModal = document.getElementById('editPriceModal');
+    const batchModal = document.getElementById('batchManagementModal');
+    
+    if (event.target === editPriceModal) {
         closeEditPriceModal();
+    }
+    if (event.target === batchModal) {
+        closeBatchManagement();
     }
 }
 </script>

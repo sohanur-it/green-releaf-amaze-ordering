@@ -454,7 +454,7 @@ async function showCurrentRolePermissions(roleIds) {
 
 async function assignRoles() {
     if (!selectedUser) {
-        alert('Please select a user');
+        notify.warning('Please select a user');
         return;
     }
     
@@ -462,7 +462,7 @@ async function assignRoles() {
     const selectedRoleIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
     
     if (selectedRoleIds.length === 0) {
-        alert('Please select at least one role');
+        notify.warning('Please select at least one role');
         return;
     }
     
@@ -472,6 +472,8 @@ async function assignRoles() {
         return role ? role.name : 'Unknown Role';
     });
     
+    const loadingNotif = notify.loading('Assigning roles...');
+    
     try {
         const response = await fetch(`/api/v1/admin/users/${selectedUser.id}/roles`, {
             method: 'POST',
@@ -480,6 +482,7 @@ async function assignRoles() {
         });
         
         const data = await response.json();
+        notify.remove(loadingNotif);
         
         if (data.success) {
             // Close modal
@@ -487,16 +490,17 @@ async function assignRoles() {
             
             // Show success message
             const roleText = selectedRoleNames.length === 1 ? 'role' : 'roles';
-            showSuccessMessage(`User ${selectedUser.firstname} ${selectedUser.lastname}'s ${roleText} "${selectedRoleNames.join(', ')}" assigned successfully!`);
+            notify.success(`${roleText.charAt(0).toUpperCase() + roleText.slice(1)} "${selectedRoleNames.join(', ')}" assigned to ${selectedUser.firstname} ${selectedUser.lastname}`, 5000);
             
             // Refresh data
             refreshData();
         } else {
-            alert('Failed to assign roles: ' + (data.message || 'Unknown error'));
+            notify.error('Failed to assign roles: ' + (data.message || 'Unknown error'));
         }
     } catch (error) {
         console.error('Error:', error);
-        alert('Error assigning roles: ' + error.message);
+        notify.remove(loadingNotif);
+        notify.error('Error assigning roles: ' + error.message);
     }
 }
 
@@ -524,21 +528,26 @@ async function approveUser(userId) {
     const user = allUsers.find(u => u.id === userId);
     if (!user) return;
     
+    const loadingNotif = notify.loading(`Approving ${user.firstname} ${user.lastname}...`);
+    
     try {
         const response = await fetch(`/api/v1/admin/users/${userId}/approve`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' }
         });
         
+        notify.remove(loadingNotif);
+        
         if (response.ok) {
-            showSuccessMessage(`User ${user.firstname} ${user.lastname} has been approved successfully!`);
+            notify.success(`${user.firstname} ${user.lastname} approved successfully!`, 4000);
             refreshData();
         } else {
-            alert('Failed to approve user');
+            notify.error('Failed to approve user');
         }
     } catch (error) {
         console.error('Error:', error);
-        alert('Error approving user: ' + error.message);
+        notify.remove(loadingNotif);
+        notify.error('Error approving user: ' + error.message);
     }
 }
 
@@ -546,7 +555,14 @@ async function revokeUser(userId) {
     const user = allUsers.find(u => u.id === userId);
     if (!user) return;
     
-    if (!confirm(`Are you sure you want to revoke access for ${user.firstname} ${user.lastname}?`)) return;
+    const confirmed = await notify.confirm(
+        `Are you sure you want to revoke access for ${user.firstname} ${user.lastname}?`,
+        'Confirm Revoke Access'
+    );
+    
+    if (!confirmed) return;
+    
+    const loadingNotif = notify.loading(`Revoking access for ${user.firstname} ${user.lastname}...`);
     
     try {
         const response = await fetch(`/api/v1/admin/users/${userId}/revoke`, {
@@ -554,15 +570,18 @@ async function revokeUser(userId) {
             headers: { 'Content-Type': 'application/json' }
         });
         
+        notify.remove(loadingNotif);
+        
         if (response.ok) {
-            showSuccessMessage(`User ${user.firstname} ${user.lastname}'s access has been revoked.`);
+            notify.success(`Access revoked for ${user.firstname} ${user.lastname}`, 4000);
             refreshData();
         } else {
-            alert('Failed to revoke user');
+            notify.error('Failed to revoke user');
         }
     } catch (error) {
         console.error('Error:', error);
-        alert('Error revoking user: ' + error.message);
+        notify.remove(loadingNotif);
+        notify.error('Error revoking user: ' + error.message);
     }
 }
 
