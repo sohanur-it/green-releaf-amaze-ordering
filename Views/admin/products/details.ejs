@@ -119,15 +119,33 @@ body {
         <div class="d-flex align-items-center">
             <a href="/admin/products" class="back-link">&larr; Back</a>
             <div>
-                <h2 class="mb-0"><%= product.name %></h2>
+                <h2 class="mb-0">
+                    <%= product.name %>
+                    <% if (product.is_archived) { %>
+                        <span class="badge bg-warning text-dark ms-2">
+                            <i class="fas fa-archive"></i> ARCHIVED
+                        </span>
+                    <% } %>
+                </h2>
                 <% if (product.brand_name) { %>
                     <span class="badge bg-secondary mt-2"><%= product.brand_name %></span>
                 <% } %>
             </div>
         </div>
-        <a href="/admin/products/<%= product.entry_id %>/link-items" class="btn btn-primary">
-            <i class="fas fa-link me-1"></i> Manage Linked Items
-        </a>
+        <div class="d-flex gap-2">
+            <a href="/admin/products/<%= product.entry_id %>/link-items" class="btn btn-primary">
+                <i class="fas fa-link me-1"></i> Manage Linked Items
+            </a>
+            <% if (product.is_archived) { %>
+                <button class="btn btn-success" onclick="toggleArchiveProduct(false)">
+                    <i class="fas fa-box-open me-1"></i> Unarchive
+                </button>
+            <% } else { %>
+                <button class="btn btn-warning text-dark" onclick="toggleArchiveProduct(true)">
+                    <i class="fas fa-archive me-1"></i> Archive Product
+                </button>
+            <% } %>
+        </div>
     </div>
 
     <% 
@@ -767,6 +785,48 @@ window.onclick = function(event) {
     }
     if (event.target === batchModal) {
         closeBatchManagement();
+    }
+}
+
+// =============================================
+// ARCHIVE/UNARCHIVE PRODUCT FUNCTIONS
+// =============================================
+
+async function toggleArchiveProduct(shouldArchive) {
+    const action = shouldArchive ? 'archive' : 'unarchive';
+    const actionPast = shouldArchive ? 'archived' : 'unarchived';
+    
+    // Confirm action
+    const message = shouldArchive 
+        ? 'Are you sure you want to archive this product? It will stop listing externally but batches remain usable internally.'
+        : 'Are you sure you want to unarchive this product? It will become visible externally again.';
+    
+    const confirmed = await notify.confirm(message, `Confirm ${action.charAt(0).toUpperCase() + action.slice(1)}`);
+    if (!confirmed) return;
+    
+    const loadingNotif = notify.loading(`${action.charAt(0).toUpperCase() + action.slice(1)}ing product...`);
+    
+    try {
+        const response = await fetch(`/api/v1/products/master/${productId}/archive`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ is_archived: shouldArchive })
+        });
+        
+        const data = await response.json();
+        notify.remove(loadingNotif);
+        
+        if (data.success) {
+            notify.success(`Product ${actionPast} successfully!`, 3000);
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            notify.error(`Failed to ${action} product: ` + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error(`Error ${action}ing product:`, error);
+        notify.remove(loadingNotif);
+        notify.error(`Error ${action}ing product: ` + error.message);
     }
 }
 </script>

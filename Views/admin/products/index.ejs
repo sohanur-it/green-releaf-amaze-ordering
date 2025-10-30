@@ -139,7 +139,19 @@
 
 <div class="container-fluid p-4">
     <!-- Action Buttons -->
-    <div class="d-flex justify-content-end mb-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="form-check form-switch">
+            <input 
+                class="form-check-input" 
+                type="checkbox" 
+                id="showArchivedToggle"
+                <%= showArchived ? 'checked' : '' %>
+                onchange="toggleShowArchived(this.checked)"
+            >
+            <label class="form-check-label" for="showArchivedToggle">
+                <i class="fas fa-archive me-1"></i> Show Archived Products
+            </label>
+        </div>
         <a href="/admin/products/new" class="btn btn-primary">
             <i class="fas fa-plus me-1"></i> Create Product
         </a>
@@ -274,7 +286,14 @@
                                 <td><strong>#<%= product.entry_id %></strong></td>
                                 <td>
                                     <div>
-                                        <div class="fw-bold"><%= product.name %></div>
+                                        <div class="fw-bold">
+                                            <%= product.name %>
+                                            <% if (product.is_archived) { %>
+                                                <span class="badge bg-warning text-dark ms-2">
+                                                    <i class="fas fa-archive"></i> ARCHIVED
+                                                </span>
+                                            <% } %>
+                                        </div>
                                         <% if (product.brand_name) { %>
                                             <small class="text-muted"><%= product.brand_name %></small>
                                         <% } %>
@@ -477,6 +496,17 @@ function clearFilters() {
     
     // Apply filters (which will reset everything)
     applyFilters();
+}
+
+// Toggle show archived products
+function toggleShowArchived(show) {
+    const url = new URL(window.location);
+    if (show) {
+        url.searchParams.set('show_archived', 'true');
+    } else {
+        url.searchParams.delete('show_archived');
+    }
+    window.location.href = url.toString();
 }
 
 // Initial filter setup

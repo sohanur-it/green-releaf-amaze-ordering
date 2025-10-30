@@ -20,6 +20,9 @@ const pool = new Pool({
  */
 exports.getAllProducts = async (req, res) => {
     try {
+        // Check if user wants to see archived products
+        const showArchived = req.query.show_archived === 'true';
+        
         const result = await pool.query(`
             SELECT 
                 p.*,
@@ -27,14 +30,16 @@ exports.getAllProducts = async (req, res) => {
                 SUM(CASE WHEN b.status = 'Sellable' THEN b.quantity - b.allocated_quantity ELSE 0 END) as available_quantity
             FROM "ORDERS-products" p
             LEFT JOIN "ORDERS-batches" b ON p.entry_id = b.fk_master_product_id
+            ${showArchived ? '' : 'WHERE p.is_archived = FALSE OR p.is_archived IS NULL'}
             GROUP BY p.entry_id
-            ORDER BY p.created_at DESC NULLS LAST, p.entry_id DESC
+            ORDER BY p.is_archived NULLS FIRST, p.created_at DESC NULLS LAST, p.entry_id DESC
         `);
 
         res.render('admin/products/index', {
             title: 'Master Products',
             layout: 'layouts/main',
             products: result.rows,
+            showArchived: showArchived,
             user: req.session.user
         });
     } catch (error) {

@@ -79,6 +79,7 @@
 const express = require('express');
 const router = express.Router();
 const BatchSyncService = require('../Services/BatchSyncService');
+const auditLogger = require('../Services/auditLogger');
 const { Pool } = require('pg');
 
 // Database configuration
@@ -835,6 +836,110 @@ router.patch('/products/master/:id/price', async (req, res) => {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error updating product price:', error.message);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    } finally {
+        client.release();
+    }
+});
+
+/**
+ * @swagger
+ * /api/v1/products/master/{id}/archive:
+ *   patch:
+ *     summary: Archive/Unarchive a product
+ *     description: Archives a product (soft delete) so it stops listing externally but batches remain usable internally. Admin only.
+ *     tags: [Module 3 - Products]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Master Product ID
+ *         example: 394
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [is_archived]
+ *             properties:
+ *               is_archived:
+ *                 type: boolean
+ *                 description: True to archive, false to unarchive
+ *                 example: true
+ *     responses:
+ *       200:
+ *         description: Product archived/unarchived successfully
+ *       403:
+ *         description: Not authorized (admin only)
+ *       500:
+ *         description: Server error
+ */
+router.patch('/products/master/:id/archive', async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const { is_archived } = req.body;
+        const productId = req.params.id;
+        const userIdRaw = req.session?.userId || req.user?.id || req.user?.userId || null;
+        const userId = userIdRaw ? parseInt(userIdRaw, 10) : null;
+
+        // Get product info before archiving
+        const productInfo = await client.query(`
+            SELECT name, is_archived FROM "ORDERS-products" WHERE entry_id = $1
+        `, [productId]);
+
+        if (productInfo.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Product not found'
+            });
+        }
+
+        const product = productInfo.rows[0];
+        const action = is_archived ? 'archived' : 'unarchived';
+
+        // Update product archive status
+        await client.query(`
+            UPDATE "ORDERS-products"
+            SET is_archived = $1,
+                archived_at = CASE WHEN $1 = TRUE THEN NOW() ELSE NULL END,
+                archived_by = CASE WHEN $1 = TRUE THEN $2::INTEGER ELSE NULL END
+            WHERE entry_id = $3
+        `, [is_archived, userId, productId]);
+
+        // Log audit action
+        await auditLogger.logAction({
+            userId,
+            action: is_archived ? 'product_archived' : 'product_unarchived',
+            resourceType: 'Product',
+            resourceId: productId.toString(),
+            details: {
+                product_name: product.name,
+                previous_status: product.is_archived ? 'archived' : 'active',
+                new_status: is_archived ? 'archived' : 'active',
+                message: `Product "${product.name}" ${action} by admin`
+            },
+            status: 'success',
+            sourceIp: req.ip
+        });
+
+        res.json({
+            success: true,
+            message: `Product ${action} successfully`,
+            product_id: productId,
+            product_name: product.name,
+            is_archived
+        });
+
+    } catch (error) {
+        console.error('Error archiving product:', error.message);
         res.status(500).json({
             success: false,
             error: error.message
