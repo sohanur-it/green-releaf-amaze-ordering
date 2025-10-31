@@ -77,24 +77,24 @@ async function syncBatches() {
     const startTime = Date.now();
     
     try {
-        await client.query('BEGIN');
-        
         console.log('🚀 Starting Module 3 Batch Synchronization...');
         console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
         console.log(`🏢 Database: ${process.env.DB_DATABASE || 'green_releaf_dev'}`);
         
-        // Create sync history entry
+        // Create sync history entry OUTSIDE transaction so it's always saved
         const licenseNumber = process.env.SYNC_LICENSE || 'CUL000063';
         historyId = await createSyncHistory(client, 'batches', licenseNumber, null, 'sync-batches.js');
         
+        // Now run the actual sync (BatchSyncService handles its own transactions)
+        await client.query('BEGIN');
         const result = await batchSyncService.syncBatches();
+        await client.query('COMMIT');
         
         const duration = Date.now() - startTime;
         const scriptOutput = `Batch sync completed: ${result.changes.new} new, ${result.changes.updated} updated, ${result.changes.removed} removed, ${result.changes.packageChanges} package changes`;
         
         // Update sync history on success
         await updateSyncHistory(client, historyId, 'completed', duration, scriptOutput, null);
-        await client.query('COMMIT');
         
         // Record success in failure tracker
         try {
@@ -110,11 +110,17 @@ async function syncBatches() {
         return result;
         
     } catch (error) {
-        await client.query('ROLLBACK');
+        // Rollback only if transaction is still active
+        try {
+            await client.query('ROLLBACK');
+        } catch (rollbackError) {
+            // Transaction might already be rolled back, ignore
+        }
+        
         const duration = Date.now() - startTime;
         const errorMessage = error.message || 'Unknown error';
         
-        // Update sync history on failure
+        // Update sync history on failure (history entry should exist since created before transaction)
         if (historyId) {
             await updateSyncHistory(client, historyId, 'failed', duration, null, errorMessage);
         }

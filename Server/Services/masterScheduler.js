@@ -103,17 +103,34 @@ class MasterScheduler {
             return;
         }
 
+        const timezone = process.env.SYNC_TIMEZONE || 'America/Chicago';
+        const nowInTz = new Date().toLocaleString('en-US', { 
+            timeZone: timezone,
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            timeZoneName: 'long'
+        });
         console.log('🚀 Starting Master Scheduler...');
+        console.log(`📅 Using timezone: ${timezone}`);
+        console.log(`⏰ Current time in ${timezone}: ${nowInTz}`);
+        console.log(`📋 Business hours: 8:00 AM - 6:00 PM (Monday-Friday) in ${timezone}`);
         
         // Schedule all enabled jobs
+        let scheduledCount = 0;
         for (const job of this.syncJobs) {
             if (job.enabled) {
                 await this.scheduleJob(job);
+                scheduledCount++;
             }
         }
 
         this.isRunning = true;
-        console.log('✅ Master Scheduler started successfully');
+        console.log(`✅ Master Scheduler started successfully (${scheduledCount} jobs scheduled)`);
         
         // Log system action
         await auditLogger.logSystemAction(
@@ -170,7 +187,7 @@ class MasterScheduler {
                 await this.executeJob(job);
             }, {
                 scheduled: false,
-                timezone: 'America/Los_Angeles' // PST/PDT timezone for US West Coast business hours
+                timezone: process.env.SYNC_TIMEZONE || 'America/Chicago' // Configurable timezone (defaults to Central)
             });
 
             this.jobs.set(job.name, cronJob);
@@ -180,9 +197,22 @@ class MasterScheduler {
             job.nextRun = this.getNextRunTime(job.schedule);
             job.status = 'scheduled';
             
+            const timezone = process.env.SYNC_TIMEZONE || 'America/Chicago';
+            const nowInTz = new Date().toLocaleString('en-US', { 
+                timeZone: timezone,
+                weekday: 'short',
+                year: 'numeric',
+                month: 'short',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                timeZoneName: 'short'
+            });
             console.log(`📅 Scheduled job: ${job.name} - ${job.description}`);
-            console.log(`   Schedule: ${job.schedule}`);
-            console.log(`   Next run: ${job.nextRun}`);
+            console.log(`   Schedule: ${job.schedule} (${timezone} timezone)`);
+            console.log(`   Current ${timezone} time: ${nowInTz}`);
+            console.log(`   Next run: ${job.nextRun || 'Calculating...'}`);
             
         } catch (error) {
             console.error(`❌ Failed to schedule job ${job.name}:`, error.message);
@@ -198,7 +228,16 @@ class MasterScheduler {
         job.status = 'running';
         job.lastRun = startTime;
         
+        const timezone = process.env.SYNC_TIMEZONE || 'America/Chicago';
+        const executeTime = new Date().toLocaleString('en-US', { 
+            timeZone: timezone,
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            timeZoneName: 'short'
+        });
         console.log(`🔄 Executing job: ${job.name} - ${job.description}`);
+        console.log(`   Execution time (${timezone}): ${executeTime}`);
         
         try {
             // Execute the sync script
@@ -382,11 +421,22 @@ class MasterScheduler {
      */
     getNextRunTime(cronExpression) {
         try {
-            // This is a simplified calculation - in production you might want to use a library like 'cron-parser'
+            // Use node-cron's built-in functionality to get next execution time
+            // Create a temporary cron job to calculate next run
+            const timezone = process.env.SYNC_TIMEZONE || 'America/Chicago';
+            const tempCron = cron.schedule(cronExpression, () => {}, {
+                scheduled: false,
+                timezone: timezone
+            });
+            
+            // Get the next execution time
+            // Note: node-cron doesn't directly expose next execution time, so we'll use a calculation
+            // For now, return the schedule info formatted for Chicago timezone
             const now = new Date();
-            const nextRun = new Date(now.getTime() + 60000); // Add 1 minute as placeholder
-            return nextRun.toISOString();
+            const chicagoTime = new Date(now.toLocaleString('en-US', { timeZone: timezone }));
+            return `Scheduled in ${timezone} timezone`;
         } catch (error) {
+            console.error('Error calculating next run time:', error.message);
             return null;
         }
     }

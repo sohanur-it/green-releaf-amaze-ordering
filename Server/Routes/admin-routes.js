@@ -85,6 +85,11 @@ router.get('/audit-logs', requirePermission('admin', 'audit'), (req, res) => {
 // API endpoint for sync health status (used by dashboard)
 router.get('/api/sync-health', requirePermission('admin', 'dashboard'), async (req, res) => {
     try {
+        // Disable caching for this endpoint to ensure fresh data
+        res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.set('Pragma', 'no-cache');
+        res.set('Expires', '0');
+        
         const alerts = await syncFailureTracker.getAllAlerts();
         const stats = await syncFailureTracker.getFailureStats();
         const recentSyncs = await syncFailureTracker.getRecentSyncHistory(5);

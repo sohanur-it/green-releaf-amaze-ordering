@@ -13,8 +13,12 @@ const cron = require('node-cron');
 const { spawn } = require('child_process');
 const path = require('path');
 
-// Load environment variables
-require('dotenv').config();
+// Load environment variables based on NODE_ENV
+if (process.env.NODE_ENV === 'production') {
+    require('dotenv').config({ path: path.join(__dirname, '../../config/production.env') });
+} else {
+    require('dotenv').config({ path: path.join(__dirname, '../../config/local.env') });
+}
 
 // Import sync failure tracker for halt mechanism
 const syncFailureTracker = require('../../Server/Services/syncFailureTracker');
@@ -211,7 +215,7 @@ function setupScheduler() {
             }
         }, {
             scheduled: true,
-            timezone: 'America/Chicago' // CST/CDT timezone for US Central business hours
+            timezone: process.env.SYNC_TIMEZONE || 'America/Chicago' // Configurable timezone (defaults to Central)
         });
     });
     
@@ -268,9 +272,24 @@ process.on('SIGINT', () => {
 
 // Start scheduler
 if (require.main === module) {
+    const timezone = process.env.SYNC_TIMEZONE || 'America/Chicago';
+    const nowInTz = new Date().toLocaleString('en-US', { 
+        timeZone: timezone,
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        timeZoneName: 'long'
+    });
+    
     log('=== METRC Sync Master Scheduler ===', 'SCHEDULER');
     log(`Environment: ${process.env.NODE_ENV || 'development'}`, 'INFO');
-    log(`Timezone: America/Chicago (CST/CDT)`, 'INFO');
+    log(`Timezone: ${timezone} (CST/CDT)`, 'INFO');
+    log(`Current time in ${timezone}: ${nowInTz}`, 'INFO');
+    log(`Business hours: 8:00 AM - 6:00 PM (Monday-Friday) in ${timezone}`, 'INFO');
     
     setupScheduler();
     

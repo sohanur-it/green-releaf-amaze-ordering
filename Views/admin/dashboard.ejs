@@ -241,7 +241,14 @@
 <script>
 async function loadSyncHealth() {
     try {
-        const response = await fetch('/admin/api/sync-health');
+        // Add cache-busting query parameter to ensure fresh data
+        const cacheBuster = new Date().getTime();
+        const response = await fetch(`/admin/api/sync-health?t=${cacheBuster}`, {
+            cache: 'no-cache',
+            headers: {
+                'Cache-Control': 'no-cache'
+            }
+        });
         const data = await response.json();
         
         if (data.success) {
@@ -407,7 +414,7 @@ function getTimeAgo(date) {
     return `${days} day${days !== 1 ? 's' : ''} ago`;
 }
 
-// Load on page load and refresh every 60 seconds
+// Load on page load and refresh every 30 seconds for real-time updates
 loadSyncHealth();
-setInterval(loadSyncHealth, 60000);
+setInterval(loadSyncHealth, 30000); // Refresh every 30 seconds for better real-time updates
 </script>
