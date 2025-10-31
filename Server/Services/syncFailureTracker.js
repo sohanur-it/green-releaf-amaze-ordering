@@ -27,6 +27,7 @@ class SyncFailureTracker {
     constructor() {
         this.WARNING_THRESHOLD = 3;
         this.CRITICAL_THRESHOLD = 5;
+        this.STALENESS_THRESHOLD_HOURS = 1; // Alert if no success in >1 hour
     }
 
     /**
@@ -176,7 +177,8 @@ class SyncFailureTracker {
     async getAllAlerts() {
         const client = await pool.connect();
         try {
-            const result = await client.query(`
+            // Get alerts for consecutive failures
+            const failureResult = await client.query(`
                 SELECT script_name, license_number, consecutive_failures, 
                        last_failure_time, last_error_message
                 FROM sync_failure_tracking 
@@ -184,7 +186,7 @@ class SyncFailureTracker {
                 ORDER BY consecutive_failures DESC, last_failure_time DESC
             `, [this.WARNING_THRESHOLD]);
 
-            const alerts = result.rows.map(row => {
+            const failureAlerts = failureResult.rows.map(row => {
                 const { script_name, license_number, consecutive_failures, last_failure_time, last_error_message } = row;
                 
                 let level = 'warning';
@@ -199,11 +201,59 @@ class SyncFailureTracker {
                     count: consecutive_failures,
                     message: `${level.toUpperCase()}: ${script_name} has failed ${consecutive_failures} times consecutively`,
                     lastFailure: last_failure_time,
-                    lastError: last_error_message
+                    lastError: last_error_message,
+                    alertType: 'consecutive_failures'
                 };
             });
 
-            return alerts;
+            // Get alerts for sync staleness (no success in >1 hour)
+            const stalenessResult = await client.query(`
+                SELECT script_name, license_number, last_success_time
+                FROM sync_failure_tracking 
+                WHERE last_success_time IS NULL 
+                   OR last_success_time < NOW() - INTERVAL '1 hour'
+                ORDER BY last_success_time DESC NULLS LAST
+            `);
+
+            const stalenessAlerts = stalenessResult.rows.map(row => {
+                const { script_name, license_number, last_success_time } = row;
+                
+                // Calculate hours since last success
+                const hoursSinceLastSuccess = last_success_time 
+                    ? Math.floor((Date.now() - new Date(last_success_time).getTime()) / (1000 * 60 * 60))
+                    : null;
+                
+                return {
+                    scriptName: script_name,
+                    licenseNumber: license_number,
+                    level: 'warning',
+                    count: hoursSinceLastSuccess,
+                    message: `STALE: ${script_name} has not had a successful sync in ${hoursSinceLastSuccess || 'N/A'} hour(s)`,
+                    lastSuccess: last_success_time,
+                    lastError: null,
+                    alertType: 'staleness'
+                };
+            });
+
+            // Combine and deduplicate (if a sync has both failure and staleness alerts, keep the critical one)
+            const allAlertsMap = new Map();
+            
+            // Add staleness alerts first
+            stalenessAlerts.forEach(alert => {
+                const key = `${alert.scriptName}_${alert.licenseNumber}`;
+                allAlertsMap.set(key, alert);
+            });
+            
+            // Add failure alerts (overwrite staleness if critical)
+            failureAlerts.forEach(alert => {
+                const key = `${alert.scriptName}_${alert.licenseNumber}`;
+                const existing = allAlertsMap.get(key);
+                if (!existing || alert.level === 'critical') {
+                    allAlertsMap.set(key, alert);
+                }
+            });
+
+            return Array.from(allAlertsMap.values());
 
         } catch (error) {
             console.error('❌ Error getting all alerts:', error.message);

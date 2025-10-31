@@ -7,6 +7,7 @@ const salesRepController = require('../Controllers/crm/salesRepController');
 const productController = require('../Controllers/productController');
 const UserModel = require('../Models/userModel');
 const { requireAuth, requirePermission } = require('../Middleware/auth');
+const syncFailureTracker = require('../Services/syncFailureTracker');
 
 // Apply authentication to all admin routes
 router.use(requireAuth);
@@ -79,6 +80,27 @@ router.get('/audit-logs', requirePermission('admin', 'audit'), (req, res) => {
         layout: 'layouts/main',
         user: req.session.user 
     });
+});
+
+// API endpoint for sync health status (used by dashboard)
+router.get('/api/sync-health', requirePermission('admin', 'dashboard'), async (req, res) => {
+    try {
+        const alerts = await syncFailureTracker.getAllAlerts();
+        const stats = await syncFailureTracker.getFailureStats();
+        
+        res.json({
+            success: true,
+            alerts,
+            stats,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Error fetching sync health:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to fetch sync health status'
+        });
+    }
 });
 
 module.exports = router;

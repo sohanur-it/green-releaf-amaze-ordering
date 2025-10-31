@@ -266,6 +266,17 @@ class MetrcAuthService {
     }
 
     /**
+     * Get the current access token (for direct use in API calls)
+     */
+    async getAccessToken() {
+        const hasValidToken = await this.ensureValidToken();
+        if (!hasValidToken) {
+            throw new Error('Failed to obtain valid METRC authentication token');
+        }
+        return this.accessToken;
+    }
+
+    /**
      * Clear all tokens (for testing or logout)
      */
     async clearTokens() {

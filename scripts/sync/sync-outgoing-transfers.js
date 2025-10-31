@@ -13,14 +13,19 @@
 const axios = require('axios');
 const { Pool } = require('pg');
 const path = require('path');
-const syncFailureTracker = require('../../Server/Services/syncFailureTracker');
 
-// Load environment variables
+// Load environment variables FIRST
 if (process.env.NODE_ENV === 'production') {
     require('dotenv').config({ path: path.join(__dirname, '../../config/production.env') });
 } else {
     require('dotenv').config({ path: path.join(__dirname, '../../config/local.env') });
 }
+
+// Import centralized METRC authentication service AFTER environment variables are loaded
+const metrcAuth = require('../../Server/Services/metrcAuth');
+
+// Import sync failure tracker
+const syncFailureTracker = require('../../Server/Services/syncFailureTracker');
 
 // Database configuration
 const DB_CONFIG = {
@@ -64,47 +69,7 @@ const OUTGOING_TRANSFER_FIELDS = {
 // Create database pool
 const pool = new Pool(DB_CONFIG);
 
-// Authentication token cache
-let authToken = null;
-let tokenExpiry = null;
-
-/**
- * Authenticate with METRC T3 API
- */
-async function authenticateWithMetrc() {
-    try {
-        console.log('🔐 Authenticating with METRC T3 API...');
-        
-        const response = await axios.post(`${METRC_CONFIG.baseURL}/auth/credentials`, {
-            username: METRC_CONFIG.username,
-            password: METRC_CONFIG.password,
-            hostname: METRC_CONFIG.hostname
-        });
-
-        if (response.data && response.data.accessToken) {
-            authToken = response.data.accessToken;
-            tokenExpiry = new Date(Date.now() + (24 * 60 * 60 * 1000)); // 24 hours from now
-            console.log('✅ Authentication successful');
-            return true;
-        } else {
-            throw new Error('Invalid authentication response');
-        }
-    } catch (error) {
-        console.error('❌ Authentication failed:', error.message);
-        if (error.response) {
-            console.error('Response status:', error.response.status);
-            console.error('Response data:', error.response.data);
-        }
-        return false;
-    }
-}
-
-/**
- * Check if authentication token is valid
- */
-function isTokenValid() {
-    return authToken && tokenExpiry && new Date() < tokenExpiry;
-}
+// Using centralized metrcAuth service - no local token cache needed
 
 /**
  * Get the latest lastmodified timestamp from local database
@@ -135,11 +100,10 @@ async function getLatestLastModified(client) {
  */
 async function fetchOutgoingTransfersIncremental(lastModified = null) {
     try {
-        if (!isTokenValid()) {
-            const authSuccess = await authenticateWithMetrc();
-            if (!authSuccess) {
-                throw new Error('Failed to authenticate');
-            }
+        // Ensure we have a valid token before starting
+        const authSuccess = await metrcAuth.ensureValidToken();
+        if (!authSuccess) {
+            throw new Error('Failed to authenticate');
         }
 
         console.log('📡 Fetching outgoing transfers from METRC API (incremental)...');
@@ -175,7 +139,7 @@ async function fetchOutgoingTransfersIncremental(lastModified = null) {
                     
                     const response = await axios.get(`${METRC_CONFIG.baseURL}/transfers/outgoing/active`, {
                         headers: {
-                            'Authorization': `Bearer ${authToken}`,
+                            'Authorization': `Bearer ${await metrcAuth.getAccessToken()}`,
                             'Content-Type': 'application/json'
                         },
                         params: pageParams
@@ -689,6 +653,5 @@ if (require.main === module) {
 
 module.exports = {
     syncOutgoingTransfersEnhanced,
-    fetchOutgoingTransfersIncremental,
-    authenticateWithMetrc
+    fetchOutgoingTransfersIncremental
 };
