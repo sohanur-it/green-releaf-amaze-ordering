@@ -38,6 +38,144 @@
 }
 .alert-item.warning { border-color: #f59e0b; }
 .alert-item.critical { border-color: #ef4444; }
+.sync-history {
+    margin-top: 1.5rem;
+}
+.sync-history-title {
+    font-weight: 600;
+    font-size: 1rem;
+    margin-bottom: 0.75rem;
+    color: #374151;
+}
+.sync-history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.sync-history-item {
+    background: white;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-left: 4px solid;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+.sync-history-item:hover {
+    transform: translateX(4px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+.sync-history-item.success {
+    border-left-color: #10b981;
+    background: #f0fdf4;
+}
+.sync-history-item.failed {
+    border-left-color: #ef4444;
+    background: #fef2f2;
+}
+.sync-history-item-info {
+    flex: 1;
+}
+.sync-history-item-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: #111827;
+    margin-bottom: 0.25rem;
+}
+.sync-history-item-meta {
+    font-size: 0.85rem;
+    color: #6b7280;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+.sync-history-item-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+.sync-history-item-status.success {
+    background: #d1fae5;
+    color: #065f46;
+}
+.sync-history-item-status.failed {
+    background: #fee2e2;
+    color: #991b1b;
+}
+.sync-status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1rem;
+    margin-top: 1.5rem;
+}
+.sync-status-item {
+    background: white;
+    padding: 1rem;
+    border-radius: 8px;
+    border-left: 4px solid;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.sync-status-item.success {
+    border-left-color: #10b981;
+    background: #f0fdf4;
+}
+.sync-status-item.failed {
+    border-left-color: #ef4444;
+    background: #fef2f2;
+}
+.sync-status-item.running {
+    border-left-color: #3b82f6;
+    background: #eff6ff;
+}
+.sync-status-item.unknown {
+    border-left-color: #9ca3af;
+    background: #f9fafb;
+}
+.sync-status-item-info {
+    flex: 1;
+}
+.sync-status-item-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: #111827;
+    margin-bottom: 0.25rem;
+}
+.sync-status-item-details {
+    font-size: 0.85rem;
+    color: #6b7280;
+}
+.sync-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+.sync-status-badge.success {
+    background: #d1fae5;
+    color: #065f46;
+}
+.sync-status-badge.failed {
+    background: #fee2e2;
+    color: #991b1b;
+}
+.sync-status-badge.running {
+    background: #dbeafe;
+    color: #1e40af;
+}
+.sync-status-badge.unknown {
+    background: #f3f4f6;
+    color: #6b7280;
+}
 </style>
 
 <div class="sync-health-card">
@@ -142,32 +280,131 @@ function updateSyncStatus(data) {
     badge.className = `sync-status ${statusClass}`;
     badge.innerHTML = `<i class="fas ${icon}"></i> ${statusText}`;
     
-    // Display alerts if any
-    if (data.alerts.length > 0) {
-        container.innerHTML = `
-            <div class="sync-alerts">
-                ${data.alerts.map(alert => `
-                    <div class="alert-item ${alert.level}">
-                        <div style="font-weight: 600; margin-bottom: 0.5rem;">
-                            ${alert.level === 'critical' ? '<i class="fas fa-exclamation-circle me-1"></i>' : '<i class="fas fa-exclamation-triangle me-1"></i>'}
-                            ${alert.scriptName}
+    // Display all sync statuses
+    let allSyncsHTML = '';
+    if (data.allSyncStatuses && data.allSyncStatuses.length > 0) {
+        allSyncsHTML = `
+            <div class="sync-status-grid">
+                ${data.allSyncStatuses.map(sync => {
+                    const timeAgo = sync.lastSyncTime ? getTimeAgo(new Date(sync.lastSyncTime)) : 'Never';
+                    const duration = sync.duration ? `${sync.duration}s` : '';
+                    const failureInfo = sync.consecutiveFailures > 0 ? `Failed ${sync.consecutiveFailures} time${sync.consecutiveFailures > 1 ? 's' : ''}` : '';
+                    
+                    return `
+                        <div class="sync-status-item ${sync.statusClass}">
+                            <div class="sync-status-item-info">
+                                <div class="sync-status-item-name">${sync.syncName}</div>
+                                <div class="sync-status-item-details">
+                                    ${timeAgo !== 'Never' ? `<span><i class="fas fa-clock me-1"></i>${timeAgo}</span>` : '<span>No sync yet</span>'}
+                                    ${duration ? ` <span class="ms-2"><i class="fas fa-stopwatch me-1"></i>${duration}</span>` : ''}
+                                    ${failureInfo ? ` <span class="ms-2" style="color: #dc2626;"><i class="fas fa-exclamation-triangle me-1"></i>${failureInfo}</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="sync-status-badge ${sync.statusClass}">
+                                <i class="fas ${sync.statusIcon}"></i>
+                                ${sync.status === 'success' ? 'Success' : sync.status === 'failed' ? 'Failed' : sync.status === 'running' ? 'Running' : 'Unknown'}
+                            </div>
                         </div>
-                        <div style="font-size: 0.9rem; color: #6b7280;">
-                            Failed ${alert.count} time${alert.count > 1 ? 's' : ''} consecutively
+                    `;
+                }).join('')}
+            </div>
+        `;
+    }
+
+    // Display critical alerts if any (separate from status grid)
+    let alertsHTML = '';
+    if (data.alerts && data.alerts.length > 0) {
+        alertsHTML = `
+            <div style="margin-top: 1.5rem;">
+                <div style="font-weight: 600; font-size: 1rem; margin-bottom: 0.75rem; color: #dc2626;">
+                    <i class="fas fa-exclamation-triangle me-2"></i>Active Alerts
+                </div>
+                <div class="sync-alerts">
+                    ${data.alerts.map(alert => `
+                        <div class="alert-item ${alert.level}">
+                            <div style="font-weight: 600; margin-bottom: 0.5rem;">
+                                ${alert.level === 'critical' ? '<i class="fas fa-exclamation-circle me-1"></i>' : '<i class="fas fa-exclamation-triangle me-1"></i>'}
+                                ${alert.scriptName}
+                            </div>
+                            <div style="font-size: 0.9rem; color: #6b7280;">
+                                Failed ${alert.count} time${alert.count > 1 ? 's' : ''} consecutively
+                            </div>
+                            ${alert.lastError ? `<div style="font-size: 0.85rem; color: #9ca3af; margin-top: 0.5rem;">${alert.lastError.substring(0, 100)}${alert.lastError.length > 100 ? '...' : ''}</div>` : ''}
                         </div>
-                        ${alert.lastError ? `<div style="font-size: 0.85rem; color: #9ca3af; margin-top: 0.5rem;">${alert.lastError.substring(0, 100)}${alert.lastError.length > 100 ? '...' : ''}</div>` : ''}
-                    </div>
-                `).join('')}
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    }
+
+    // Display recent sync history
+    let historyHTML = '';
+    if (data.recentSyncs && data.recentSyncs.length > 0) {
+        historyHTML = `
+            <div class="sync-history">
+                <div class="sync-history-title">
+                    <i class="fas fa-history me-2"></i>Last 5 Sync Operations
+                </div>
+                <div class="sync-history-list">
+                    ${data.recentSyncs.map(sync => {
+                        const isSuccess = sync.status === 'completed';
+                        const statusClass = isSuccess ? 'success' : 'failed';
+                        const statusIcon = isSuccess ? 'fa-check-circle' : 'fa-times-circle';
+                        const statusText = isSuccess ? 'Success' : 'Failed';
+                        const timeAgo = getTimeAgo(new Date(sync.startTime));
+                        const duration = sync.duration ? `${sync.duration}s` : 'N/A';
+                        
+                        return `
+                            <div class="sync-history-item ${statusClass}">
+                                <div class="sync-history-item-info">
+                                    <div class="sync-history-item-name">${sync.syncName}</div>
+                                    <div class="sync-history-item-meta">
+                                        <span><i class="fas fa-clock me-1"></i>${timeAgo}</span>
+                                        <span><i class="fas fa-stopwatch me-1"></i>${duration}</span>
+                                        ${sync.error ? `<span style="color: #dc2626;"><i class="fas fa-exclamation-triangle me-1"></i>Error</span>` : ''}
+                                    </div>
+                                </div>
+                                <div class="sync-history-item-status ${statusClass}">
+                                    <i class="fas ${statusIcon}"></i>
+                                    ${statusText}
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
             </div>
         `;
     } else {
-        container.innerHTML = '<div style="text-align: center; color: #6b7280; padding: 1rem;"><i class="fas fa-check-circle me-2"></i>No issues detected</div>';
+        historyHTML = '';
     }
+
+    container.innerHTML = allSyncsHTML + alertsHTML + historyHTML;
 }
 
 function showError(message) {
     document.getElementById('syncStatusBadge').className = 'sync-status critical';
     document.getElementById('syncStatusBadge').innerHTML = `<i class="fas fa-times-circle"></i> ${message}`;
+}
+
+function getTimeAgo(date) {
+    const seconds = Math.floor((new Date() - date) / 1000);
+    
+    if (seconds < 60) {
+        return `${seconds} second${seconds !== 1 ? 's' : ''} ago`;
+    }
+    
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) {
+        return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
+    }
+    
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) {
+        return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+    }
+    
+    const days = Math.floor(hours / 24);
+    return `${days} day${days !== 1 ? 's' : ''} ago`;
 }
 
 // Load on page load and refresh every 60 seconds

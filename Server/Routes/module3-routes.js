@@ -1902,23 +1902,110 @@ router.post('/orders/:id/release-allocation', async (req, res) => {
  *                       example: 12
  */
 router.post('/admin/sync/batches', async (req, res) => {
+    const batchSyncService = new BatchSyncService();
+    const { pool } = require('../config/database'); // Use existing pool
+    const syncFailureTracker = require('../Services/syncFailureTracker');
+    let historyId = null;
+    const startTime = Date.now();
+    let client = null;
+    
     try {
-        const batchSyncService = new BatchSyncService();
-        const result = await batchSyncService.syncBatches();
+        // Check authentication (optional - allow both authenticated and system calls)
+        const userId = req.user?.id || req.session?.userId || null;
+        const licenseNumber = process.env.SYNC_LICENSE || 'CUL000063';
+        
+        // Create sync history entry
+        client = await pool.connect();
+        try {
+            const historyResult = await client.query(`
+                INSERT INTO sync_history (license_number, sync_type, start_time, status, user_id, script_name)
+                VALUES ($1, $2, NOW(), 'started', $3, $4)
+                RETURNING id
+            `, [licenseNumber, 'batches', userId, 'sync-batches-api']);
+            historyId = historyResult.rows[0].id;
+        } catch (historyError) {
+            console.error('⚠️ Failed to create sync history:', historyError.message);
+        }
+        
+        // Run batch sync with timeout protection
+        console.log('🔄 Starting batch sync via API...');
+        const syncPromise = batchSyncService.syncBatches();
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Batch sync timeout after 5 minutes')), 300000); // 5 minutes
+        });
+        
+        const result = await Promise.race([syncPromise, timeoutPromise]);
         await batchSyncService.close();
+        
+        const duration = Date.now() - startTime;
+        
+        // Update sync history on success
+        if (historyId && client) {
+            try {
+                const scriptOutput = `Batch sync completed: ${result.changes.new} new, ${result.changes.updated} updated, ${result.changes.removed} removed, ${result.changes.packageChanges} package changes`;
+                await client.query(`
+                    UPDATE sync_history 
+                    SET end_time = NOW(), status = 'completed', duration_ms = $1, script_output = $2
+                    WHERE id = $3
+                `, [duration, scriptOutput, historyId]);
+            } catch (updateError) {
+                console.error('⚠️ Failed to update sync history:', updateError.message);
+            }
+        }
+        
+        // Record success
+        try {
+            await syncFailureTracker.recordSuccess('sync-batches', licenseNumber);
+        } catch (trackError) {
+            console.error('⚠️ Failed to record success:', trackError.message);
+        }
 
+        console.log('✅ Batch sync completed successfully via API');
         res.json({
             success: true,
-            duration_ms: result.duration,
+            duration_ms: duration,
             changes: result.changes
         });
 
     } catch (error) {
-        console.error('Error running batch sync:', error.message);
+        const duration = Date.now() - startTime;
+        const errorMessage = error.message || 'Unknown error';
+        const licenseNumber = process.env.SYNC_LICENSE || 'CUL000063';
+        
+        // Update sync history on failure
+        if (historyId && client) {
+            try {
+                await client.query(`
+                    UPDATE sync_history 
+                    SET end_time = NOW(), status = 'failed', duration_ms = $1, script_error_output = $2
+                    WHERE id = $3
+                `, [duration, errorMessage, historyId]);
+            } catch (updateError) {
+                console.error('⚠️ Failed to update sync history:', updateError.message);
+            }
+        }
+        
+        // Record failure
+        try {
+            await syncFailureTracker.recordFailure('sync-batches', errorMessage, licenseNumber);
+        } catch (trackError) {
+            console.error('⚠️ Failed to record failure:', trackError.message);
+        }
+        
+        console.error('❌ Error running batch sync:', errorMessage);
         res.status(500).json({
             success: false,
-            error: error.message
+            error: errorMessage
         });
+    } finally {
+        if (client) {
+            client.release();
+        }
+        try {
+            await batchSyncService.close();
+        } catch (closeError) {
+            // Ignore close errors
+        }
     }
 });
 

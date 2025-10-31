@@ -294,6 +294,230 @@ class SyncFailureTracker {
             client.release();
         }
     }
+
+    /**
+     * Get status for all sync types
+     * @returns {Array} Array of sync status objects for all sync types
+     */
+    async getAllSyncStatuses() {
+        const client = await pool.connect();
+        try {
+            // Map all sync types
+            const syncTypes = [
+                { type: 'active_packages', name: 'Active Packages', script: 'sync-active-packages' },
+                { type: 'transferred_packages', name: 'Transferred Packages', script: 'sync-transferred-packages' },
+                { type: 'intransit_packages', name: 'In-Transit Packages', script: 'sync-intransit-packages' },
+                { type: 'outgoing_transfers', name: 'Outgoing Transfers', script: 'sync-outgoing-transfers' },
+                { type: 'items', name: 'Items', script: 'sync-items' },
+                { type: 'strains', name: 'Strains', script: 'sync-strains' },
+                { type: 'batches', name: 'Batches', script: 'sync-batches' }
+            ];
+
+            // Get last sync for each type (convert stuck 'started' status to 'failed')
+            // Different thresholds for different sync types based on expected duration
+            const syncTypeList = ['active_packages', 'transferred_packages', 'intransit_packages', 'outgoing_transfers', 'items', 'strains', 'batches'];
+            const lastSyncsResult = await client.query(`
+                SELECT DISTINCT ON (sync_type)
+                    sync_type,
+                    status,
+                    start_time,
+                    duration_ms,
+                    script_error_output,
+                    CASE 
+                        -- Transferred packages can be very long, allow up to 30 minutes
+                        WHEN status = 'started' AND sync_type = 'transferred_packages' 
+                             AND start_time < NOW() - INTERVAL '30 minutes' THEN 'failed'
+                        -- Other syncs should complete faster, allow up to 15 minutes
+                        WHEN status = 'started' AND start_time < NOW() - INTERVAL '15 minutes' THEN 'failed'
+                        ELSE status
+                    END as effective_status
+                FROM sync_history
+                WHERE sync_type = ANY($1)
+                ORDER BY sync_type, start_time DESC
+            `, [syncTypeList]);
+
+            // Create a map of last sync results
+            const lastSyncMap = new Map();
+            lastSyncsResult.rows.forEach(row => {
+                // Use effective_status to handle old stuck 'started' entries
+                const finalStatus = row.effective_status || row.status;
+                lastSyncMap.set(row.sync_type, {
+                    status: finalStatus, // This will be 'failed' if old 'started' entry
+                    originalStatus: row.status, // Original status from DB
+                    syncType: row.sync_type, // Store sync type for age checks
+                    startTime: row.start_time,
+                    duration: row.duration_ms ? Math.round(row.duration_ms / 1000) : null,
+                    error: row.script_error_output ? row.script_error_output.substring(0, 200) : null
+                });
+            });
+
+            // Get failure tracking data
+            const scriptNameList = ['sync-active-packages', 'sync-transferred-packages', 'sync-intransit-packages', 'sync-outgoing-transfers', 'sync-items', 'sync-strains', 'sync-batches'];
+            const failureResult = await client.query(`
+                SELECT script_name, consecutive_failures, last_failure_time, last_success_time, last_error_message
+                FROM sync_failure_tracking
+                WHERE script_name = ANY($1)
+            `, [scriptNameList]);
+
+            const failureMap = new Map();
+            failureResult.rows.forEach(row => {
+                failureMap.set(row.script_name, {
+                    consecutiveFailures: row.consecutive_failures,
+                    lastFailureTime: row.last_failure_time,
+                    lastSuccessTime: row.last_success_time,
+                    lastError: row.last_error_message
+                });
+            });
+
+            // Combine data for all sync types
+            return syncTypes.map(syncType => {
+                const lastSync = lastSyncMap.get(syncType.type) || null;
+                const failureData = failureMap.get(syncType.script) || { 
+                    consecutiveFailures: 0, 
+                    lastFailureTime: null, 
+                    lastSuccessTime: null,
+                    lastError: null
+                };
+
+                // Determine overall status
+                let status = 'unknown';
+                let statusIcon = 'fa-question-circle';
+                let statusClass = 'unknown';
+                
+                if (lastSync) {
+                    // Use effective_status (query converts old 'started' to 'failed')
+                    // The status here is already the effective_status from the query
+                    if (lastSync.status === 'completed') {
+                        status = 'success';
+                        statusIcon = 'fa-check-circle';
+                        statusClass = 'success';
+                    } else if (lastSync.status === 'failed') {
+                        status = 'failed';
+                        statusIcon = 'fa-times-circle';
+                        statusClass = 'failed';
+                        // If it was originally 'started' but converted to 'failed' due to age
+                        if (lastSync.originalStatus === 'started') {
+                            const syncAge = Date.now() - new Date(lastSync.startTime).getTime();
+                            const ageMinutes = Math.round(syncAge / 60000);
+                            if (!lastSync.error) {
+                                lastSync.error = `Sync appears stuck (started ${ageMinutes} minutes ago, never completed)`;
+                            }
+                        }
+                    } else if (lastSync.status === 'started' || lastSync.originalStatus === 'started') {
+                        // This means it's actually running (recent, within threshold)
+                        // Check if it's been running too long
+                        const syncAge = Date.now() - new Date(lastSync.startTime).getTime();
+                        // Transferred packages can take longer, others should be faster
+                        const maxAge = syncType.type === 'transferred_packages' 
+                            ? 30 * 60 * 1000  // 30 minutes for transferred packages
+                            : 15 * 60 * 1000; // 15 minutes for other syncs
+                        
+                        if (syncAge > maxAge) {
+                            // Running too long, treat as stuck/failed
+                            status = 'failed';
+                            statusIcon = 'fa-times-circle';
+                            statusClass = 'failed';
+                            if (!lastSync.error) {
+                                lastSync.error = `Sync appears stuck (running for ${Math.round(syncAge / 60000)} minutes)`;
+                            }
+                        } else {
+                            status = 'running';
+                            statusIcon = 'fa-spinner fa-spin';
+                            statusClass = 'running';
+                        }
+                    }
+                } else if (failureData.consecutiveFailures > 0) {
+                    status = 'failed';
+                    statusIcon = 'fa-times-circle';
+                    statusClass = 'failed';
+                } else if (failureData.lastSuccessTime) {
+                    status = 'success';
+                    statusIcon = 'fa-check-circle';
+                    statusClass = 'success';
+                }
+
+                return {
+                    syncType: syncType.type,
+                    syncName: syncType.name,
+                    scriptName: syncType.script,
+                    status: status,
+                    statusClass: statusClass,
+                    statusIcon: statusIcon,
+                    lastSyncTime: lastSync ? lastSync.startTime : (failureData.lastSuccessTime || failureData.lastFailureTime),
+                    lastSyncStatus: lastSync ? lastSync.status : null,
+                    duration: lastSync ? lastSync.duration : null,
+                    consecutiveFailures: failureData.consecutiveFailures,
+                    lastError: failureData.lastError || (lastSync ? lastSync.error : null),
+                    hasRecentActivity: lastSync !== null || failureData.lastSuccessTime !== null || failureData.lastFailureTime !== null
+                };
+            });
+
+        } catch (error) {
+            console.error('❌ Error getting all sync statuses:', error.message);
+            return [];
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Get last N sync operations from sync_history
+     * @param {number} limit - Number of recent syncs to retrieve (default: 5)
+     * @returns {Array} Array of sync history objects
+     */
+    async getRecentSyncHistory(limit = 5) {
+        const client = await pool.connect();
+        try {
+            // Map sync_type to friendly names
+            const syncTypeMap = {
+                'active_packages': 'Active Packages',
+                'transferred_packages': 'Transferred Packages',
+                'intransit_packages': 'In-Transit Packages',
+                'outgoing_transfers': 'Outgoing Transfers',
+                'items': 'Items',
+                'strains': 'Strains',
+                'batches': 'Batches'
+            };
+
+            const result = await client.query(`
+                SELECT 
+                    id,
+                    sync_type,
+                    script_name,
+                    start_time,
+                    status,
+                    duration_ms,
+                    script_error_output
+                FROM sync_history
+                WHERE status IN ('completed', 'failed')
+                ORDER BY start_time DESC
+                LIMIT $1
+            `, [limit]);
+
+            return result.rows.map(row => {
+                const syncType = row.sync_type;
+                const friendlyName = syncTypeMap[syncType] || syncType;
+                
+                return {
+                    id: row.id,
+                    syncType: syncType,
+                    syncName: friendlyName,
+                    scriptName: row.script_name,
+                    startTime: row.start_time,
+                    status: row.status, // 'completed' or 'failed'
+                    duration: row.duration_ms ? Math.round(row.duration_ms / 1000) : null, // Convert to seconds
+                    error: row.script_error_output ? row.script_error_output.substring(0, 200) : null
+                };
+            });
+
+        } catch (error) {
+            console.error('❌ Error getting recent sync history:', error.message);
+            // If sync_history table doesn't exist, return empty array
+            return [];
+        } finally {
+            client.release();
+        }
+    }
 }
 
 module.exports = new SyncFailureTracker();

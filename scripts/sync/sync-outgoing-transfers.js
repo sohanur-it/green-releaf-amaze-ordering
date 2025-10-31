@@ -137,12 +137,12 @@ async function fetchOutgoingTransfersIncremental(lastModified = null) {
                         pageSize: pageSize
                     };
                     
-                    const response = await axios.get(`${METRC_CONFIG.baseURL}/transfers/outgoing/active`, {
-                        headers: {
-                            'Authorization': `Bearer ${await metrcAuth.getAccessToken()}`,
-                            'Content-Type': 'application/json'
-                        },
-                        params: pageParams
+                    // Use makeAuthenticatedRequest instead of getAccessToken
+                    const response = await metrcAuth.makeAuthenticatedRequest({
+                        method: 'GET',
+                        url: `${metrcAuth.apiBaseUrl}/transfers/outgoing/active`,
+                        params: pageParams,
+                        timeout: 30000
                     });
 
                     if (response.data && response.data.data) {

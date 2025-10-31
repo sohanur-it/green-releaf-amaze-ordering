@@ -87,11 +87,15 @@ router.get('/api/sync-health', requirePermission('admin', 'dashboard'), async (r
     try {
         const alerts = await syncFailureTracker.getAllAlerts();
         const stats = await syncFailureTracker.getFailureStats();
+        const recentSyncs = await syncFailureTracker.getRecentSyncHistory(5);
+        const allSyncStatuses = await syncFailureTracker.getAllSyncStatuses();
         
         res.json({
             success: true,
             alerts,
             stats,
+            recentSyncs,
+            allSyncStatuses,
             timestamp: new Date().toISOString()
         });
     } catch (error) {

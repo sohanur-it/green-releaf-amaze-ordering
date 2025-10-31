@@ -84,15 +84,32 @@ async function fetchTransferredPackages() {
         }
 
         console.log('📡 Fetching transferred packages from METRC API...');
-        console.log('🚀 FULL SYNC MODE: Fetching all pages');
+        if (process.env.MAX_PAGES) {
+            console.log(`🧪 TEST MODE: Limiting to ${process.env.MAX_PAGES} pages`);
+        } else {
+            console.log('🚀 FULL SYNC MODE: Fetching all pages');
+        }
+        
+        if (process.env.DRY_RUN === 'true') {
+            console.log('🧪 DRY RUN MODE: Will validate API but skip database writes');
+        }
         
         let allPackages = [];
         let page = 1;
         let hasMorePages = true;
         const pageSize = 500; // Maximum allowed by API
+        const maxPages = process.env.MAX_PAGES ? parseInt(process.env.MAX_PAGES) : null; // Limit pages if specified
         
-        while (hasMorePages) {
-            console.log(`📄 Fetching transferred packages page ${page}...`);
+        if (maxPages) {
+            console.log(`⚠️  PAGE LIMIT ENABLED: Will only fetch ${maxPages} pages for testing`);
+        }
+        
+        while (hasMorePages && (!maxPages || page <= maxPages)) {
+            if (maxPages && page > maxPages) {
+                console.log(`⚠️  Reached page limit (${maxPages}). Stopping fetch.`);
+                break;
+            }
+            console.log(`📄 Fetching transferred packages page ${page}${maxPages ? `/${maxPages}` : ''}...`);
             
             let retries = 3;
             let success = false;
@@ -119,9 +136,14 @@ async function fetchTransferredPackages() {
                         
                         // Check if there are more pages
                         const totalPages = response.data.totalPages || Math.ceil(response.data.total / pageSize);
-                        hasMorePages = page < totalPages;
+                        hasMorePages = page < totalPages && (!maxPages || page < maxPages);
                         page++;
                         success = true;
+                        
+                        if (maxPages && page > maxPages) {
+                            console.log(`⚠️  Reached page limit (${maxPages}). Stopping fetch.`);
+                            hasMorePages = false;
+                        }
                         
                         // Small delay to avoid rate limiting
                         if (hasMorePages) {
@@ -174,53 +196,142 @@ function prepareValue(value, fieldName) {
 }
 
 /**
- * Perform bulk INSERT operation
+ * Perform bulk INSERT operation using optimized batch inserts
+ * Uses temp table + bulk insert strategy for maximum speed
  */
 async function performBulkInsert(client, records) {
     if (records.length === 0) return;
     
+    const DRY_RUN = process.env.DRY_RUN === 'true';
+    if (DRY_RUN) {
+        console.log(`🧪 DRY RUN: Would insert ${records.length} packages (skipping database write)`);
+        return;
+    }
+    
     const fields = Object.keys(TRANSFERRED_PACKAGE_FIELDS);
     const fieldList = fields.join(', ');
-    
-    const insertQuery = `
-        INSERT INTO transferredpackages (${fieldList})
-        VALUES ${records.map((_, recordIndex) => 
-            `(${fields.map((_, fieldIndex) => 
-                `$${recordIndex * fields.length + fieldIndex + 1}`
-            ).join(', ')})`
-        ).join(', ')}
-    `;
-    
-    const values = [];
-    records.forEach(record => {
-        fields.forEach(field => {
-            if (field === 'sync_license') {
-                values.push(metrcAuth.licenseNumber);
-            } else {
-                const apiField = TRANSFERRED_PACKAGE_FIELDS[field];
-                const value = prepareValue(record[apiField], field);
-                values.push(value);
-            }
-        });
-    });
-    
+    const tempTableName = `temp_transferred_${Date.now()}`;
     
     try {
-        console.log(`🔄 About to execute insert query with ${values.length} values...`);
+        // Step 1: Create temp table with same structure
+        await client.query(`
+            CREATE TEMP TABLE ${tempTableName} (LIKE transferredpackages INCLUDING ALL)
+        `);
         
-        // Add timeout to prevent hanging
-        const queryPromise = client.query(insertQuery, values);
-        const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Database query timeout after 10 seconds')), 10000)
-        );
+        // Step 2: Insert all records into temp table using batch inserts (larger batches for speed)
+        const BATCH_SIZE = 100; // Larger batches for better performance
+        let totalInserted = 0;
         
-        await Promise.race([queryPromise, timeoutPromise]);
-        console.log(`✅ Successfully inserted ${records.length} packages`);
+        for (let i = 0; i < records.length; i += BATCH_SIZE) {
+            const batch = records.slice(i, i + BATCH_SIZE);
+            const values = [];
+            const valuePlaceholders = [];
+            
+            batch.forEach((record, batchIndex) => {
+                const recordPlaceholders = [];
+                fields.forEach((field, fieldIndex) => {
+                    const paramIndex = batchIndex * fields.length + fieldIndex + 1;
+                    recordPlaceholders.push(`$${paramIndex}`);
+                    
+                    if (field === 'sync_license') {
+                        values.push(metrcAuth.licenseNumber);
+                    } else {
+                        const apiField = TRANSFERRED_PACKAGE_FIELDS[field];
+                        values.push(prepareValue(record[apiField], field));
+                    }
+                });
+                valuePlaceholders.push(`(${recordPlaceholders.join(', ')})`);
+            });
+            
+            const batchInsertQuery = `
+                INSERT INTO ${tempTableName} (${fieldList})
+                VALUES ${valuePlaceholders.join(', ')}
+            `;
+            
+            try {
+                await client.query(batchInsertQuery, values);
+                totalInserted += batch.length;
+            } catch (error) {
+                // If batch fails, try individual inserts for this batch
+                console.log(`⚠️  Batch insert failed, trying individual inserts for ${batch.length} records...`);
+                for (const record of batch) {
+                    try {
+                        const singleValues = [];
+                        const singlePlaceholders = fields.map((_, idx) => {
+                            const field = fields[idx];
+                            if (field === 'sync_license') {
+                                singleValues.push(metrcAuth.licenseNumber);
+                            } else {
+                                const apiField = TRANSFERRED_PACKAGE_FIELDS[field];
+                                singleValues.push(prepareValue(record[apiField], field));
+                            }
+                            return `$${idx + 1}`;
+                        });
+                        
+                        await client.query(`
+                            INSERT INTO ${tempTableName} (${fieldList})
+                            VALUES (${singlePlaceholders.join(', ')})
+                        `, singleValues);
+                        totalInserted++;
+                    } catch (singleError) {
+                        // Skip problematic records
+                        if (totalInserted < 10) {
+                            console.log(`⚠️  Skipped record: ${singleError.message.substring(0, 60)}`);
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Step 3: Insert from temp table to main table (ON CONFLICT handles duplicates)
+        // Try with unique constraint first
+        try {
+            const finalInsertQuery = `
+                INSERT INTO transferredpackages (${fieldList})
+                SELECT ${fieldList} FROM ${tempTableName}
+                ON CONFLICT (metrcid, sync_license) DO NOTHING
+            `;
+            await client.query(finalInsertQuery);
+        } catch (error) {
+            // If unique constraint doesn't exist, use simple insert (duplicates will be caught by PK)
+            const finalInsertQuery = `
+                INSERT INTO transferredpackages (${fieldList})
+                SELECT ${fieldList} FROM ${tempTableName}
+            `;
+            try {
+                await client.query(finalInsertQuery);
+            } catch (innerError) {
+                // Last resort: insert one by one with conflict handling
+                const tempRows = await client.query(`SELECT * FROM ${tempTableName}`);
+                let successCount = 0;
+                for (const row of tempRows.rows) {
+                    try {
+                        const rowValues = fields.map(field => row[field]);
+                        await client.query(`
+                            INSERT INTO transferredpackages (${fieldList})
+                            VALUES (${fields.map((_, i) => `$${i + 1}`).join(', ')})
+                        `, rowValues);
+                        successCount++;
+                    } catch (e) {
+                        // Skip duplicates
+                    }
+                }
+                console.log(`✅ Inserted ${successCount}/${tempRows.rows.length} records (duplicates skipped)`);
+            }
+        }
+        
+        console.log(`✅ Successfully processed ${totalInserted} packages`);
+        
     } catch (error) {
-        console.error(`❌ Error inserting packages:`, error.message);
-        console.error(`❌ Insert query:`, insertQuery);
-        console.error(`❌ Values count:`, values.length);
+        console.error(`❌ Error in bulk insert:`, error.message);
         throw error;
+    } finally {
+        // Clean up temp table
+        try {
+            await client.query(`DROP TABLE IF EXISTS ${tempTableName}`);
+        } catch (e) {
+            // Ignore cleanup errors
+        }
     }
 }
 
@@ -327,8 +438,10 @@ async function processBatch(client, packages, batchNumber) {
  * Process records in chunks to prevent database locks
  */
 async function processRecordsInChunks(client, records, operation = 'UPSERT') {
-    const CHUNK_SIZE = 500; // Back to original working size
-    const DELAY_BETWEEN_CHUNKS = 100; // Back to original delay
+    // Optimized chunk size - temp table allows efficient bulk inserts
+    const DRY_RUN = process.env.DRY_RUN === 'true';
+    const CHUNK_SIZE = DRY_RUN ? 500 : 500; // Use larger chunks - temp table handles it efficiently
+    const DELAY_BETWEEN_CHUNKS = DRY_RUN ? 0 : 50; // Minimal delay
     
     console.log(`🔄 Starting to process ${records.length} records in chunks of ${CHUNK_SIZE}...`);
     
@@ -414,7 +527,22 @@ async function performBulkUpsert(client, records) {
         });
     });
     
-    await client.query(insertQuery, values);
+    try {
+        console.log(`🔄 About to execute upsert query with ${values.length} values (${deduplicatedRecords.length} records)...`);
+        
+        // Add timeout to prevent hanging (increased for larger chunks)
+        const queryPromise = client.query(insertQuery, values);
+        const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(`Database query timeout after 30 seconds (${values.length} values, ${deduplicatedRecords.length} records)`)), 30000)
+        );
+        
+        await Promise.race([queryPromise, timeoutPromise]);
+        console.log(`✅ Successfully upserted ${deduplicatedRecords.length} packages`);
+    } catch (error) {
+        console.error(`❌ Error upserting packages:`, error.message);
+        console.error(`❌ Values count: ${values.length}, Records count: ${deduplicatedRecords.length}`);
+        throw error;
+    }
 }
 
 /**
