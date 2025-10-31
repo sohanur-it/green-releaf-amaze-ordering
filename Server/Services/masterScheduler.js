@@ -54,7 +54,7 @@ class MasterScheduler {
             {
                 name: 'transferredPackages',
                 description: 'Transferred Packages Sync (Incremental)',
-                schedule: '*/10 8-18 * * 1-5', // Every 10 minutes, 8 AM - 6 PM, weekdays
+                schedule: '0 8-18 * * 1-5', // Every hour at :00, 8 AM - 6 PM, weekdays
                 script: 'sync:transferred:prod',
                 enabled: true,
                 lastRun: null,

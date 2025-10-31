@@ -46,9 +46,9 @@ const SCHEDULE_CONFIG = {
         description: 'Outgoing Transfers Sync (Incremental)'
     },
     
-    // Transferred Packages - Incremental Sync (every 10 minutes)
+    // Transferred Packages - Incremental Sync (once per hour)
     transferredPackages: {
-        schedule: '*/10 8-18 * * 1-5', // Every 10 minutes, 8 AM - 6 PM, Mon-Fri
+        schedule: '0 8-18 * * 1-5', // Every hour at :00, 8 AM - 6 PM, Mon-Fri
         script: 'sync:transferred:prod',
         description: 'Transferred Packages Sync (Incremental)'
     },
