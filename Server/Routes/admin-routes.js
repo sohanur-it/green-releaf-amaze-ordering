@@ -5,6 +5,7 @@ const router = express.Router();
 const buyerController = require('../Controllers/crm/buyerController');
 const salesRepController = require('../Controllers/crm/salesRepController');
 const productController = require('../Controllers/productController');
+const portalAccessController = require('../Controllers/portalAccessController');
 const UserModel = require('../Models/userModel');
 const { requireAuth, requirePermission } = require('../Middleware/auth');
 const syncFailureTracker = require('../Services/syncFailureTracker');
@@ -81,6 +82,25 @@ router.get('/audit-logs', requirePermission('admin', 'audit'), (req, res) => {
         user: req.session.user 
     });
 });
+
+// =============================================
+// PORTAL ACCESS MANAGEMENT ROUTES (Module 4)
+// =============================================
+
+// List portal access links
+router.get('/portal-access', requirePermission('admin', 'buyers'), portalAccessController.list);
+
+// Create new portal access
+router.post('/api/portal-access', requirePermission('admin', 'buyers'), portalAccessController.create);
+
+// Toggle portal access active status
+router.post('/api/portal-access/:id/toggle', requirePermission('admin', 'buyers'), portalAccessController.toggleActive);
+
+// Delete portal access
+router.delete('/api/portal-access/:id', requirePermission('admin', 'buyers'), portalAccessController.delete);
+
+// Get portal URL
+router.get('/api/portal-access/:id/url', requirePermission('admin', 'buyers'), portalAccessController.getUrl);
 
 // API endpoint for sync health status (used by dashboard)
 router.get('/api/sync-health', requirePermission('admin', 'dashboard'), async (req, res) => {

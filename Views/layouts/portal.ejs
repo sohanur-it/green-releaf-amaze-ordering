@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Green Releaf - <%= title %></title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/public/css/portal-white-theme.css">
+    <link rel="stylesheet" href="/public/css/notifications.css">
+</head>
+<body>
+    <header class="portal-header">
+        <div class="portal-header-left"></div>
+        <div class="portal-header-right">
+            <button class="header-icon" title="Help">
+                <i class="fas fa-lightbulb"></i>
+            </button>
+            <button class="header-icon" title="Support">
+                <i class="fas fa-comments"></i>
+            </button>
+            <button class="header-icon" title="Location">
+                <i class="fas fa-map-marker-alt"></i>
+            </button>
+            <span class="header-text">Green Releaf:</span>
+            <div class="header-dropdown">
+                Open Cart ▼
+            </div>
+            <button id="cart-toggle" class="header-icon" title="Cart">
+                <i class="fas fa-shopping-cart"></i>
+                <span id="cart-count-badge" style="display:inline-block;min-width:18px;height:18px;border-radius:9px;background:#4ade80;color:#fff;font-size:11px;line-height:18px;text-align:center;margin-left:6px;">0</span>
+            </button>
+        </div>
+    </header>
+
+    <div class="amaze-header-section">
+        <div class="amaze-branding">
+            <div class="amaze-logo">GR</div>
+            <div class="amaze-text">
+                <div class="amaze-title">AMAZE</div>
+                <div class="amaze-subtitle">CANNABIS</div>
+            </div>
+        </div>
+    </div>
+
+    <%- typeof body !== 'undefined' ? body : '' %>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="/public/js/shared/notifications.js"></script>
+    <script src="/public/js/portal.js"></script>
+</body>
+</html>
+

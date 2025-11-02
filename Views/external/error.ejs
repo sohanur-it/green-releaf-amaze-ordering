@@ -1,0 +1,27 @@
+<div class="portal-main-container">
+    <div style="display: flex; align-items: center; justify-content: center; min-height: 60vh; flex-direction: column;">
+        <div style="text-align: center; max-width: 600px; padding: 40px;">
+            <div style="font-size: 64px; margin-bottom: 24px;">⚠️</div>
+            <h1 style="font-size: 28px; font-weight: 700; margin-bottom: 16px; color: var(--portal-text-white);">
+                <%= typeof error !== 'undefined' ? error : 'Error' %>
+            </h1>
+            <p style="font-size: 16px; color: var(--portal-text-light); margin-bottom: 32px;">
+                <%= typeof message !== 'undefined' ? message : 'An unexpected error occurred' %>
+            </p>
+            <button onclick="history.back()" style="
+                background-color: var(--portal-accent-green);
+                border: none;
+                border-radius: 8px;
+                padding: 14px 28px;
+                font-size: 16px;
+                font-weight: 600;
+                color: white;
+                cursor: pointer;
+                transition: background-color 0.2s;
+            ">
+                Go Back
+            </button>
+        </div>
+    </div>
+</div>
+

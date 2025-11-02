@@ -1,0 +1,1679 @@
+
+<div class="portal-main-container">
+    <!-- Filter Sidebar (Left) -->
+    <div class="filter-sidebar">
+        <div class="sidebar-header">
+            <h3>Filters</h3>
+            <button class="toggle-sidebar-btn" onclick="toggleSidebar()">
+                <i class="fas fa-chevron-left"></i>
+            </button>
+        </div>
+        
+        <div class="sidebar-content">
+            <!-- Categories Filter -->
+            <div class="filter-section">
+                <div class="filter-section-header" onclick="toggleFilterSection(this)">
+                    <div class="filter-icon"><i class="fas fa-layer-group"></i></div>
+                    <span>Categories</span>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="filter-options">
+                    <label class="filter-checkbox">
+                        <input type="checkbox" name="category" value="Cartridge">
+                        <span>Cartridges</span>
+                    </label>
+                    <label class="filter-checkbox">
+                        <input type="checkbox" name="category" value="Extract">
+                        <span>Extracts</span>
+                    </label>
+                    <label class="filter-checkbox">
+                        <input type="checkbox" name="category" value="Flower">
+                        <span>Flower - Prepackaged</span>
+                    </label>
+                    <label class="filter-checkbox">
+                        <input type="checkbox" name="category" value="Preroll">
+                        <span>Prerolls</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Featured Products -->
+            <div class="filter-section">
+                <div class="filter-section-header" onclick="toggleFilterSection(this)">
+                    <div class="filter-icon"><i class="fas fa-star"></i></div>
+                    <span>Featured Products</span>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="filter-options">
+                    <label class="filter-checkbox">
+                        <input type="checkbox" name="featured">
+                        <span>Featured Products</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Strain Type Filter -->
+            <div class="filter-section">
+                <div class="filter-section-header" onclick="toggleFilterSection(this)">
+                    <div class="filter-icon"><i class="fas fa-leaf"></i></div>
+                    <span>Strain Type</span>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="filter-options">
+                    <label class="filter-checkbox">
+                        <input type="checkbox" name="strain" value="Hybrid">
+                        <span>Hybrid</span>
+                    </label>
+                    <label class="filter-checkbox">
+                        <input type="checkbox" name="strain" value="Indica">
+                        <span>Indica</span>
+                    </label>
+                    <label class="filter-checkbox">
+                        <input type="checkbox" name="strain" value="Indica Dom. Hybrid">
+                        <span>Indica Dom. Hybrid</span>
+                    </label>
+                    <label class="filter-checkbox">
+                        <input type="checkbox" name="strain" value="Sativa">
+                        <span>Sativa</span>
+                    </label>
+                    <label class="filter-checkbox">
+                        <input type="checkbox" name="strain" value="Sativa Dom. Hybrid">
+                        <span>Sativa Dom. Hybrid</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Brands Filter -->
+            <div class="filter-section">
+                <div class="filter-section-header" onclick="toggleFilterSection(this)">
+                    <div class="filter-icon"><i class="fas fa-gem"></i></div>
+                    <span>Brands</span>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="filter-options" id="brand-filters">
+                    <!-- Will be populated dynamically from products -->
+                </div>
+            </div>
+            
+            <!-- Cannabinoids Filter -->
+            <div class="filter-section">
+                <div class="filter-section-header" onclick="toggleFilterSection(this)">
+                    <div class="filter-icon"><i class="fas fa-pills"></i></div>
+                    <span>Cannabinoids</span>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="filter-options">
+                    <label class="filter-checkbox">
+                        <input type="checkbox" name="cannabinoid" value="TAC">
+                        <span>TAC</span>
+                    </label>
+                    <label class="filter-checkbox">
+                        <input type="checkbox" name="cannabinoid" value="THC">
+                        <span>THC</span>
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Potency Filter -->
+            <div class="filter-section">
+                <div class="filter-section-header" onclick="toggleFilterSection(this)">
+                    <div class="filter-icon"><i class="fas fa-sliders-h"></i></div>
+                    <span>Potency</span>
+                    <i class="fas fa-chevron-down"></i>
+                </div>
+                <div class="filter-options">
+                    <div class="potency-controls">
+                        <div class="potency-toggle">
+                            <button class="toggle-btn active" onclick="togglePotencyUnit(this, '%')">%</button>
+                            <button class="toggle-btn" onclick="togglePotencyUnit(this, 'Mg')">Mg</button>
+                        </div>
+                        <div class="range-inputs">
+                            <input type="number" id="min-potency" value="0" min="0">
+                            <input type="range" id="potency-range" min="0" max="100" value="100">
+                            <input type="number" id="max-potency" value="100" min="0">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Product Catalog Section (Right) -->
+    <div class="portal-catalog">
+        <div class="catalog-header">
+            <div class="catalog-header-left">
+                <button class="catalog-sidebar-toggle" id="inline-sidebar-toggle" title="Toggle Filters">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <h2>Category: All Products (<span id="product-count"><%= products.reduce((sum, p) => sum + (p.available_batches?.length || 0), 0) %></span>)</h2>
+            </div>
+            <div class="catalog-header-right">
+                <button class="catalog-header-icon" title="Search">
+                    <i class="fas fa-search"></i>
+                </button>
+                <div class="view-toggle">
+                    <button class="view-btn active" data-view="grid" onclick="switchView('grid')">
+                        <i class="fas fa-th"></i> Grid
+                    </button>
+                    <button class="view-btn" data-view="table" onclick="switchView('table')">
+                        <i class="fas fa-table"></i> Table
+                    </button>
+                </div>
+                <button class="contact-sales-catalog-btn">
+                    <i class="fas fa-envelope"></i> Contact Sales
+                </button>
+            </div>
+        </div>
+        
+        <!-- Grid View -->
+        <div class="product-grid-view" id="grid-view">
+            <% products.forEach(product => { %>
+                <% if (product.available_batches && product.available_batches.length > 0) { %>
+                    <% product.available_batches.forEach(batch => { %>
+                        <div class="product-card product-card-clickable"
+                             data-product-id="<%= product.product_id %>"
+                             data-product-name="<%= product.product_name %>"
+                             data-cultivar-name="<%= product.cultivar_name %>"
+                             data-brand-name="<%= product.brand_name %>"
+                             data-category-name="<%= product.category_name %>"
+                             data-product-type="<%= product.product_type %>"
+                             data-description="<%= product.product_description || '' %>"
+                             data-unit-size="<%= product.unit_size %>"
+                             data-sold-as="<%= product.sold_as %>"
+                             data-units-per-case="<%= product.units_per_case || 24 %>"
+                             data-batch-id="<%= batch.batch_id %>"
+                             data-batch-name="<%= batch.batch_name %>"
+                             data-production-date="<%= batch.production_date || '' %>"
+                             data-best-by-date="<%= batch.best_by_date || '' %>"
+                             data-thc-percentage="<%= batch.thc_percentage || 0 %>"
+                            data-unit-price="<%= batch.unit_price || 0 %>"
+                            data-quantity-available="<%= batch.quantity_available %>"
+                            data-metrc-item-name="<%= batch.metrc_item_name || '' %>"
+                            data-image-url="<%= product.image_url || '/public/images/placeholder.jpg' %>"
+                            style="cursor: pointer;">
+                            <div class="product-card-header">
+                                <div class="product-brand-badge"><%= product.brand_name || 'AMAZE' %></div>
+                                <% if (product.image_url) { %>
+                                    <img src="<%= product.image_url %>" 
+                                         alt="<%= product.product_name %>" 
+                                         class="product-image">
+                                <% } else { %>
+                                    <div class="product-image-placeholder">
+                                        <div class="placeholder-icon">🍃</div>
+                                    </div>
+                                <% } %>
+                            </div>
+                            <div class="product-card-body">
+                                <h3 class="product-name"><%= (product.cultivar_name || product.product_name).toUpperCase() %></h3>
+                                
+                                <!-- THC Bar with text -->
+                                <div class="thc-bar <%= product.product_type && product.product_type.toLowerCase().includes('indica') ? 'indica' : (product.product_type && product.product_type.toLowerCase().includes('sativa') ? 'sativa' : 'hybrid') %>">
+                                    <%= product.product_type || 'Hybrid' %> - <%= batch.thc_percentage ? batch.thc_percentage.toFixed(2) : '0.00' %>% THC
+                                </div>
+                                
+                                <div class="product-variant">
+                                    <%= product.product_name %> <%= product.unit_size ? product.unit_size : '' %>
+                                </div>
+                                <div class="product-type"><%= product.category_name %> - <%= product.product_type %></div>
+                                
+                                <div class="price-section">
+                                    <div class="price-case">
+                                        <span class="price-amount">$<%= batch.unit_price ? batch.unit_price.toFixed(2) : '0.00' %></span><span class="price-rest"> / Cases<% if (product.unit_size) { %> - <%= product.unit_size %><% } %></span>
+                                    </div>
+                                    <div class="quantity-available">
+                                        Quantity: <span class="quantity-bold"><%= batch.quantity_available %></span> Cases
+                                    </div>
+                                </div>
+                                
+                                <div class="product-details">
+                                    <div class="detail-line">Package Size: <% if (product.unit_size) { %><%= product.unit_size %><% } else { %><%= batch.metrc_item_name || 'N/A' %><% } %></div>
+                                    <div class="detail-line"><%= product.units_per_case || 24 %> units per case</div>
+                                    <div class="unit-price-tag">
+                                        $<%= batch.unit_price && product.units_per_case ? (batch.unit_price / product.units_per_case).toFixed(2) : '0.00' %>/unit
+                                    </div>
+                                </div>
+                                
+                                <div class="quantity-selector-container">
+                                    <input type="number" 
+                                           class="quantity-input" 
+                                           placeholder="Quantity"
+                                           value="1" 
+                                           min="1" 
+                                           max="<%= batch.quantity_available %>"
+                                           data-batch-id="<%= batch.batch_id %>">
+                                    <button class="add-to-cart-btn" onclick="addToCart(event, '<%= batch.batch_id %>')">
+                                        +
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    <% }); %>
+                <% } %>
+            <% }); %>
+        </div>
+        
+        <% if (products.length === 0) { %>
+            <div class="loading">
+                <div class="spinner"></div>
+            </div>
+        <% } %>
+        
+        <!-- Table View -->
+        <div class="product-table-view" id="table-view">
+            <table class="products-table">
+                <thead>
+                    <tr>
+                        <th>Product</th>
+                        <th>Batch</th>
+                        <th>Category</th>
+                        <th>Product Type</th>
+                        <th>Potency</th>
+                        <th>Quantity Available</th>
+                        <th>Price</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% products.forEach(product => { %>
+                        <% if (product.available_batches && product.available_batches.length > 0) { %>
+                            <% product.available_batches.forEach(batch => { %>
+                                <tr class="product-row" 
+                                    data-product-id="<%= product.product_id %>"
+                                    data-product-name="<%= product.product_name %>"
+                                    data-cultivar-name="<%= product.cultivar_name %>"
+                                    data-brand-name="<%= product.brand_name %>"
+                                    data-category-name="<%= product.category_name %>"
+                                    data-product-type="<%= product.product_type %>"
+                                    data-description="<%= product.product_description || '' %>"
+                                    data-unit-size="<%= product.unit_size %>"
+                                    data-sold-as="<%= product.sold_as %>"
+                                    data-units-per-case="<%= product.units_per_case || 24 %>"
+                                    data-batch-id="<%= batch.batch_id %>"
+                                    data-batch-name="<%= batch.batch_name %>"
+                                    data-production-date="<%= batch.production_date || '' %>"
+                                    data-best-by-date="<%= batch.best_by_date || '' %>"
+                                    data-thc-percentage="<%= batch.thc_percentage || 0 %>"
+                                    data-unit-price="<%= batch.unit_price || 0 %>"
+                                    data-quantity-available="<%= batch.quantity_available %>"
+                                    data-metrc-item-name="<%= batch.metrc_item_name || '' %>"
+                                    data-image-url="<%= product.image_url || '/public/images/placeholder.jpg' %>">
+                                    <td>
+                                        <div class="table-product-info">
+                                            <div class="table-product-image">
+                                                <div class="placeholder-icon">🍃</div>
+                                            </div>
+                                            <div class="table-product-details">
+                                                <h4><%= product.cultivar_name || product.product_name %></h4>
+                                                <p><%= product.product_name %> - <%= product.category_name %></p>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td><span class="table-batch"><%= batch.batch_name %></span></td>
+                                    <td><span class="table-category"><%= product.category_name %></span></td>
+                                    <td><span class="table-category"><%= product.product_type %></span></td>
+                                    <td><span class="table-thc"><%= batch.thc_percentage ? batch.thc_percentage.toFixed(2) : '0.00' %>% THC</span></td>
+                                    <td>
+                                        <span class="table-quantity">
+                                            <%= batch.quantity_available %> Cases<br>
+                                            <%= product.units_per_case || 24 %> units per case<br>
+                                            <%= batch.metrc_item_name || 'N/A' %>
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <div class="table-price-main">$<%= batch.unit_price ? batch.unit_price.toFixed(2) : '0.00' %></div>
+                                        <div class="table-price-unit">$<%= batch.unit_price && product.units_per_case ? (batch.unit_price / product.units_per_case).toFixed(2) : '0.00' %>/unit</div>
+                                    </td>
+                                    <td>
+                                        <div class="table-actions">
+                                            <input type="number" class="table-qty-input" value="1" min="1" max="<%= batch.quantity_available %>">
+                                            <button class="table-add-btn" onclick="addToCart(event, '<%= batch.batch_id %>')">+</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <% }); %>
+                        <% } %>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Pagination -->
+        <div class="pagination-container">
+            <div class="pagination-left">
+                <span class="pagination-label">Powered by</span>
+                <div class="apex-logo">APEX<br>TRADING</div>
+            </div>
+            <div class="pagination-controls">
+                <span class="pagination-label">Show Per Page</span>
+                <select class="pagination-dropdown" id="items-per-page" onchange="changeItemsPerPage()">
+                    <option value="12">12</option>
+                    <option value="24" selected>24</option>
+                    <option value="36">36</option>
+                    <option value="48">48</option>
+                </select>
+                <div class="pagination-buttons">
+                    <button class="pagination-btn" onclick="goToPage(1)" title="First Page">
+                        <i class="fas fa-angle-double-left"></i>
+                    </button>
+                    <button class="pagination-btn" onclick="goToPage(currentPage - 1)" title="Previous Page">
+                        <i class="fas fa-angle-left"></i>
+                    </button>
+                    <div class="pagination-numbers" id="pagination-numbers"></div>
+                    <button class="pagination-btn" onclick="goToPage(currentPage + 1)" title="Next Page">
+                        <i class="fas fa-angle-right"></i>
+                    </button>
+                    <button class="pagination-btn" onclick="goToPage(totalPages)" title="Last Page">
+                        <i class="fas fa-angle-double-right"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="pagination-right">
+                <a href="#" class="social-link">
+                    <i class="fab fa-instagram"></i> Instagram
+                </a>
+                <a href="#" class="social-link">
+                    <i class="fas fa-globe"></i> Website
+                </a>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Product Details Modal -->
+    <div id="productDetailsModal" class="product-modal" style="display: none;">
+        <div class="modal-overlay" onclick="closeProductModal()"></div>
+        <div class="modal-content">
+            <button class="modal-close" onclick="closeProductModal()">
+                <i class="fas fa-times"></i>
+            </button>
+            
+            <!-- Modal Header -->
+            <div class="modal-header">
+                <h2 id="modal-product-title">Product Title</h2>
+                <p id="modal-product-brand">Brand Name</p>
+            </div>
+            
+            <div class="modal-body">
+                <!-- Left Panel: Details -->
+                <div class="modal-left">
+                    <!-- Product Section -->
+                    <div class="modal-section">
+                        <h3 class="modal-section-title">
+                            <i class="fas fa-leaf" style="color: var(--accent-green); margin-right: 8px;"></i>
+                            Product
+                        </h3>
+                        <!-- Packaging info at top -->
+                        <div class="packaging-info-top">
+                            <span id="modal-packaging-top"></span>
+                        </div>
+                        <!-- Product Attributes -->
+                        <div class="product-attributes" id="modal-attributes"></div>
+                        <!-- Batch info with location -->
+                        <div class="batch-location-info" id="modal-batch-location"></div>
+                        <div class="product-type-info">
+                            <span id="modal-product-type-tags"></span>
+                            <span class="strain-tag" id="modal-strain-name"></span>
+                        </div>
+                        <div class="category-badge" id="modal-category"></div>
+                        <p id="modal-genetics" class="genetics-info"></p>
+                        <p id="modal-description" class="product-description"></p>
+                        <div class="product-notes">
+                            <p><strong>Notes:</strong> <span id="modal-notes"></span></p>
+                            <p><strong>Effects:</strong> <span id="modal-effects"></span></p>
+                        </div>
+                        <div class="packaging-info">
+                            <span id="modal-packaging"></span>
+                            <span id="modal-weight"></span>
+                        </div>
+                    </div>
+                    
+                    <!-- Batch & Testing Info -->
+                    <div class="modal-section">
+                        <h3 class="modal-section-title">Batch Information</h3>
+                        <div class="batch-info">
+                            <p><strong>Batch:</strong> <span id="modal-batch-name"></span></p>
+                            <p><strong>Production Date:</strong> <span id="modal-production-date"></span></p>
+                            <p><strong>Best By:</strong> <span id="modal-best-by"></span></p>
+                        </div>
+                        
+                        <div class="thc-display">
+                            <div class="thc-value-large" id="modal-thc-value">0.00 %</div>
+                            <div class="thc-label">THC Range</div>
+                            <div class="thc-bar-visualizer">
+                                <div class="thc-bar-track"></div>
+                                <div class="thc-bar-fill" id="modal-thc-bar"></div>
+                                <div class="thc-marker" id="modal-thc-marker"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="testing-section">
+                            <h4 class="modal-section-title">
+                                <i class="fas fa-leaf" style="color: var(--accent-green); margin-right: 8px;"></i>
+                                Testing Documents
+                            </h4>
+                            <div class="cannabinoids">
+                                <h5>Cannabinoids</h5>
+                                <div class="cannabinoid-box">
+                                    <span>(THC) Tetrahydrocannabinol</span>
+                                </div>
+                            </div>
+                            <div class="thc-icon-display">
+                                <div class="thc-icon">⛭</div>
+                                <span id="modal-thc-percent">0.00%</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Right Panel: Image and Ordering -->
+                <div class="modal-right">
+                    <!-- Product Image at Top -->
+                    <div class="modal-product-image-container">
+                        <img id="modal-product-image" src="/public/images/placeholder.jpg" alt="Product">
+                    </div>
+                    
+                    <!-- Cart Status (if item in cart) -->
+                    <div class="cart-status-badge" id="modal-cart-status" style="display: none;">
+                        <i class="fas fa-shopping-cart"></i>
+                        <span id="modal-cart-quantity">1 Case</span> in cart
+                    </div>
+                    
+                    <!-- Availability Section -->
+                    <div class="availability-box">
+                        <div class="availability-quantity" id="modal-available">0 Cases</div>
+                        <div class="availability-label">AVAILABLE</div>
+                    </div>
+                    
+                    <!-- Units Information -->
+                    <div class="order-info">
+                        <div class="info-row">
+                            <span>Total Units:</span>
+                            <span id="modal-total-units">0</span>
+                        </div>
+                        <div class="info-row">
+                            <span>Units per case:</span>
+                            <span id="modal-units-per-case">0</span>
+                        </div>
+                    </div>
+                    
+                    <!-- Pricing Section -->
+                    <div class="pricing">
+                        <div class="price-row">
+                            <span class="price-label">Price</span>
+                            <span class="price-main" id="modal-price">$0</span>
+                        </div>
+                        <div class="price-per-unit" id="modal-price-per-unit">$0/unit</div>
+                    </div>
+                    
+                    <!-- Cart Controls at Bottom -->
+                    <div class="order-controls">
+                        <div class="quantity-row">
+                            <span class="quantity-label">Quantity</span>
+                            <input type="number" id="modal-quantity" value="1" min="1" class="quantity-input-modal">
+                        </div>
+                        <div class="total-cost-row">
+                            <span class="total-label">Total</span>
+                            <span class="total-value" id="modal-total-cost">$0.00</span>
+                        </div>
+                        <button class="btn-add-to-cart-modal" onclick="addToCartFromModal()">
+                            Add to Cart
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Cart Overlay -->
+    <div class="cart-overlay" id="cart-overlay"></div>
+    
+    <!-- Shopping Cart Sidebar (Right) -->
+    <div class="portal-cart">
+        <div class="cart-container">
+            <div class="cart-header">
+                <div class="cart-title">
+                    <div class="cart-logo-small">GR</div>
+                    Cart: <span id="cart-count">0</span>
+                </div>
+                <div class="cart-dropdown">▼</div>
+            </div>
+            
+            <div class="cart-instruction">
+                Review your selected items before proceeding to checkout.
+            </div>
+            
+            <div class="cart-items" id="cart-items">
+                <div class="empty-cart">
+                    <div class="empty-cart-icon">🛒</div>
+                    <p>Your cart is empty</p>
+                </div>
+            </div>
+            
+            <div class="checkout-message">
+                When ready to checkout, click the button below to proceed. We appreciate you shopping with us.
+            </div>
+            
+            <div class="order-summary">
+                <div class="summary-row">
+                    <span class="summary-label">Subtotal:</span>
+                    <span class="summary-value" id="cart-subtotal">$0.00</span>
+                </div>
+                <div class="summary-row">
+                    <span class="summary-label">Discounts:</span>
+                    <span class="summary-value">$0.00</span>
+                </div>
+                <div class="summary-row summary-total">
+                    <span>Total:</span>
+                    <span id="cart-total">$0.00</span>
+                </div>
+            </div>
+            
+            <button class="checkout-btn" id="checkout-btn" onclick="goToCheckout()" disabled>
+                Checkout
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+// Cart management functions
+let currentCart = {
+    items: [],
+    subtotal: 0,
+    total: 0
+};
+
+// Load cart on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadCart();
+    
+    // Load saved view preference (URL param overrides localStorage)
+    const params = new URLSearchParams(window.location.search);
+    const paramView = params.get('view');
+    const savedView = paramView || localStorage.getItem('preferredView') || 'grid';
+    
+    // Load sidebar state
+    const sidebarCollapsed = localStorage.getItem('sidebarCollapsed') === 'true';
+    if (sidebarCollapsed) {
+        const sidebar = document.querySelector('.filter-sidebar');
+        if (sidebar) sidebar.classList.add('collapsed');
+    }
+    
+    // Switch view after setting sidebar state
+    switchView(savedView === 'table' ? 'table' : 'grid');
+    
+    // Populate brand filters dynamically
+    const brands = new Set();
+    document.querySelectorAll('.product-card-clickable').forEach(card => {
+        const brand = card.dataset.brandName;
+        if (brand && brand.trim()) {
+            brands.add(brand);
+        }
+    });
+    
+    const brandFilters = document.getElementById('brand-filters');
+    if (brandFilters) {
+        brands.forEach(brand => {
+            const label = document.createElement('label');
+            label.className = 'filter-checkbox';
+            label.innerHTML = `
+                <input type="checkbox" name="brand" value="${brand}">
+                <span>${brand}</span>
+            `;
+            brandFilters.appendChild(label);
+        });
+    }
+    
+    // Add click handlers to product cards (grid view)
+    document.querySelectorAll('.product-card-clickable').forEach(card => {
+        card.addEventListener('click', function(e) {
+            // Don't trigger if clicking on quantity input or add to cart button
+            if (e.target.closest('.quantity-selector-container') || e.target.closest('.add-to-cart-btn')) {
+                return;
+            }
+            
+            // Get image URL from data attribute or from image element
+            let imageUrl = this.dataset.imageUrl || '/public/images/placeholder.jpg';
+            if (!imageUrl || imageUrl === '') {
+                const imgEl = this.querySelector('.product-image');
+                imageUrl = imgEl ? (imgEl.getAttribute('src') || '/public/images/placeholder.jpg') : '/public/images/placeholder.jpg';
+            }
+            
+            const productData = {
+                productId: this.dataset.productId,
+                productName: this.dataset.productName,
+                cultivarName: this.dataset.cultivarName,
+                brandName: this.dataset.brandName,
+                categoryName: this.dataset.categoryName,
+                productType: this.dataset.productType,
+                description: this.dataset.description,
+                unitSize: this.dataset.unitSize,
+                soldAs: this.dataset.soldAs,
+                unitsPerCase: parseInt(this.dataset.unitsPerCase || 24),
+                batchId: this.dataset.batchId,
+                batchName: this.dataset.batchName,
+                productionDate: this.dataset.productionDate,
+                bestByDate: this.dataset.bestByDate,
+                thcPercentage: parseFloat(this.dataset.thcPercentage || 0),
+                unitPrice: parseFloat(this.dataset.unitPrice || 0),
+                quantityAvailable: parseInt(this.dataset.quantityAvailable || 0),
+                metrcItemName: this.dataset.metrcItemName,
+                imageUrl: imageUrl
+            };
+            
+            openProductModal(productData);
+        });
+    });
+    
+    // Add click handlers to table rows
+    document.querySelectorAll('.product-row').forEach(row => {
+        row.addEventListener('click', function(e) {
+            // Don't trigger if clicking on input or button
+            if (e.target.closest('.table-actions')) {
+                return;
+            }
+            
+            // Get image URL from data attribute
+            let imageUrl = this.dataset.imageUrl || '/public/images/placeholder.jpg';
+            if (!imageUrl || imageUrl === '') {
+                const imgEl = this.querySelector('.product-image');
+                imageUrl = imgEl ? (imgEl.getAttribute('src') || '/public/images/placeholder.jpg') : '/public/images/placeholder.jpg';
+            }
+            
+            const productData = {
+                productId: this.dataset.productId,
+                productName: this.dataset.productName,
+                cultivarName: this.dataset.cultivarName,
+                brandName: this.dataset.brandName,
+                categoryName: this.dataset.categoryName,
+                productType: this.dataset.productType,
+                description: this.dataset.description,
+                unitSize: this.dataset.unitSize,
+                soldAs: this.dataset.soldAs,
+                unitsPerCase: parseInt(this.dataset.unitsPerCase || 24),
+                batchId: this.dataset.batchId,
+                batchName: this.dataset.batchName,
+                productionDate: this.dataset.productionDate,
+                bestByDate: this.dataset.bestByDate,
+                thcPercentage: parseFloat(this.dataset.thcPercentage || 0),
+                unitPrice: parseFloat(this.dataset.unitPrice || 0),
+                quantityAvailable: parseInt(this.dataset.quantityAvailable || 0),
+                metrcItemName: this.dataset.metrcItemName,
+                imageUrl: imageUrl
+            };
+            
+            openProductModal(productData);
+        });
+    });
+
+    // Inline sidebar toggle button in catalog header
+    const inlineToggle = document.getElementById('inline-sidebar-toggle');
+    if (inlineToggle) {
+        inlineToggle.addEventListener('click', toggleSidebar);
+    }
+
+    // Cart toggle button in header
+    const cartToggleBtn = document.getElementById('cart-toggle');
+    const cartOverlay = document.getElementById('cart-overlay');
+    
+    function toggleCart(show) {
+        const cartEl = document.querySelector('.portal-cart');
+        if (cartEl) {
+            if (show === undefined) {
+                // Toggle current state
+                const isCurrentlyCollapsed = cartEl.classList.contains('collapsed');
+                show = isCurrentlyCollapsed;
+            }
+            
+            if (show) {
+                cartEl.classList.remove('collapsed');
+                localStorage.setItem('cartCollapsed', 'false');
+                if (cartOverlay) {
+                    cartOverlay.style.display = 'block';
+                    setTimeout(() => { cartOverlay.style.opacity = '1'; }, 10);
+                }
+            } else {
+                cartEl.classList.add('collapsed');
+                localStorage.setItem('cartCollapsed', 'true');
+                if (cartOverlay) {
+                    cartOverlay.style.opacity = '0';
+                    setTimeout(() => { cartOverlay.style.display = 'none'; }, 300);
+                }
+            }
+        }
+    }
+    
+    if (cartToggleBtn) {
+        cartToggleBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            toggleCart();
+        });
+    }
+    
+    // Close cart when clicking overlay
+    if (cartOverlay) {
+        cartOverlay.addEventListener('click', function() {
+            toggleCart(false);
+        });
+    }
+
+    // Initialize cart collapsed state (default hidden)
+    const cartEl = document.querySelector('.portal-cart');
+    const cartCollapsedPref = localStorage.getItem('cartCollapsed');
+    if (cartCollapsedPref === null) {
+        localStorage.setItem('cartCollapsed', 'true');
+    }
+    if (cartEl) {
+        // 'true' in localStorage means hidden, which means collapsed class
+        // 'false' means visible
+        if (localStorage.getItem('cartCollapsed') === 'true') {
+            cartEl.classList.add('collapsed');
+            if (cartOverlay) {
+                cartOverlay.style.display = 'none';
+                cartOverlay.style.opacity = '0';
+            }
+        } else {
+            cartEl.classList.remove('collapsed');
+            if (cartOverlay) {
+                cartOverlay.style.display = 'block';
+                cartOverlay.style.opacity = '1';
+            }
+        }
+    }
+    
+    // Initialize pagination and filters
+    initProducts();
+    
+    // Add event listeners to all filter checkboxes
+    document.querySelectorAll('.filter-checkbox input').forEach(input => {
+        input.addEventListener('change', applyFilters);
+    });
+    
+    // Add event listeners to potency inputs
+    const potencyInputs = document.querySelectorAll('#min-potency, #max-potency, #potency-range');
+    potencyInputs.forEach(input => {
+        if (input) {
+            input.addEventListener('input', applyFilters);
+        }
+    });
+    
+    // Sync pending cart updates before page unload
+    window.addEventListener('beforeunload', async (e) => {
+        if (pendingCartUpdates.size > 0) {
+            // Sync synchronously before page unload
+            await syncCartUpdates();
+        }
+    });
+    
+    // Sync when page becomes visible (user returns to tab)
+    document.addEventListener('visibilitychange', async () => {
+        if (!document.hidden && pendingCartUpdates.size > 0) {
+            await syncCartUpdates();
+        }
+    });
+});
+
+async function loadCart() {
+    const uuid = '<%= uuid %>';
+    try {
+        const response = await fetch(`/api/portal/${uuid}/cart`);
+        const data = await response.json();
+        console.log('loadCart - Cart data received:', {
+            item_count: data.items ? data.items.length : 0,
+            items: data.items,
+            subtotal: data.subtotal,
+            total: data.total
+        });
+        currentCart = data;
+        renderCart();
+    } catch (error) {
+        console.error('Error loading cart:', error);
+    }
+}
+
+async function addToCart(event, batchId) {
+    event.preventDefault();
+    let quantity = 1;
+    const container = event.target.closest('.quantity-selector-container');
+    if (container) {
+        const quantityInput = container.querySelector('.quantity-input');
+        const inputValue = quantityInput?.value || '1';
+        quantity = parseInt(inputValue, 10);
+        console.log('addToCart - Grid view:', { inputValue, parsedQuantity: quantity, batchId });
+    } else {
+        // Table view
+        const td = event.target.closest('td');
+        const tableInput = td ? td.querySelector('.table-qty-input') : null;
+        const inputValue = tableInput?.value || '1';
+        quantity = parseInt(inputValue, 10);
+        console.log('addToCart - Table view:', { inputValue, parsedQuantity: quantity, batchId });
+    }
+    
+    if (!quantity || isNaN(quantity) || quantity <= 0) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Please enter a valid quantity', 'warning');
+        } else {
+            alert('Please enter a valid quantity');
+        }
+        return;
+    }
+    
+    const uuid = '<%= uuid %>';
+    console.log('addToCart - Sending to API:', { batchId, quantity, uuid });
+    try {
+        const response = await fetch(`/api/portal/${uuid}/cart/add`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                batch_id: batchId,
+                quantity: quantity
+            })
+        });
+        const data = await response.json();
+
+        // If backend successfully added item, reload cart from server
+        if (data.success) {
+            await loadCart();
+            
+            // Show success notification
+            const itemText = quantity === 1 ? '1 item' : `${quantity} items`;
+            if (typeof showNotification !== 'undefined') {
+                showNotification(`${itemText} added to cart`, 'success');
+            } else {
+                alert(`${itemText} added to cart successfully!`);
+            }
+            
+            // Ensure cart is visible when adding first item
+            const cartEl = document.querySelector('.portal-cart');
+            const cartOverlay = document.getElementById('cart-overlay');
+            if (cartEl && cartEl.classList.contains('collapsed')) {
+                cartEl.classList.remove('collapsed');
+                localStorage.setItem('cartCollapsed', 'false');
+                if (cartOverlay) {
+                    cartOverlay.style.display = 'block';
+                    setTimeout(() => { cartOverlay.style.opacity = '1'; }, 10);
+                }
+            }
+            return;
+        } else {
+            // Show error notification
+            if (typeof showNotification !== 'undefined') {
+                showNotification(data.error || 'Failed to add item to cart', 'error');
+            } else {
+                alert(data.error || 'Failed to add item to cart');
+            }
+        }
+
+        // Fallback to client-side cart if backend fails or not implemented
+        if (!data || data.error) {
+            const card = event.target.closest('.product-card');
+            const row = event.target.closest('.product-row');
+            
+            if (card || row) {
+                const element = card || row;
+                const productName = element.dataset.productName;
+                const batchName = element.dataset.batchName;
+                const unitPrice = parseFloat(element.dataset.unitPrice || '0');
+                
+                // Get image URL from data attribute or from image element
+                let imageUrl = element.dataset.imageUrl || '/public/images/placeholder.jpg';
+                if (!imageUrl || imageUrl === '') {
+                    if (card) {
+                        const imgEl = card.querySelector('img.product-image');
+                        imageUrl = imgEl ? (imgEl.getAttribute('src') || '/public/images/placeholder.jpg') : '/public/images/placeholder.jpg';
+                    }
+                }
+                
+                const lineItem = {
+                    line_item_id: Date.now(),
+                    product_id: element.dataset.productId,
+                    batch_id: element.dataset.batchId,
+                    product_name: productName,
+                    batch_name: batchName,
+                    quantity: quantity,
+                    unit_price: unitPrice,
+                    line_total: unitPrice * quantity,
+                    image_url: imageUrl
+                };
+
+                if (!currentCart.items) currentCart.items = [];
+                currentCart.items.push(lineItem);
+                currentCart.subtotal = (currentCart.subtotal || 0) + lineItem.line_total;
+                currentCart.total = (currentCart.total || 0) + lineItem.line_total;
+                renderCart();
+
+                // Ensure cart is visible when adding first item
+                const cartEl = document.querySelector('.portal-cart');
+                const cartOverlay = document.getElementById('cart-overlay');
+                if (cartEl && cartEl.classList.contains('collapsed')) {
+                    cartEl.classList.remove('collapsed');
+                    localStorage.setItem('cartCollapsed', 'false');
+                    if (cartOverlay) {
+                        cartOverlay.style.display = 'block';
+                        setTimeout(() => { cartOverlay.style.opacity = '1'; }, 10);
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        // Client-side fallback on error as well
+        console.error('Error adding to cart:', error);
+        const card = event.target.closest('.product-card');
+        const row = event.target.closest('.product-row');
+        
+        if (card || row) {
+            const element = card || row;
+            const productName = element.dataset.productName;
+            const batchName = element.dataset.batchName;
+            const unitPrice = parseFloat(element.dataset.unitPrice || '0');
+            
+            let imageUrl = '/public/images/placeholder.jpg';
+            if (card) {
+                const imgEl = card.querySelector('img.product-image');
+                imageUrl = imgEl ? imgEl.getAttribute('src') : '/public/images/placeholder.jpg';
+            }
+            
+            const lineItem = {
+                line_item_id: Date.now(),
+                product_id: element.dataset.productId,
+                batch_id: element.dataset.batchId,
+                product_name: productName,
+                batch_name: batchName,
+                quantity: quantity,
+                unit_price: unitPrice,
+                line_total: unitPrice * quantity,
+                image_url: imageUrl
+            };
+            if (!currentCart.items) currentCart.items = [];
+            currentCart.items.push(lineItem);
+            currentCart.subtotal = (currentCart.subtotal || 0) + lineItem.line_total;
+            currentCart.total = (currentCart.total || 0) + lineItem.line_total;
+            renderCart();
+
+            const cartEl = document.querySelector('.portal-cart');
+            if (cartEl && cartEl.classList.contains('collapsed')) {
+                cartEl.classList.remove('collapsed');
+                localStorage.setItem('cartCollapsed', 'false');
+            }
+        }
+    }
+}
+
+function renderCart() {
+    const cartItemsDiv = document.getElementById('cart-items');
+    const cartCountSpan = document.getElementById('cart-count');
+    const cartSubtotalSpan = document.getElementById('cart-subtotal');
+    const cartTotalSpan = document.getElementById('cart-total');
+    const checkoutBtn = document.getElementById('checkout-btn');
+    
+    if (currentCart.items && currentCart.items.length > 0) {
+        cartItemsDiv.innerHTML = currentCart.items.map(item => {
+            const imageUrl = (item.image_url && item.image_url !== '') 
+                ? item.image_url 
+                : '/public/images/placeholder.jpg';
+            return `
+            <div class="cart-item" data-line-item-id="${item.line_item_id}">
+                <div class="cart-item-header">
+                    <img src="${imageUrl}" 
+                         alt="${item.product_name}" 
+                         class="cart-item-image"
+                         onerror="this.src='/public/images/placeholder.jpg'; this.onerror=null;">
+                    <div class="cart-item-info">
+                        <h4 class="cart-item-name">${item.product_name}</h4>
+                        <div class="cart-item-attributes">
+                            ${item.batch_name}<br>
+                            Vendor: AMAZE Cannabis<br>
+                            Brand: AMAZE<br>
+                            Category: Extract
+                        </div>
+                    </div>
+                </div>
+                <div class="cart-item-price">
+                    <span class="price-label">$${item.unit_price.toFixed(2)} / Case</span>
+                </div>
+                <div class="cart-quantity-controls">
+                    <button class="quantity-btn" onclick="updateQuantity(${item.line_item_id}, -1)">-</button>
+                    <span>${item.quantity}</span>
+                    <button class="quantity-btn" onclick="updateQuantity(${item.line_item_id}, 1)">+</button>
+                </div>
+                <div class="cart-item-total">
+                    <span>Total: $${item.line_total.toFixed(2)}</span>
+                    <button class="remove-item-btn" onclick="removeItem(${item.line_item_id}, ${item.batch_id})">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+        }).join('');
+        
+        cartCountSpan.textContent = currentCart.items.length;
+        const headerBadge = document.getElementById('cart-count-badge');
+        if (headerBadge) headerBadge.textContent = currentCart.items.length;
+        checkoutBtn.disabled = false;
+    } else {
+        cartItemsDiv.innerHTML = `
+            <div class="empty-cart">
+                <div class="empty-cart-icon">🛒</div>
+                <p>Your cart is empty</p>
+            </div>
+        `;
+        cartCountSpan.textContent = '0';
+        const headerBadge = document.getElementById('cart-count-badge');
+        if (headerBadge) headerBadge.textContent = '0';
+        checkoutBtn.disabled = true;
+    }
+    
+    cartSubtotalSpan.textContent = `$${currentCart.subtotal.toFixed(2)}`;
+    cartTotalSpan.textContent = `$${currentCart.total.toFixed(2)}`;
+}
+
+// Debounce timer for cart updates
+let cartUpdateTimer = null;
+let pendingCartUpdates = new Map();
+
+async function updateQuantity(lineItemId, delta) {
+    if (!currentCart.items) return;
+    
+    const item = currentCart.items.find(i => i.line_item_id === lineItemId);
+    if (!item) return;
+    
+    const newQuantity = item.quantity + delta;
+    if (newQuantity <= 0) {
+        await removeItem(lineItemId, item.batch_id);
+        return;
+    }
+    
+    // OPTIMISTIC UPDATE: Update UI immediately (client-side)
+    item.quantity = newQuantity;
+    item.line_total = item.unit_price * newQuantity;
+    
+    // Recalculate totals
+    currentCart.subtotal = currentCart.items.reduce((sum, i) => sum + i.line_total, 0);
+    currentCart.total = currentCart.subtotal;
+    
+    // Update UI immediately
+    renderCart();
+    
+    // Store pending update for debounced sync
+    pendingCartUpdates.set(lineItemId, {
+        line_item_id: lineItemId,
+        quantity: newQuantity,
+        batch_id: item.batch_id
+    });
+    
+    // Clear existing timer
+    if (cartUpdateTimer) {
+        clearTimeout(cartUpdateTimer);
+    }
+    
+    // Debounce: Wait 300ms for more changes, then sync with backend
+    cartUpdateTimer = setTimeout(async () => {
+        await syncCartUpdates();
+    }, 300);
+}
+
+async function syncCartUpdates() {
+    if (pendingCartUpdates.size === 0) return;
+    
+    const uuid = '<%= uuid %>';
+    const updates = Array.from(pendingCartUpdates.values());
+    pendingCartUpdates.clear();
+    
+    // Sync all pending updates
+    for (const update of updates) {
+        try {
+            const response = await fetch(`/api/portal/${uuid}/cart/update`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(update)
+            });
+            
+            const data = await response.json();
+            if (!data.success) {
+                console.error('Cart sync failed:', data.error);
+                // Reload cart to revert to server state
+                await loadCart();
+                if (typeof showNotification !== 'undefined') {
+                    showNotification(data.error || 'Failed to sync cart', 'error');
+                }
+                return;
+            }
+        } catch (error) {
+            console.error('Error syncing cart:', error);
+            // Reload cart to revert to server state
+            await loadCart();
+            if (typeof showNotification !== 'undefined') {
+                showNotification('Failed to sync cart', 'error');
+            }
+            return;
+        }
+    }
+    
+    // After successful sync, reload cart to ensure consistency
+    await loadCart();
+}
+
+async function removeItem(lineItemId, batchId) {
+    if (!currentCart.items) return;
+    
+    if (!confirm('Are you sure you want to remove this item?')) {
+        return;
+    }
+    
+    // OPTIMISTIC UPDATE: Remove from UI immediately
+    const item = currentCart.items.find(i => i.line_item_id === lineItemId);
+    if (item) {
+        currentCart.items = currentCart.items.filter(i => i.line_item_id !== lineItemId);
+        currentCart.subtotal = currentCart.items.reduce((sum, i) => sum + i.line_total, 0);
+        currentCart.total = currentCart.subtotal;
+        renderCart();
+    }
+    
+    // Cancel any pending updates for this item
+    pendingCartUpdates.delete(lineItemId);
+    
+    // Sync with backend
+    const uuid = '<%= uuid %>';
+    try {
+        const response = await fetch(`/api/portal/${uuid}/cart/remove`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                line_item_id: lineItemId,
+                batch_id: batchId  // Include batch_id to remove all duplicates
+            })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            // Reload cart from server to ensure consistency
+            await loadCart();
+            
+            if (typeof showNotification !== 'undefined') {
+                showNotification('Item removed from cart', 'success');
+            }
+        } else {
+            // Revert on failure
+            await loadCart();
+            if (typeof showNotification !== 'undefined') {
+                showNotification(data.error || 'Failed to remove item', 'error');
+            } else {
+                alert(data.error || 'Failed to remove item');
+            }
+        }
+    } catch (error) {
+        console.error('Error removing item:', error);
+        // Revert on error
+        await loadCart();
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Failed to remove item', 'error');
+        } else {
+            alert('Failed to remove item');
+        }
+    }
+}
+
+function goToCheckout() {
+    const uuid = '<%= uuid %>';
+    window.location.href = `/external/store/${uuid}/checkout`;
+}
+
+// Product Details Modal Functions
+let currentModalBatchId = null;
+let currentModalUnitPrice = 0;
+
+function openProductModal(productData) {
+    currentModalBatchId = productData.batchId;
+    currentModalUnitPrice = productData.unitPrice || 0;
+    
+    // Set header info
+    const productTitle = `${productData.cultivarName || productData.productName}${productData.unitSize ? ` (${productData.unitSize})` : ''}`;
+    document.getElementById('modal-product-title').textContent = productTitle;
+    document.getElementById('modal-product-brand').textContent = 
+        `${productData.brandName || 'AMAZE'} | ${productData.brandName || 'AMAZE'}`;
+    
+    // Set product type tags
+    const productTypeTags = [];
+    if (productData.productType) {
+        productTypeTags.push(productData.productType);
+    }
+    if (productData.categoryName) {
+        productTypeTags.push(productData.categoryName);
+    }
+    if (productData.cultivarName) {
+        productTypeTags.push(productData.cultivarName);
+    }
+    document.getElementById('modal-product-type-tags').textContent = productTypeTags.join(' | ') + ' |';
+    
+    // Set strain name
+    const strainEl = document.getElementById('modal-strain-name');
+    if (productData.cultivarName) {
+        strainEl.textContent = productData.cultivarName;
+        strainEl.style.display = 'inline-block';
+    } else {
+        strainEl.style.display = 'none';
+    }
+    
+    // Set category badge
+    const categoryEl = document.getElementById('modal-category');
+    if (productData.productType) {
+        const isIndica = productData.productType.toLowerCase().includes('indica');
+        const isSativa = productData.productType.toLowerCase().includes('sativa');
+        let categoryText = productData.productType;
+        if (isIndica) categoryText = 'INDICA';
+        else if (isSativa) categoryText = 'SATIVA';
+        categoryEl.textContent = categoryText;
+        categoryEl.style.display = 'block';
+    } else {
+        categoryEl.style.display = 'none';
+    }
+    
+    // Set genetics (placeholder - would come from product data)
+    const geneticsEl = document.getElementById('modal-genetics');
+    geneticsEl.textContent = `Genetics: ${productData.cultivarName || 'N/A'}`;
+    
+    // Set description (strip HTML tags and decode entities)
+    const descriptionText = productData.description || `${productData.productName} - ${productData.categoryName}`;
+    
+    // Create a temporary element to decode HTML entities properly
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = descriptionText;
+    let strippedDescription = tempDiv.textContent || tempDiv.innerText || '';
+    
+    // Clean up any remaining encoded entities and normalize whitespace
+    strippedDescription = strippedDescription
+        .replace(/\s+/g, ' ')  // Replace multiple spaces with single space
+        .replace(/\n\s*\n/g, '\n')  // Replace multiple newlines with single newline
+        .trim();
+    
+    document.getElementById('modal-description').textContent = strippedDescription;
+    
+    // Set notes and effects (placeholder - would come from product data)
+    document.getElementById('modal-notes').textContent = 'Orange, Candy, Sweet';
+    document.getElementById('modal-effects').textContent = 'Relaxation, Pain Relief, Mood Elevation';
+    
+    // Set product image
+    const imageEl = document.getElementById('modal-product-image');
+    if (productData.imageUrl && productData.imageUrl !== '/public/images/placeholder.jpg') {
+        // Ensure the image URL is properly formatted
+        imageEl.src = productData.imageUrl.startsWith('/') ? productData.imageUrl : '/' + productData.imageUrl;
+        imageEl.style.display = 'block';
+    } else {
+        // Use placeholder image
+        imageEl.src = '/public/images/placeholder.jpg';
+        imageEl.style.display = 'block';
+    }
+    // Handle image load errors
+    imageEl.onerror = function() {
+        this.src = '/public/images/placeholder.jpg';
+        this.onerror = null; // Prevent infinite loop
+    };
+    
+    // Set packaging info at top
+    const unitsPerCase = productData.unitsPerCase || 24;
+    document.getElementById('modal-packaging-top').textContent = `${unitsPerCase} units per case`;
+    
+    // Set packaging info
+    document.getElementById('modal-packaging').textContent = `${unitsPerCase} units per case`;
+    if (productData.unitSize) {
+        document.getElementById('modal-weight').textContent = `Weight: ${productData.unitSize}`;
+    } else {
+        document.getElementById('modal-weight').textContent = '';
+    }
+    
+    // Set product attributes (Indoor, Tubed, etc.)
+    const attributesEl = document.getElementById('modal-attributes');
+    const attributes = [];
+    if (productData.soldAs) attributes.push(productData.soldAs);
+    // Add default attributes if available
+    attributes.push('Indoor', 'Living Soil', 'Hung, Humidity & Temp Controlled Room', 'Glass Container');
+    attributesEl.innerHTML = attributes.map(attr => 
+        `<span class="attribute-tag">${attr}</span>`
+    ).join('');
+    
+    // Set batch info with location
+    const batchLocationEl = document.getElementById('modal-batch-location');
+    if (productData.batchName) {
+        batchLocationEl.innerHTML = `
+            <p><strong>Batch:</strong> <span id="modal-batch-name-display">${productData.batchName}</span></p>
+            <p>(Location: AMAZE Cannabis, Moberly MO)</p>
+        `;
+    } else {
+        batchLocationEl.innerHTML = '';
+    }
+    
+    // Set batch info
+    document.getElementById('modal-batch-name').textContent = productData.batchName || 'N/A';
+    const formatDate = (dateStr) => {
+        if (!dateStr) return 'N/A';
+        const date = new Date(dateStr);
+        return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
+    };
+    document.getElementById('modal-production-date').textContent = formatDate(productData.productionDate);
+    document.getElementById('modal-best-by').textContent = formatDate(productData.bestByDate);
+    
+    // Set THC info
+    const thcPercent = productData.thcPercentage || 0;
+    document.getElementById('modal-thc-value').textContent = `${thcPercent.toFixed(2)} %`;
+    document.getElementById('modal-thc-percent').textContent = `${thcPercent.toFixed(2)}%`;
+    
+    // Set THC bar with gradient
+    const thcBar = document.getElementById('modal-thc-bar');
+    const thcMarker = document.getElementById('modal-thc-marker');
+    const thcPercentValue = Math.min(thcPercent, 100);
+    thcBar.style.width = `${thcPercentValue}%`;
+    thcMarker.style.left = `${thcPercentValue}%`;
+    
+    // Set availability
+    document.getElementById('modal-available').textContent = `${productData.quantityAvailable} Cases`;
+    
+    // Calculate and set units info
+    const totalUnits = productData.quantityAvailable * unitsPerCase;
+    document.getElementById('modal-total-units').textContent = totalUnits.toLocaleString();
+    document.getElementById('modal-units-per-case').textContent = unitsPerCase;
+    
+    // Set pricing
+    const unitPrice = productData.unitPrice || 0;
+    document.getElementById('modal-price').textContent = `$${unitPrice.toFixed(0)}`;
+    document.getElementById('modal-price-per-unit').textContent = 
+        `$${(unitPrice / unitsPerCase).toFixed(2)}/unit`;
+    
+    // Set quantity input max
+    const qtyInput = document.getElementById('modal-quantity');
+    qtyInput.max = productData.quantityAvailable;
+    qtyInput.value = 1;
+    
+    // Update total cost
+    updateModalTotalCost();
+    
+    // Add quantity change listener
+    qtyInput.oninput = updateModalTotalCost;
+    
+    // Show modal
+    document.getElementById('productDetailsModal').style.display = 'flex';
+}
+
+function updateModalTotalCost() {
+    const quantity = parseInt(document.getElementById('modal-quantity').value) || 1;
+    const total = quantity * currentModalUnitPrice;
+    document.getElementById('modal-total-cost').textContent = `$${total.toFixed(2)}`;
+}
+
+async function addToCartFromModal() {
+    const quantity = parseInt(document.getElementById('modal-quantity').value) || 1;
+    
+    if (!currentModalBatchId) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Error: No batch selected', 'error');
+        } else {
+            alert('Error: No batch selected');
+        }
+        return;
+    }
+    
+    const parsedQty = parseInt(quantity, 10);
+    if (parsedQty <= 0 || isNaN(parsedQty)) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Please enter a valid quantity', 'warning');
+        } else {
+            alert('Please enter a valid quantity');
+        }
+        return;
+    }
+    
+    await addToCartFromBatch(currentModalBatchId, parsedQty);
+    closeProductModal();
+}
+
+async function addToCartFromBatch(batchId, quantity) {
+    const uuid = '<%= uuid %>';
+    const parsedQuantity = parseInt(quantity, 10);
+    console.log('addToCartFromBatch - Sending:', { batchId, quantity, parsedQuantity });
+    try {
+        const response = await fetch(`/api/portal/${uuid}/cart/add`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                batch_id: batchId,
+                quantity: parsedQuantity
+            })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            await loadCart();
+            // Show success notification with item count
+            const itemText = parsedQuantity === 1 ? '1 item' : `${parsedQuantity} items`;
+            if (typeof showNotification !== 'undefined') {
+                showNotification(`${itemText} added to cart`, 'success');
+            } else {
+                alert(`${itemText} added to cart successfully!`);
+            }
+        } else {
+            if (typeof showNotification !== 'undefined') {
+                showNotification(data.error || 'Failed to add item to cart', 'error');
+            } else {
+                alert(data.error || 'Failed to add item to cart');
+            }
+        }
+    } catch (error) {
+        console.error('Error adding to cart:', error);
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Failed to add item to cart', 'error');
+        } else {
+            alert('Failed to add item to cart');
+        }
+    }
+}
+
+function closeProductModal() {
+    document.getElementById('productDetailsModal').style.display = 'none';
+    currentModalBatchId = null;
+}
+
+// View Toggle Functions
+function switchView(viewType) {
+    const gridView = document.getElementById('grid-view');
+    const tableView = document.getElementById('table-view');
+    const viewButtons = document.querySelectorAll('.view-btn');
+    const sidebar = document.querySelector('.filter-sidebar');
+    const portalCatalog = document.querySelector('.portal-catalog');
+    
+    // Remove active class from all buttons
+    viewButtons.forEach(btn => btn.classList.remove('active'));
+    
+    // Add active class to clicked button
+    document.querySelector(`.view-btn[data-view="${viewType}"]`).classList.add('active');
+    
+    if (viewType === 'grid') {
+        gridView.style.display = 'grid';
+        tableView.classList.remove('active');
+        if (sidebar) {
+            sidebar.style.display = '';
+        }
+    } else {
+        gridView.style.display = 'none';
+        tableView.classList.add('active');
+        if (sidebar) {
+            sidebar.style.display = 'none';
+        }
+    }
+    
+    // Save preference
+    localStorage.setItem('preferredView', viewType);
+}
+
+// Sidebar Toggle Functions
+function toggleSidebar() {
+    const sidebar = document.querySelector('.filter-sidebar');
+    sidebar.classList.toggle('collapsed');
+    localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+}
+
+// Filter Section Toggle
+function toggleFilterSection(header) {
+    const section = header.closest('.filter-section');
+    section.classList.toggle('collapsed');
+}
+
+// Potency Unit Toggle
+function togglePotencyUnit(btn, unit) {
+    const buttons = document.querySelectorAll('.potency-toggle .toggle-btn');
+    buttons.forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+}
+
+// Pagination and Filtering
+let currentPage = 1;
+let itemsPerPage = 24;
+let filteredProducts = [];
+let totalPages = 1;
+
+// Initialize products and pagination
+function initProducts() {
+    filteredProducts = Array.from(document.querySelectorAll('.product-card-clickable, .product-row'));
+    totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+    renderPagination();
+    applyFilters();
+}
+
+function applyFilters() {
+    // Get filter values
+    const selectedCategories = Array.from(document.querySelectorAll('input[name="category"]:checked')).map(cb => cb.value);
+    const selectedStrains = Array.from(document.querySelectorAll('input[name="strain"]:checked')).map(cb => cb.value);
+    const selectedBrands = Array.from(document.querySelectorAll('input[name="brand"]:checked')).map(cb => cb.value);
+    const minPotency = parseFloat(document.getElementById('min-potency')?.value || 0);
+    const maxPotency = parseFloat(document.getElementById('max-potency')?.value || 100);
+    
+    // Filter products
+    filteredProducts.forEach(item => {
+        let shouldShow = true;
+        
+        // Category filter
+        if (selectedCategories.length > 0) {
+            const category = item.dataset.categoryName || '';
+            if (!selectedCategories.some(cat => category.includes(cat))) {
+                shouldShow = false;
+            }
+        }
+        
+        // Strain filter
+        if (selectedStrains.length > 0 && shouldShow) {
+            const strain = item.dataset.productType || '';
+            if (!selectedStrains.some(s => strain.includes(s))) {
+                shouldShow = false;
+            }
+        }
+        
+        // Brand filter
+        if (selectedBrands.length > 0 && shouldShow) {
+            const brand = item.dataset.brandName || '';
+            if (!selectedBrands.includes(brand)) {
+                shouldShow = false;
+            }
+        }
+        
+        // Potency filter
+        if (shouldShow) {
+            const thc = parseFloat(item.dataset.thcPercentage || 0);
+            if (thc < minPotency || thc > maxPotency) {
+                shouldShow = false;
+            }
+        }
+        
+        item.style.display = shouldShow ? '' : 'none';
+    });
+    
+    // Update pagination
+    const visibleProducts = filteredProducts.filter(item => item.style.display !== 'none');
+    totalPages = Math.ceil(visibleProducts.length / itemsPerPage);
+    currentPage = 1;
+    renderPagination();
+    showPage(1);
+    
+    // Update product count
+    updateProductCount(visibleProducts.length);
+}
+
+function updateProductCount(count) {
+    const countElement = document.getElementById('product-count');
+    if (countElement) {
+        countElement.textContent = count;
+    }
+}
+
+function showPage(page) {
+    const visibleProducts = filteredProducts.filter(item => item.style.display !== 'none');
+    const start = (page - 1) * itemsPerPage;
+    const end = start + itemsPerPage;
+    
+    visibleProducts.forEach((item, index) => {
+        if (index >= start && index < end) {
+            item.style.display = '';
+        } else {
+            item.style.display = 'none';
+        }
+    });
+    
+    currentPage = page;
+    updatePaginationButtons();
+}
+
+function goToPage(page) {
+    const visibleProducts = filteredProducts.filter(item => item.style.display !== 'none');
+    const maxPage = Math.ceil(visibleProducts.length / itemsPerPage);
+    if (page >= 1 && page <= maxPage) {
+        showPage(page);
+    }
+}
+
+function changeItemsPerPage() {
+    itemsPerPage = parseInt(document.getElementById('items-per-page').value);
+    totalPages = Math.ceil(filteredProducts.filter(item => item.style.display !== 'none').length / itemsPerPage);
+    renderPagination();
+    showPage(1);
+}
+
+function renderPagination() {
+    const visibleProducts = filteredProducts.filter(item => item.style.display !== 'none');
+    const maxPage = Math.ceil(visibleProducts.length / itemsPerPage);
+    const paginationNumbers = document.getElementById('pagination-numbers');
+    if (!paginationNumbers) return;
+    
+    paginationNumbers.innerHTML = '';
+    
+    // Calculate page range to show
+    const maxVisible = 4;
+    let startPage = Math.max(1, currentPage - Math.floor(maxVisible / 2));
+    let endPage = Math.min(maxPage, startPage + maxVisible - 1);
+    
+    if (endPage - startPage < maxVisible - 1) {
+        startPage = Math.max(1, endPage - maxVisible + 1);
+    }
+    
+    for (let i = startPage; i <= endPage; i++) {
+        const pageBtn = document.createElement('button');
+        pageBtn.className = 'pagination-number' + (i === currentPage ? ' active' : '');
+        pageBtn.textContent = i;
+        pageBtn.onclick = () => goToPage(i);
+        paginationNumbers.appendChild(pageBtn);
+    }
+}
+
+function updatePaginationButtons() {
+    const visibleProducts = filteredProducts.filter(item => item.style.display !== 'none');
+    const maxPage = Math.ceil(visibleProducts.length / itemsPerPage);
+    const buttons = document.querySelectorAll('.pagination-btn');
+    buttons.forEach(btn => btn.style.display = '');
+}
+
+
+</script>
+

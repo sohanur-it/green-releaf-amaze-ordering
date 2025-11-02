@@ -32,6 +32,7 @@ const auditLogRoutes = require('./Routes/audit-log-routes');
 const batchRoutes = require('./Routes/batch-routes');
 const alertRoutes = require('./Routes/alertRoutes');
 const module3Routes = require('./Routes/module3-routes');
+const portalRoutes = require('./Routes/portal-routes');
 
 //import services
 const masterScheduler = require('./Services/masterScheduler');
@@ -98,6 +99,7 @@ app.use('/api/v1/admin/audit-logs', auditLogRoutes); // audit log API routes
 app.use('/api/batches', batchRoutes); // batch status management API routes
 app.use('/api/v1', module3Routes); // Module 3: Product & Inventory Management API routes
 app.use('/api/alerts', alertRoutes); // sync failure alert API routes
+app.use('/', portalRoutes); // External buyer portal routes
 
 // WebSocket test page
 app.get('/test-websocket', (req, res) => {

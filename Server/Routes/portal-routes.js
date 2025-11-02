@@ -1,0 +1,22 @@
+// Server/Routes/portal-routes.js
+
+const express = require('express');
+const router = express.Router();
+const PortalController = require('../Controllers/portalController');
+const { authenticatePortalAccess, requirePortalAccess } = require('../Middleware/portalAuth');
+
+// Product catalog - requires UUID authentication
+router.get('/external/store/:uuid', authenticatePortalAccess, PortalController.showCatalog);
+
+// Shopping cart API endpoints
+router.get('/api/portal/:uuid/cart', authenticatePortalAccess, PortalController.getCart);
+router.post('/api/portal/:uuid/cart/add', authenticatePortalAccess, PortalController.addToCart);
+router.post('/api/portal/:uuid/cart/remove', authenticatePortalAccess, PortalController.removeFromCart);
+router.post('/api/portal/:uuid/cart/update', authenticatePortalAccess, PortalController.updateCartItem);
+
+// Checkout page
+router.get('/external/store/:uuid/checkout', authenticatePortalAccess, requirePortalAccess, PortalController.showCheckout);
+router.post('/api/portal/:uuid/checkout', authenticatePortalAccess, requirePortalAccess, PortalController.processCheckout);
+
+module.exports = router;
+

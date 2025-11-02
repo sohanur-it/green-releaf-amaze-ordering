@@ -1,0 +1,369 @@
+<div class="checkout-container">
+    <div class="checkout-header">
+        <h1>Checkout</h1>
+        <button class="back-to-store-btn" onclick="window.location.href='/external/store/<%= uuid %>'">
+            <i class="fas fa-arrow-left"></i> Back to Store
+        </button>
+    </div>
+    
+    <div class="checkout-content">
+        <!-- Order Summary Table -->
+        <div class="checkout-section order-summary-section">
+            <h2>Order Summary</h2>
+            <div class="order-summary-table-container">
+                <table class="order-summary-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Price</th>
+                            <th>Quantity</th>
+                            <th>Line</th>
+                        </tr>
+                    </thead>
+                    <tbody id="checkout-items">
+                        <% if (cart && cart.items && cart.items.length > 0) { %>
+                            <% cart.items.forEach((item, index) => { %>
+                                <tr class="checkout-item-row" data-line-item-id="<%= item.line_item_id %>">
+                                    <td class="item-name-cell">
+                                        <div class="product-name-with-logo">
+                                            <div class="amaze-logo-small">A</div>
+                                            <div class="product-name-details">
+                                                <div class="product-main-name">
+                                                    <%= item.brand_name || 'AMAZE' %> <%= item.product_name %>
+                                                    <% if (item.unit_size) { %> - <%= item.unit_size %><% } %>
+                                                </div>
+                                                <div class="product-sub-info">
+                                                    <% if (item.cultivar_name) { %>
+                                                        (<%= item.cultivar_name %>)
+                                                    <% } %>
+                                                    <% if (item.category_name || item.product_type) { %>
+                                                        (<%= item.category_name || '' %><% if (item.category_name && item.product_type) { %> - <% } %><%= item.product_type || '' %>)
+                                                    <% } %>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                    <td class="item-price-cell">
+                                        $<%= item.unit_price ? parseFloat(item.unit_price).toFixed(2) : '0.00' %>
+                                    </td>
+                                    <td class="item-quantity-cell">
+                                        <div class="quantity-info">
+                                            <div><%= item.quantity %> Case</div>
+                                            <% 
+                                                const totalUnits = (item.quantity || 0) * (item.units_per_case || 24);
+                                            %>
+                                            <div class="units-info"><%= totalUnits %> Units total</div>
+                                            <% if (item.unit_size) { %>
+                                                <div class="package-size">Package Size: <%= item.unit_size %></div>
+                                            <% } %>
+                                            <button class="edit-quantity-btn" onclick="openQuantityModal(<%= item.line_item_id %>, <%= item.quantity %>, <%= item.batch_id %>)" title="Edit Quantity">
+                                                <i class="fas fa-pencil"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                    <td class="item-line-cell">
+                                        <div class="line-total-actions">
+                                            <span class="line-total">$<%= item.line_total ? parseFloat(item.line_total).toFixed(2) : '0.00' %></span>
+                                            <button class="remove-item-btn" onclick="removeLineItem(<%= item.line_item_id %>)" title="Remove Item">
+                                                <i class="fas fa-times"></i>
+                                            </button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            <% }); %>
+                        <% } else { %>
+                            <tr>
+                                <td colspan="4" class="empty-cart-message">
+                                    <p>Your cart is empty.</p>
+                                    <a href="/external/store/<%= uuid %>" class="back-to-store-link">Return to Store</a>
+                                </td>
+                            </tr>
+                        <% } %>
+                    </tbody>
+                </table>
+                <% if (cart && cart.items && cart.items.length > 0) { %>
+                    <div class="order-total-row">
+                        <span>Total: $<%= cart.total ? parseFloat(cart.total).toFixed(2) : '0.00' %></span>
+                    </div>
+                <% } %>
+            </div>
+            
+            <!-- Order Notes -->
+            <div class="order-notes-section">
+                <label for="order-notes">Order Notes / Requests for Seller</label>
+                <textarea id="order-notes" name="order_notes" rows="5" placeholder="Enter any special requests or notes for the seller..."></textarea>
+            </div>
+        </div>
+        
+        <!-- Shipping and Payment Section -->
+        <div class="checkout-bottom-section">
+            <!-- Left: Shipping Information -->
+            <div class="shipping-section">
+                <h3 class="section-header purple-header">Select Location</h3>
+                <select id="location-select" class="location-dropdown">
+                    <option value="">Select a location...</option>
+                </select>
+                
+                <div class="shipping-form-grid">
+                    <div class="form-group">
+                        <label for="ship-to">Ship To</label>
+                        <input type="text" id="ship-to" name="ship_to" value="Green Releaf">
+                    </div>
+                    <div class="form-group">
+                        <label for="state-license">State License Number</label>
+                        <input type="text" id="state-license" name="state_license">
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="address-line-one">Address Line One</label>
+                        <input type="text" id="address-line-one" name="address_line_one">
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="address-line-two">Address Line Two</label>
+                        <input type="text" id="address-line-two" name="address_line_two">
+                    </div>
+                    <div class="form-group">
+                        <label for="city">City</label>
+                        <input type="text" id="city" name="city">
+                    </div>
+                    <div class="form-group">
+                        <label for="state">State</label>
+                        <input type="text" id="state" name="state" value="Missouri">
+                    </div>
+                    <div class="form-group">
+                        <label for="postal-code">Postal Code</label>
+                        <input type="text" id="postal-code" name="postal_code">
+                    </div>
+                    <div class="form-group">
+                        <label for="country">Country</label>
+                        <input type="text" id="country" name="country" value="US">
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Right: Payment and Actions -->
+            <div class="payment-section">
+                <div class="payment-illustration">
+                    <div class="illustration-icon">🏪</div>
+                </div>
+                <div class="terms-text">Terms: Net 15</div>
+                <button class="sign-in-btn">Sign In</button>
+                <div class="final-total">
+                    Final Total: $<%= cart && cart.total ? parseFloat(cart.total).toFixed(2) : '0.00' %>
+                </div>
+                <button id="place-order-btn" class="place-order-guest-btn" onclick="placeOrder()" <%= (!cart || !cart.items || cart.items.length === 0) ? 'disabled' : '' %>>
+                    Place Order As Guest
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quantity Edit Modal -->
+<div id="quantityModal" class="quantity-modal" style="display: none;">
+    <div class="modal-overlay" onclick="closeQuantityModal()"></div>
+    <div class="modal-content-small">
+        <button class="modal-close" onclick="closeQuantityModal()">
+            <i class="fas fa-times"></i>
+        </button>
+        <h3>Edit Quantity</h3>
+        <div class="quantity-modal-body">
+            <label for="modal-quantity-input">Quantity (Cases):</label>
+            <input type="number" id="modal-quantity-input" min="1" value="1">
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="closeQuantityModal()">Cancel</button>
+                <button class="btn-save" onclick="saveQuantity()">Save</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const uuid = '<%= uuid %>';
+let currentEditingLineItemId = null;
+
+// Update cart badge count in header
+function updateCartBadge() {
+    // Use cart data from server (more accurate than counting DOM elements)
+    const itemCount = <%= (cart && cart.items) ? cart.items.length : 0 %>;
+    const badge = document.getElementById('cart-count-badge');
+    if (badge) {
+        badge.textContent = itemCount;
+        badge.style.display = itemCount > 0 ? 'inline-block' : 'none';
+    }
+}
+
+// Initialize cart badge on page load
+document.addEventListener('DOMContentLoaded', function() {
+    updateCartBadge();
+});
+
+function openQuantityModal(lineItemId, currentQuantity, batchId) {
+    currentEditingLineItemId = lineItemId;
+    document.getElementById('modal-quantity-input').value = currentQuantity;
+    document.getElementById('modal-quantity-input').max = ''; // Will be set based on availability
+    document.getElementById('quantityModal').style.display = 'flex';
+}
+
+function closeQuantityModal() {
+    document.getElementById('quantityModal').style.display = 'none';
+    currentEditingLineItemId = null;
+}
+
+async function saveQuantity() {
+    const newQuantity = parseInt(document.getElementById('modal-quantity-input').value);
+    if (!newQuantity || newQuantity <= 0) {
+        alert('Please enter a valid quantity');
+        return;
+    }
+    
+    if (!currentEditingLineItemId) {
+        alert('Error: Missing line item information');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/portal/${uuid}/cart/update`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                line_item_id: currentEditingLineItemId,
+                quantity: newQuantity
+            })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            closeQuantityModal();
+            // Reload page to refresh cart and update badge
+            window.location.reload();
+        } else {
+            alert('Error updating quantity: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Failed to update quantity. Please try again.');
+    }
+}
+
+async function removeLineItem(lineItemId, reload = true) {
+    if (!confirm('Are you sure you want to remove this item?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/portal/${uuid}/cart/remove`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                line_item_id: lineItemId
+            })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            // Optimistic update: Remove row immediately
+            const row = document.querySelector(`tr[data-line-item-id="${lineItemId}"]`);
+            if (row) {
+                row.remove();
+                
+                // Recalculate badge count
+                const remainingItems = document.querySelectorAll('.checkout-item-row');
+                const itemCount = remainingItems.length;
+                const badge = document.getElementById('cart-count-badge');
+                if (badge) {
+                    badge.textContent = itemCount;
+                    badge.style.display = itemCount > 0 ? 'inline-block' : 'none';
+                }
+            }
+            
+            // Reload page if requested to get fresh data from server
+            if (reload) {
+                window.location.reload();
+            } else {
+                // Check if cart is empty
+                const remainingItems = document.querySelectorAll('.checkout-item-row');
+                if (remainingItems.length === 0) {
+                    // Show empty cart message
+                    const tbody = document.getElementById('checkout-items');
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="4" class="empty-cart-message">
+                                <p>Your cart is empty.</p>
+                                <a href="/external/store/${uuid}" class="back-to-store-link">Return to Store</a>
+                            </td>
+                        </tr>
+                    `;
+                    // Hide total row
+                    const totalRow = document.querySelector('.order-total-row');
+                    if (totalRow) totalRow.style.display = 'none';
+                    // Disable place order button
+                    const placeOrderBtn = document.getElementById('place-order-btn');
+                    if (placeOrderBtn) placeOrderBtn.disabled = true;
+                }
+            }
+        } else {
+            alert('Error removing item: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Failed to remove item. Please try again.');
+    }
+}
+
+async function placeOrder() {
+    const orderNotes = document.getElementById('order-notes').value;
+    const shipTo = document.getElementById('ship-to').value;
+    const stateLicense = document.getElementById('state-license').value;
+    const addressLineOne = document.getElementById('address-line-one').value;
+    const addressLineTwo = document.getElementById('address-line-two').value;
+    const city = document.getElementById('city').value;
+    const state = document.getElementById('state').value;
+    const postalCode = document.getElementById('postal-code').value;
+    const country = document.getElementById('country').value;
+    
+    if (!addressLineOne || !city || !state || !postalCode) {
+        alert('Please fill in all required shipping information');
+        return;
+    }
+    
+    const orderData = {
+        shipping: {
+            ship_to: shipTo,
+            state_license: stateLicense,
+            address_line_one: addressLineOne,
+            address_line_two: addressLineTwo,
+            city: city,
+            state: state,
+            postal_code: postalCode,
+            country: country
+        },
+        order_notes: orderNotes,
+        uuid: uuid
+    };
+    
+    try {
+        const response = await fetch(`/api/portal/${uuid}/checkout`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(orderData)
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            alert('Order placed successfully!');
+            window.location.href = `/external/store/${uuid}`;
+        } else {
+            alert('Error placing order: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Failed to place order. Please try again.');
+    }
+}
+</script>
