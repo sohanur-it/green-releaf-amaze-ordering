@@ -135,6 +135,60 @@
     color: #9ca3af;
     margin-bottom: 2rem;
 }
+
+.search-toggle-container {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.search-toggle-btn {
+    background: #667eea;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.search-toggle-btn:hover {
+    background: #764ba2;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.search-toggle-btn.active {
+    background: #764ba2;
+}
+
+.search-input-container {
+    display: none;
+    position: relative;
+    max-width: 300px;
+}
+
+.search-input-container.active {
+    display: block;
+}
+
+#searchProducts {
+    width: 100%;
+    transition: all 0.3s ease;
+    border-radius: 8px;
+    border: 1px solid #ddd;
+    padding: 0.5rem 1rem;
+}
+
+#searchProducts:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+    outline: none;
+}
 </style>
 
 <div class="container-fluid p-4">
@@ -257,7 +311,15 @@
             
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h5 class="mb-0">All Products (<span id="filteredCount"><%= totalProducts %></span>)</h5>
-                <input type="text" id="searchProducts" class="form-control" style="max-width: 300px;" placeholder="Search products...">
+                <div class="search-toggle-container">
+                    <button class="search-toggle-btn" id="searchToggleBtn" onclick="toggleSearch()">
+                        <i class="fas fa-search"></i>
+                        <span>Search</span>
+                    </button>
+                    <div class="search-input-container" id="searchInputContainer">
+                        <input type="text" id="searchProducts" class="form-control" placeholder="Search products...">
+                    </div>
+                </div>
             </div>
             <div class="table-responsive">
                 <table class="table table-hover modern-table">
@@ -507,6 +569,26 @@ function toggleShowArchived(show) {
         url.searchParams.delete('show_archived');
     }
     window.location.href = url.toString();
+}
+
+// Toggle search input
+function toggleSearch() {
+    const btn = document.getElementById('searchToggleBtn');
+    const container = document.getElementById('searchInputContainer');
+    const input = document.getElementById('searchProducts');
+    
+    if (container.classList.contains('active')) {
+        // Hide search
+        container.classList.remove('active');
+        btn.classList.remove('active');
+        input.value = '';
+        applyFilters(); // Reset filters when closing
+    } else {
+        // Show search
+        container.classList.add('active');
+        btn.classList.add('active');
+        input.focus();
+    }
 }
 
 // Initial filter setup

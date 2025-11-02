@@ -18,6 +18,7 @@ class PortalController {
                     p.name as product_name,
                     p.brand_name,
                     p.cultivar_name,
+                    p.cultivar_type_name,
                     p.default_price,
                     p.product_type_name as product_type,
                     p.category_name,

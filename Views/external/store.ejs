@@ -148,9 +148,17 @@
                 <h2>Category: All Products (<span id="product-count"><%= products.reduce((sum, p) => sum + (p.available_batches?.length || 0), 0) %></span>)</h2>
             </div>
             <div class="catalog-header-right">
-                <button class="catalog-header-icon" title="Search">
-                    <i class="fas fa-search"></i>
-                </button>
+                <div class="search-container">
+                    <button class="catalog-header-icon" id="search-toggle-btn" title="Search" onclick="toggleSearchBox()">
+                        <i class="fas fa-search"></i>
+                    </button>
+                    <div class="search-input-wrapper" id="search-input-wrapper" style="display: none;">
+                        <input type="text" id="portal-search-input" class="portal-search-input" placeholder="Search products...">
+                        <button class="search-close-btn" onclick="closeSearchBox()">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
                 <div class="view-toggle">
                     <button class="view-btn active" data-view="grid" onclick="switchView('grid')">
                         <i class="fas fa-th"></i> Grid
@@ -174,6 +182,7 @@
                              data-product-id="<%= product.product_id %>"
                              data-product-name="<%= product.product_name %>"
                              data-cultivar-name="<%= product.cultivar_name %>"
+                             data-cultivar-type-name="<%= product.cultivar_type_name || '' %>"
                              data-brand-name="<%= product.brand_name %>"
                              data-category-name="<%= product.category_name %>"
                              data-product-type="<%= product.product_type %>"
@@ -207,8 +216,8 @@
                                 <h3 class="product-name"><%= (product.cultivar_name || product.product_name).toUpperCase() %></h3>
                                 
                                 <!-- THC Bar with text -->
-                                <div class="thc-bar <%= product.product_type && product.product_type.toLowerCase().includes('indica') ? 'indica' : (product.product_type && product.product_type.toLowerCase().includes('sativa') ? 'sativa' : 'hybrid') %>">
-                                    <%= product.product_type || 'Hybrid' %> - <%= batch.thc_percentage ? batch.thc_percentage.toFixed(2) : '0.00' %>% THC
+                                <div class="thc-bar <%= product.cultivar_type_name && product.cultivar_type_name.toLowerCase().includes('indica') ? 'indica' : (product.cultivar_type_name && product.cultivar_type_name.toLowerCase().includes('sativa') ? 'sativa' : 'hybrid') %>">
+                                    <%= product.cultivar_type_name || product.product_type || 'Hybrid' %> - <%= batch.thc_percentage ? batch.thc_percentage.toFixed(2) : '0.00' %>% THC
                                 </div>
                                 
                                 <div class="product-variant">
@@ -281,6 +290,7 @@
                                     data-product-id="<%= product.product_id %>"
                                     data-product-name="<%= product.product_name %>"
                                     data-cultivar-name="<%= product.cultivar_name %>"
+                                    data-cultivar-type-name="<%= product.cultivar_type_name || '' %>"
                                     data-brand-name="<%= product.brand_name %>"
                                     data-category-name="<%= product.category_name %>"
                                     data-product-type="<%= product.product_type %>"
@@ -795,6 +805,12 @@ document.addEventListener('DOMContentLoaded', function() {
             input.addEventListener('input', applyFilters);
         }
     });
+    
+    // Add event listener to search input
+    const searchInput = document.getElementById('portal-search-input');
+    if (searchInput) {
+        searchInput.addEventListener('input', applyFilters);
+    }
     
     // Sync pending cart updates before page unload
     window.addEventListener('beforeunload', async (e) => {
@@ -1479,6 +1495,24 @@ function closeProductModal() {
 }
 
 // View Toggle Functions
+function toggleSearchBox() {
+    const searchWrapper = document.getElementById('search-input-wrapper');
+    const searchInput = document.getElementById('portal-search-input');
+    
+    if (searchWrapper.style.display === 'none' || !searchWrapper.style.display) {
+        searchWrapper.style.display = 'flex';
+        setTimeout(() => searchInput.focus(), 100);
+    }
+}
+
+function closeSearchBox() {
+    const searchWrapper = document.getElementById('search-input-wrapper');
+    const searchInput = document.getElementById('portal-search-input');
+    searchWrapper.style.display = 'none';
+    searchInput.value = '';
+    applyFilters(); // Clear search results
+}
+
 function switchView(viewType) {
     const gridView = document.getElementById('grid-view');
     const tableView = document.getElementById('table-view');
@@ -1551,10 +1585,25 @@ function applyFilters() {
     const selectedBrands = Array.from(document.querySelectorAll('input[name="brand"]:checked')).map(cb => cb.value);
     const minPotency = parseFloat(document.getElementById('min-potency')?.value || 0);
     const maxPotency = parseFloat(document.getElementById('max-potency')?.value || 100);
+    const searchTerm = document.getElementById('portal-search-input')?.value.toLowerCase() || '';
     
     // Filter products
     filteredProducts.forEach(item => {
         let shouldShow = true;
+        
+        // Search filter (search in product name, cultivar name, brand name, batch name)
+        if (searchTerm) {
+            const searchableText = [
+                item.dataset.productName,
+                item.dataset.cultivarName,
+                item.dataset.brandName,
+                item.dataset.batchName
+            ].join(' ').toLowerCase();
+            
+            if (!searchableText.includes(searchTerm)) {
+                shouldShow = false;
+            }
+        }
         
         // Category filter
         if (selectedCategories.length > 0) {
@@ -1564,9 +1613,9 @@ function applyFilters() {
             }
         }
         
-        // Strain filter
+        // Strain filter (use cultivar_type_name from database)
         if (selectedStrains.length > 0 && shouldShow) {
-            const strain = item.dataset.productType || '';
+            const strain = item.dataset.cultivarTypeName || '';
             if (!selectedStrains.some(s => strain.includes(s))) {
                 shouldShow = false;
             }
