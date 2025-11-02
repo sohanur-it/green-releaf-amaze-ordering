@@ -38,14 +38,15 @@ class AllocationService {
     }
 
     /**
-     * Allocate batch to order with row locking to prevent overselling
+     * Allocate batch to invoice with row locking to prevent overselling
+     * Module 4 compliant - works with ORDERS-invoices and ORDERS-invoice-line-items
      * @param {number} batchId - Batch ID
-     * @param {number} requestedQty - Requested quantity
-     * @param {number} orderId - Order ID
-     * @param {number} userId - User ID performing allocation
+     * @param {number} quantity - Requested quantity
+     * @param {number} invoiceId - Invoice ID
+     * @param {number} lineItemId - Line item ID (optional, will be created if not provided)
      * @returns {Promise<Object>} - Allocation result
      */
-    async allocateBatchToOrder(batchId, requestedQty, orderId, userId) {
+    async allocateBatchToInvoice(batchId, quantity, invoiceId, lineItemId = null) {
         const client = await this.pool.connect();
         
         try {
@@ -73,69 +74,54 @@ class AllocationService {
             const available = batchData.quantity - batchData.allocated_quantity;
 
             // Check if sufficient inventory available
-            if (available < requestedQty) {
+            if (available < quantity) {
                 await client.query('ROLLBACK');
                 return {
                     success: false,
-                    error: `Insufficient inventory. Available: ${available}, Requested: ${requestedQty}`,
-                    batch_name: batchData.batch_name,
+                    error: 'insufficient_inventory',
                     available: available,
-                    requested: requestedQty
+                    requested: quantity,
+                    batch_name: batchData.batch_name
                 };
             }
 
             // Increment allocated_quantity
             const oldAllocated = batchData.allocated_quantity;
-            const newAllocated = oldAllocated + requestedQty;
+            const newAllocated = oldAllocated + quantity;
 
             await client.query(`
                 UPDATE "ORDERS-batches"
-                SET allocated_quantity = $1
+                SET allocated_quantity = allocated_quantity + $1
                 WHERE id = $2
-            `, [newAllocated, batchId]);
+            `, [quantity, batchId]);
 
-            // Create order_items record
-            const orderItemResult = await client.query(`
-                INSERT INTO order_items (
-                    order_id, batch_id, requested_quantity, 
-                    allocated_quantity, unit_price, 
-                    allocated_at, created_at, updated_at
-                )
-                VALUES ($1, $2, $3, $4, 
-                        COALESCE((SELECT override_price FROM "ORDERS-batches" WHERE id = $2),
-                                (SELECT default_price FROM "ORDERS-products" p 
-                                 INNER JOIN "ORDERS-batches" b ON p.entry_id = b.fk_master_product_id 
-                                 WHERE b.id = $2)), 0.00),
-                        NOW(), NOW(), NOW())
-                ON CONFLICT (order_id, batch_id) 
-                DO UPDATE SET 
-                    requested_quantity = EXCLUDED.requested_quantity,
-                    allocated_quantity = EXCLUDED.allocated_quantity
-                RETURNING id, unit_price, (allocated_quantity * unit_price) as total_price
-            `, [orderId, batchId, requestedQty, requestedQty]);
-
-            const orderItem = orderItemResult.rows[0];
+            // Update line item if provided, otherwise log allocation separately
+            if (lineItemId) {
+                await client.query(`
+                    UPDATE "ORDERS-invoice-line-items"
+                    SET quantity_allocated = $1
+                    WHERE id = $2
+                `, [quantity, lineItemId]);
+            }
 
             // Log to batch history
             await client.query(`
                 INSERT INTO "ORDERS-batch-history" (
                     batch_id, change_type, field_name,
                     old_value, new_value, reason,
-                    related_invoice_id, changed_by_user_id,
-                    changed_by_system
-                ) VALUES ($1, 'allocation_increased', 'allocated_quantity', 
-                          $2, $3, 'Allocated to order', $4, $5, true)
+                    related_invoice_id, changed_by_system
+                ) VALUES ($1, 'allocation_increased', 'allocated_quantity',
+                          $2, $3, 'Allocated to invoice', $4, true)
             `, [
                 batchId,
                 oldAllocated.toString(),
                 newAllocated.toString(),
-                orderId,
-                userId
+                invoiceId
             ]);
 
             await client.query('COMMIT');
 
-            console.log(`✅ Allocated ${requestedQty} units from batch ${batchId} to order ${orderId}`);
+            console.log(`✅ Allocated ${quantity} units from batch ${batchId} to invoice ${invoiceId}`);
 
             // Check if this allocation should trigger auto-promotion
             try {
@@ -151,22 +137,24 @@ class AllocationService {
                 // Don't fail the allocation if promotion fails
             }
 
+            // Broadcast inventory update via WebSocket
+            try {
+                await this.broadcastInventoryUpdate(batchId, available - quantity);
+            } catch (wsError) {
+                console.error('WebSocket broadcast error (non-critical):', wsError.message);
+            }
+
             return {
                 success: true,
                 batch_id: batchId,
                 batch_name: batchData.batch_name,
-                old_allocated: oldAllocated,
-                new_allocated: newAllocated,
-                available_before: available,
-                available_after: available - requestedQty,
-                order_item_id: orderItem.id,
-                unit_price: orderItem.unit_price,
-                total_price: orderItem.total_price
+                allocated: quantity,
+                remaining_available: available - quantity
             };
 
         } catch (error) {
             await client.query('ROLLBACK');
-            console.error('❌ Error allocating batch to order:', error.message);
+            console.error('❌ Error allocating batch to invoice:', error.message);
             
             return {
                 success: false,
@@ -178,83 +166,63 @@ class AllocationService {
     }
 
     /**
-     * Release allocation (e.g., when order is cancelled)
-     * @param {number} orderId - Order ID
-     * @param {number} userId - User ID
+     * Release allocation for a specific batch (cart removal, order cancellation, etc.)
+     * @param {number} batchId - Batch ID
+     * @param {number} quantity - Quantity to release
+     * @param {number} invoiceId - Invoice ID
+     * @param {string} reason - Reason for release
      * @returns {Promise<Object>} - Release result
      */
-    async releaseAllocation(orderId, userId) {
+    async releaseAllocation(batchId, quantity, invoiceId, reason) {
         const client = await this.pool.connect();
         
         try {
             await client.query('BEGIN');
 
-            // Get all allocations for this order
-            const allocations = await client.query(`
-                SELECT oi.batch_id, oi.allocated_quantity, b.batch_name
-                FROM order_items oi
-                INNER JOIN "ORDERS-batches" b ON oi.batch_id = b.id
-                WHERE oi.order_id = $1 AND oi.allocated_quantity > 0
-            `, [orderId]);
+            const batch = await client.query(`
+                SELECT allocated_quantity FROM "ORDERS-batches"
+                WHERE id = $1
+                FOR UPDATE
+            `, [batchId]);
 
-            let releasedBatches = [];
-
-            for (const allocation of allocations.rows) {
-                const batchId = allocation.batch_id;
-                const releasedQty = allocation.allocated_quantity;
-
-                // Decrement allocated_quantity
-                await client.query(`
-                    UPDATE "ORDERS-batches"
-                    SET allocated_quantity = allocated_quantity - $1
-                    WHERE id = $2
-                `, [releasedQty, batchId]);
-
-                // Mark order item as released
-                await client.query(`
-                    UPDATE order_items
-                    SET allocated_quantity = 0,
-                        updated_at = NOW()
-                    WHERE order_id = $1 AND batch_id = $2
-                `, [orderId, batchId]);
-
-                // Log to batch history
-                const currentAllocated = await client.query(`
-                    SELECT allocated_quantity FROM "ORDERS-batches" WHERE id = $1
-                `, [batchId]);
-
-                await client.query(`
-                    INSERT INTO "ORDERS-batch-history" (
-                        batch_id, change_type, field_name,
-                        old_value, new_value, reason,
-                        related_invoice_id, changed_by_user_id,
-                        changed_by_system
-                    ) VALUES ($1, 'allocation_released', 'allocated_quantity', 
-                              $2, $3, 'Order cancelled or modified', $4, $5, false)
-                `, [
-                    batchId,
-                    releasedQty.toString(),
-                    currentAllocated.rows[0].allocated_quantity.toString(),
-                    orderId,
-                    userId
-                ]);
-
-                releasedBatches.push({
-                    batch_id: batchId,
-                    batch_name: allocation.batch_name,
-                    released_quantity: releasedQty
-                });
-
-                console.log(`✅ Released ${releasedQty} units from batch ${allocation.batch_name}`);
+            if (batch.rows.length === 0) {
+                await client.query('ROLLBACK');
+                return {
+                    success: false,
+                    error: 'Batch not found'
+                };
             }
+
+            const currentAllocated = batch.rows[0].allocated_quantity;
+
+            // Decrement allocation
+            await client.query(`
+                UPDATE "ORDERS-batches"
+                SET allocated_quantity = allocated_quantity - $1
+                WHERE id = $2
+            `, [quantity, batchId]);
+
+            // Log history
+            await client.query(`
+                INSERT INTO "ORDERS-batch-history" (
+                    batch_id, change_type, field_name,
+                    old_value, new_value, reason,
+                    related_invoice_id, changed_by_system
+                ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
+                          $2, $3, $4, $5, true)
+            `, [batchId, currentAllocated, currentAllocated - quantity, reason, invoiceId]);
 
             await client.query('COMMIT');
 
-            return {
-                success: true,
-                released_count: releasedBatches.length,
-                batches: releasedBatches
-            };
+            // Broadcast inventory update via WebSocket
+            try {
+                const newAvailable = await this.getAvailableQuantity(batchId);
+                await this.broadcastInventoryUpdate(batchId, newAvailable);
+            } catch (wsError) {
+                console.error('WebSocket broadcast error (non-critical):', wsError.message);
+            }
+
+            return { success: true };
 
         } catch (error) {
             await client.query('ROLLBACK');
@@ -266,6 +234,170 @@ class AllocationService {
             };
         } finally {
             client.release();
+        }
+    }
+
+    /**
+     * Release ALL allocations for an invoice (cancellation)
+     * Module 4 compliant
+     * @param {number} invoiceId - Invoice ID
+     * @param {Object} client - Database client (will create own if not provided)
+     */
+    async releaseAllAllocations(invoiceId, client = null) {
+        const shouldReleaseClient = !client;
+        if (!client) {
+            client = await this.pool.connect();
+        }
+        
+        const shouldReleaseTransaction = !client._transactionStarted;
+        try {
+            if (shouldReleaseTransaction) {
+                await client.query('BEGIN');
+            }
+            
+            const lineItems = await client.query(`
+                SELECT id, fk_batch_id, quantity_allocated
+                FROM "ORDERS-invoice-line-items"
+                WHERE fk_invoice_id = $1 AND quantity_allocated > 0
+            `, [invoiceId]);
+            
+            for (const item of lineItems.rows) {
+                const batchId = item.fk_batch_id;
+                const quantity = item.quantity_allocated;
+                
+                // Lock batch
+                const batch = await client.query(`
+                    SELECT allocated_quantity FROM "ORDERS-batches"
+                    WHERE id = $1
+                    FOR UPDATE
+                `, [batchId]);
+                
+                if (batch.rows.length === 0) continue;
+                
+                const currentAllocated = batch.rows[0].allocated_quantity;
+                
+                // Decrement allocation
+                await client.query(`
+                    UPDATE "ORDERS-batches"
+                    SET allocated_quantity = allocated_quantity - $1
+                    WHERE id = $2
+                `, [quantity, batchId]);
+                
+                // Log history
+                await client.query(`
+                    INSERT INTO "ORDERS-batch-history" (
+                        batch_id, change_type, field_name,
+                        old_value, new_value, reason,
+                        related_invoice_id, changed_by_system
+                    ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
+                              $2, $3, 'Invoice cancelled', $4, true)
+                `, [batchId, currentAllocated, currentAllocated - quantity, invoiceId]);
+                
+                // Zero out line item allocation
+                await client.query(`
+                    UPDATE "ORDERS-invoice-line-items"
+                    SET quantity_allocated = 0
+                    WHERE id = $1
+                `, [item.id]);
+            }
+            
+            if (shouldReleaseTransaction) {
+                await client.query('COMMIT');
+            }
+            
+            return { success: true };
+        } catch (error) {
+            if (shouldReleaseTransaction) {
+                await client.query('ROLLBACK');
+            }
+            console.error('Error releasing all allocations:', error);
+            return { success: false, error: error.message };
+        } finally {
+            if (shouldReleaseClient) {
+                client.release();
+            }
+        }
+    }
+
+    /**
+     * Finalize inventory deduction after delivery
+     * This is when we actually remove from batch.quantity
+     * Module 4 compliant
+     * @param {number} invoiceId - Invoice ID
+     * @param {Object} client - Database client (will create own if not provided)
+     */
+    async finalizeInventoryDeductions(invoiceId, client = null) {
+        const shouldReleaseClient = !client;
+        if (!client) {
+            client = await this.pool.connect();
+        }
+        
+        try {
+            const lineItems = await client.query(`
+                SELECT fk_batch_id, quantity_fulfilled
+                FROM "ORDERS-invoice-line-items"
+                WHERE fk_invoice_id = $1
+            `, [invoiceId]);
+            
+            for (const item of lineItems.rows) {
+                const batchId = item.fk_batch_id;
+                const quantity = item.quantity_fulfilled;
+                
+                // Decrease actual quantity AND allocated_quantity
+                await client.query(`
+                    UPDATE "ORDERS-batches"
+                    SET quantity = quantity - $1, allocated_quantity = allocated_quantity - $1
+                    WHERE id = $2
+                `, [quantity, batchId]);
+                
+                // Log the final deduction
+                await client.query(`
+                    INSERT INTO "ORDERS-batch-history" (
+                        batch_id, change_type, reason,
+                        related_invoice_id, changed_by_system
+                    ) VALUES ($1, 'quantity_deducted', 'Invoice delivered and finalized', $2, true)
+                `, [batchId, invoiceId]);
+            }
+            
+            return { success: true };
+        } catch (error) {
+            console.error('Error finalizing inventory deductions:', error);
+            return { success: false, error: error.message };
+        } finally {
+            if (shouldReleaseClient) {
+                client.release();
+            }
+        }
+    }
+
+    /**
+     * Get available quantity for a batch
+     * @param {number} batchId - Batch ID
+     * @returns {Promise<number>} - Available quantity
+     */
+    async getAvailableQuantity(batchId) {
+        const result = await this.pool.query(`
+            SELECT (quantity - allocated_quantity) as available
+            FROM "ORDERS-batches"
+            WHERE id = $1
+        `, [batchId]);
+        
+        return result.rows[0]?.available || 0;
+    }
+
+    /**
+     * Broadcast inventory update via WebSocket (placeholder)
+     * @param {number} batchId - Batch ID
+     * @param {number} availableQuantity - New available quantity
+     */
+    async broadcastInventoryUpdate(batchId, availableQuantity) {
+        try {
+            const websocketService = require('./websocketService');
+            await websocketService.broadcastInventoryUpdate(batchId, availableQuantity);
+            console.log(`📡 Broadcast: Batch ${batchId} now has ${availableQuantity} available`);
+        } catch (error) {
+            console.error('Error broadcasting inventory update:', error);
+            // Don't throw - WebSocket issues shouldn't break allocations
         }
     }
 

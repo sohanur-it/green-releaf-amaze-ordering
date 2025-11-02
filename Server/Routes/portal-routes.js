@@ -18,5 +18,8 @@ router.post('/api/portal/:uuid/cart/update', authenticatePortalAccess, PortalCon
 router.get('/external/store/:uuid/checkout', authenticatePortalAccess, requirePortalAccess, PortalController.showCheckout);
 router.post('/api/portal/:uuid/checkout', authenticatePortalAccess, requirePortalAccess, PortalController.processCheckout);
 
+// Order confirmation page
+router.get('/external/store/:uuid/confirmation/:invoiceId', authenticatePortalAccess, requirePortalAccess, PortalController.showConfirmation);
+
 module.exports = router;
 

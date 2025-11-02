@@ -1,0 +1,495 @@
+<!-- Create Invoice Page -->
+<style>
+.create-invoice-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.form-section {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+    color: #333;
+}
+
+.form-group select,
+.form-group input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.product-search-section {
+    margin-top: 20px;
+}
+
+.product-search-results {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-top: 10px;
+    display: none;
+}
+
+.product-result-item {
+    padding: 12px;
+    border-bottom: 1px solid #eee;
+    cursor: pointer;
+}
+
+.product-result-item:hover {
+    background: #f5f5f5;
+}
+
+.line-items-list {
+    margin-top: 20px;
+}
+
+.line-item-row {
+    display: flex;
+    align-items: center;
+    padding: 12px;
+    background: #f9f9f9;
+    border-radius: 4px;
+    margin-bottom: 10px;
+    gap: 12px;
+}
+
+.line-item-info {
+    flex: 1;
+}
+
+.line-item-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.btn {
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: none;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.btn-primary {
+    background: #007bff;
+    color: white;
+}
+
+.btn-danger {
+    background: #dc3545;
+    color: white;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.totals-section {
+    text-align: right;
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 2px solid #ddd;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 40px;
+    color: #999;
+}
+</style>
+
+<div class="create-invoice-container">
+    <div class="page-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+        <h1>Create Invoice</h1>
+        <a href="/admin/invoices" class="btn btn-secondary">← Back to Invoices</a>
+    </div>
+
+    <form id="create-invoice-form">
+        <!-- Location Selection -->
+        <div class="form-section">
+            <h3>Location Selection</h3>
+            <div class="form-group">
+                <label for="location-select">Buyer Location *</label>
+                <select id="location-select" required>
+                    <option value="">-- Select Location --</option>
+                    <% 
+                    // Group buyers by name
+                    const buyerGroups = {};
+                    buyers.forEach(item => {
+                        if (!buyerGroups[item.buyer_name]) {
+                            buyerGroups[item.buyer_name] = [];
+                        }
+                        buyerGroups[item.buyer_name].push(item);
+                    });
+                    
+                    Object.keys(buyerGroups).sort().forEach(buyerName => {
+                        buyerGroups[buyerName].forEach(loc => {
+                    %>
+                    <option value="<%= loc.location_id %>" data-buyer-id="<%= loc.buyer_id %>">
+                        <%= buyerName %> - <%= loc.location_name %>
+                    </option>
+                    <% }); }); %>
+                </select>
+            </div>
+        </div>
+
+        <!-- Product Search and Add -->
+        <div class="form-section">
+            <h3>Add Products</h3>
+            <div class="form-group">
+                <label for="product-search">Search Products</label>
+                <input type="text" id="product-search" placeholder="Search by product name, brand, or batch..." autocomplete="off">
+                <div id="product-search-results" class="product-search-results"></div>
+            </div>
+        </div>
+
+        <!-- Line Items -->
+        <div class="form-section">
+            <h3>Line Items</h3>
+            <div id="line-items-list" class="line-items-list">
+                <div class="empty-state">No products added yet. Search and add products above.</div>
+            </div>
+            <div id="totals-section" class="totals-section" style="display: none;">
+                <div style="font-size: 1.2rem; font-weight: 600;">
+                    Total: $<span id="invoice-total">0.00</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notes -->
+        <div class="form-section">
+            <h3>Notes</h3>
+            <div class="form-group">
+                <label for="customer-notes">Customer Notes</label>
+                <textarea id="customer-notes" rows="3" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="internal-notes">Internal Notes</label>
+                <textarea id="internal-notes" rows="3" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"></textarea>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div style="display: flex; gap: 12px; margin-top: 20px;">
+            <button type="submit" class="btn btn-primary" id="create-invoice-btn">Create Invoice</button>
+            <a href="/admin/invoices" class="btn btn-secondary">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<script>
+let selectedLocationId = null;
+let selectedBuyerId = null;
+let lineItems = [];
+let productCache = [];
+
+// Initialize
+document.addEventListener('DOMContentLoaded', function() {
+    // Location selection
+    document.getElementById('location-select').addEventListener('change', function() {
+        selectedLocationId = this.value;
+        selectedBuyerId = this.options[this.selectedIndex].getAttribute('data-buyer-id');
+        loadProductsForLocation(selectedLocationId);
+    });
+
+    // Product search
+    let searchTimeout;
+    document.getElementById('product-search').addEventListener('input', function() {
+        clearTimeout(searchTimeout);
+        const query = this.value.trim();
+        
+        if (query.length < 2) {
+            document.getElementById('product-search-results').style.display = 'none';
+            return;
+        }
+        
+        searchTimeout = setTimeout(() => {
+            searchProducts(query);
+        }, 300);
+    });
+
+    // Form submission
+    document.getElementById('create-invoice-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        await createInvoice();
+    });
+
+    // Close search results on outside click
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('.product-search-section')) {
+            document.getElementById('product-search-results').style.display = 'none';
+        }
+    });
+});
+
+async function loadProductsForLocation(locationId) {
+    if (!locationId) return;
+    
+    try {
+        const response = await fetch(`/api/v1/invoices/products?location_id=${locationId}`);
+        const data = await response.json();
+        
+        if (data.success && data.products) {
+            productCache = data.products;
+        }
+    } catch (error) {
+        console.error('Error loading products:', error);
+    }
+}
+
+async function searchProducts(query) {
+    if (!selectedLocationId) {
+        alert('Please select a location first');
+        return;
+    }
+
+    try {
+        const response = await fetch(`/api/v1/invoices/products?location_id=${selectedLocationId}&search=${encodeURIComponent(query)}`);
+        const data = await response.json();
+        
+        const resultsDiv = document.getElementById('product-search-results');
+        
+        if (data.success && data.products && data.products.length > 0) {
+            resultsDiv.innerHTML = data.products.map(product => `
+                <div class="product-result-item" onclick="selectProduct(${product.product_id})">
+                    <strong>${product.brand_name || 'AMAZE'} ${product.name}</strong>
+                    <div style="font-size: 0.9rem; color: #666;">
+                        ${product.product_type_name || ''} | $${parseFloat(product.default_price || 0).toFixed(2)}
+                    </div>
+                </div>
+            `).join('');
+            resultsDiv.style.display = 'block';
+        } else {
+            resultsDiv.innerHTML = '<div class="product-result-item">No products found</div>';
+            resultsDiv.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Error searching products:', error);
+    }
+}
+
+async function selectProduct(productId) {
+    // Hide search results
+    document.getElementById('product-search-results').style.display = 'none';
+    document.getElementById('product-search').value = '';
+
+    // Load batches for this product
+    try {
+        const response = await fetch(`/api/v1/invoices/products/${productId}/batches?location_id=${selectedLocationId}`);
+        const data = await response.json();
+        
+        if (data.success && data.batches && data.batches.length > 0) {
+            // Show batch selection modal or add directly if only one batch
+            if (data.batches.length === 1) {
+                const qty = prompt(`Enter quantity (Available: ${data.batches[0].available_quantity}):`);
+                if (qty && parseInt(qty) > 0 && parseInt(qty) <= data.batches[0].available_quantity) {
+                    addLineItem(productId, data.batches[0].id, parseInt(qty), data.batches[0].unit_price, data.batches[0].batch_name);
+                }
+            } else {
+                showBatchSelectionModal(productId, data.batches);
+            }
+        } else {
+            alert('No available batches found for this product');
+        }
+    } catch (error) {
+        console.error('Error loading batches:', error);
+        alert('Error loading batches. Please try again.');
+    }
+}
+
+function showBatchSelectionModal(productId, batches) {
+    const batchList = batches.map(batch => `
+        <div style="padding: 12px; border-bottom: 1px solid #eee; cursor: pointer;" onclick="selectBatch(${productId}, ${batch.id}, ${batch.available_quantity}, ${batch.unit_price}, '${batch.batch_name}'); closeBatchModal();">
+            <strong>${batch.batch_name}</strong>
+            <div style="font-size: 0.9rem; color: #666;">
+                Available: ${batch.available_quantity} | Unit Price: $${parseFloat(batch.unit_price || 0).toFixed(2)}
+            </div>
+        </div>
+    `).join('');
+
+    const modal = document.createElement('div');
+    modal.id = 'batch-modal';
+    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;';
+    modal.innerHTML = `
+        <div style="background: white; border-radius: 8px; padding: 20px; max-width: 500px; max-height: 400px; overflow-y: auto; width: 90%;">
+            <h3>Select Batch</h3>
+            <div>${batchList}</div>
+            <button onclick="closeBatchModal()" class="btn btn-secondary" style="margin-top: 20px;">Cancel</button>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+function closeBatchModal() {
+    const modal = document.getElementById('batch-modal');
+    if (modal) modal.remove();
+}
+
+function selectBatch(productId, batchId, availableQuantity, unitPrice, batchName) {
+    const quantity = prompt(`Enter quantity (Available: ${availableQuantity}):`);
+    if (!quantity || parseInt(quantity) <= 0) return;
+    
+    const qty = parseInt(quantity);
+    if (qty > availableQuantity) {
+        alert(`Only ${availableQuantity} units available`);
+        return;
+    }
+    
+    addLineItem(productId, batchId, qty, unitPrice, batchName);
+}
+
+async function addLineItem(productId, batchId, quantity, unitPrice, batchName) {
+    // Check if product already added, if so update quantity
+    const existing = lineItems.find(item => item.product_id === productId && item.batch_id === batchId);
+    if (existing) {
+        existing.quantity += quantity;
+        renderLineItems();
+        return;
+    }
+
+    // Fetch product details - use cached product or fetch
+    let product = productCache.find(p => p.product_id === productId);
+    
+    if (!product) {
+        try {
+            // Try to get from search results or fetch
+            const searchQuery = document.getElementById('product-search').value;
+            if (searchQuery) {
+                const response = await fetch(`/api/v1/invoices/products?location_id=${selectedLocationId}&search=${encodeURIComponent(searchQuery)}`);
+                const data = await response.json();
+                if (data.success && data.products) {
+                    product = data.products.find(p => p.product_id === productId);
+                }
+            }
+        } catch (error) {
+            console.error('Error fetching product:', error);
+        }
+    }
+    
+    if (product) {
+        lineItems.push({
+            product_id: productId,
+            product_name: product.name,
+            brand_name: product.brand_name,
+            batch_id: batchId,
+            batch_name: batchName || `Batch ${batchId}`,
+            quantity: quantity,
+            unit_price: parseFloat(unitPrice || product.default_price || 0)
+        });
+        renderLineItems();
+    } else {
+        alert('Error: Could not find product details. Please try again.');
+    }
+}
+
+function removeLineItem(index) {
+    lineItems.splice(index, 1);
+    renderLineItems();
+}
+
+function renderLineItems() {
+    const container = document.getElementById('line-items-list');
+    const totalsSection = document.getElementById('totals-section');
+    
+    if (lineItems.length === 0) {
+        container.innerHTML = '<div class="empty-state">No products added yet. Search and add products above.</div>';
+        totalsSection.style.display = 'none';
+        return;
+    }
+
+    let total = 0;
+    container.innerHTML = lineItems.map((item, index) => {
+        const lineTotal = item.quantity * parseFloat(item.unit_price);
+        total += lineTotal;
+        return `
+            <div class="line-item-row">
+                <div class="line-item-info">
+                    <strong>${item.brand_name || 'AMAZE'} ${item.product_name}</strong>
+                    <div style="font-size: 0.9rem; color: #666;">
+                        ${item.batch_name || `Batch ID: ${item.batch_id}`} | Qty: ${item.quantity} | 
+                        Unit Price: $${parseFloat(item.unit_price).toFixed(2)} | 
+                        Total: $<strong>${parseFloat(lineTotal).toFixed(2)}</strong>
+                    </div>
+                </div>
+                <div class="line-item-actions">
+                    <button onclick="removeLineItem(${index})" class="btn btn-danger">Remove</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    document.getElementById('invoice-total').textContent = total.toFixed(2);
+    totalsSection.style.display = 'block';
+}
+
+async function createInvoice() {
+    if (!selectedLocationId || !selectedBuyerId) {
+        alert('Please select a location');
+        return;
+    }
+
+    if (lineItems.length === 0) {
+        alert('Please add at least one product');
+        return;
+    }
+
+    const btn = document.getElementById('create-invoice-btn');
+    btn.disabled = true;
+    btn.textContent = 'Creating...';
+
+    try {
+        const response = await fetch('/api/v1/invoices/internal', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                buyer_id: parseInt(selectedBuyerId),
+                location_id: parseInt(selectedLocationId),
+                source: 'Internal',
+                line_items: lineItems.map(item => ({
+                    fk_batch_id: item.batch_id,
+                    quantity: item.quantity
+                })),
+                customer_notes: document.getElementById('customer-notes').value,
+                internal_notes: document.getElementById('internal-notes').value
+            })
+        });
+
+        const data = await response.json();
+        if (data.success) {
+            alert('Invoice created successfully!');
+            window.location.href = `/admin/invoices/${data.invoice_id}`;
+        } else {
+            alert('Error: ' + (data.error || 'Failed to create invoice'));
+            btn.disabled = false;
+            btn.textContent = 'Create Invoice';
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Failed to create invoice. Please try again.');
+        btn.disabled = false;
+        btn.textContent = 'Create Invoice';
+    }
+}
+</script>
+

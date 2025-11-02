@@ -1,0 +1,251 @@
+<!-- Invoice List Page -->
+<style>
+.invoice-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+}
+
+.invoice-table th {
+    background: #f8f9fa;
+    padding: 12px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.invoice-table td {
+    padding: 12px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.invoice-table tr:hover {
+    background: #f8f9fa;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.status-draft { background: #e3f2fd; color: #1976d2; }
+.status-pending_approval { background: #fff3e0; color: #e65100; }
+.status-approved { background: #e8f5e9; color: #2e7d32; }
+.status-fulfillment_accepted { background: #f3e5f5; color: #7b1fa2; }
+.status-fulfillment_issue { background: #ffebee; color: #c62828; }
+.status-manifested { background: #e0f2f1; color: #00695c; }
+.status-shipped { background: #e8eaf6; color: #283593; }
+.status-delivered { background: #c8e6c9; color: #1b5e20; }
+.status-paid { background: #4caf50; color: white; }
+.status-cancelled { background: #9e9e9e; color: white; }
+
+.source-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 500;
+}
+
+.source-internal { background: #e3f2fd; color: #1565c0; }
+.source-external { background: #f3e5f5; color: #7b1fa2; }
+
+.filter-controls {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+    color: #6c757d;
+}
+</style>
+
+<div class="page-header">
+    <h1>Invoices</h1>
+    <a href="/admin/invoices/create" class="btn btn-primary" style="background: #007bff; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; display: inline-block;">Create Invoice</a>
+</div>
+
+<!-- Filters -->
+<div class="filter-controls">
+    <div class="filter-group">
+        <label>Status:</label>
+        <select onchange="applyFilters()" id="status-filter">
+            <option value="">All Statuses</option>
+            <option value="Draft" <%= filters.status === 'Draft' ? 'selected' : '' %>>Draft</option>
+            <option value="Pending_Approval" <%= filters.status === 'Pending_Approval' ? 'selected' : '' %>>Pending Approval</option>
+            <option value="Approved" <%= filters.status === 'Approved' ? 'selected' : '' %>>Approved</option>
+            <option value="Fulfillment_Accepted" <%= filters.status === 'Fulfillment_Accepted' ? 'selected' : '' %>>Fulfillment Accepted</option>
+            <option value="Manifested" <%= filters.status === 'Manifested' ? 'selected' : '' %>>Manifested</option>
+            <option value="Shipped" <%= filters.status === 'Shipped' ? 'selected' : '' %>>Shipped</option>
+            <option value="Delivered" <%= filters.status === 'Delivered' ? 'selected' : '' %>>Delivered</option>
+            <option value="Paid" <%= filters.status === 'Paid' ? 'selected' : '' %>>Paid</option>
+        </select>
+    </div>
+    <div class="filter-group">
+        <label>Source:</label>
+        <select onchange="applyFilters()" id="source-filter">
+            <option value="">All Sources</option>
+            <option value="Internal" <%= filters.source === 'Internal' ? 'selected' : '' %>>Internal</option>
+            <option value="External" <%= filters.source === 'External' ? 'selected' : '' %>>External</option>
+        </select>
+    </div>
+    <button onclick="clearFilters()" class="btn-clear-filters">Clear Filters</button>
+</div>
+
+<!-- Invoice Table -->
+<% if (invoices && invoices.length > 0) { %>
+    <table class="invoice-table">
+        <thead>
+            <tr>
+                <th>Invoice #</th>
+                <th>Buyer</th>
+                <th>Location</th>
+                <th>Status</th>
+                <th>Source</th>
+                <th>Total</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            <% invoices.forEach(invoice => { %>
+                <tr>
+                    <td><strong><%= invoice.invoice_number %></strong></td>
+                    <td><%= invoice.buyer_name %></td>
+                    <td><%= invoice.location_name %></td>
+                    <td>
+                        <span class="status-badge status-<%= invoice.status.toLowerCase() %>">
+                            <%= invoice.status %>
+                        </span>
+                    </td>
+                    <td>
+                        <span class="source-badge source-<%= invoice.source.toLowerCase() %>">
+                            <%= invoice.source %>
+                        </span>
+                    </td>
+                    <td><strong>$<%= parseFloat(invoice.total || 0).toFixed(2) %></strong></td>
+                    <td><%= new Date(invoice.created_at).toLocaleDateString() %></td>
+                    <td>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <a href="/admin/invoices/<%= invoice.id %>" class="btn btn-sm btn-primary">View</a>
+                            <% if (invoice.status === 'Pending_Approval') { %>
+                                <button data-invoice-id="<%= invoice.id %>" class="btn-approve btn btn-sm btn-success" style="background: #28a745; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer;">Approve</button>
+                                <button data-invoice-id="<%= invoice.id %>" class="btn-reject btn btn-sm btn-danger" style="background: #dc3545; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer;">Reject</button>
+                            <% } %>
+                        </div>
+                    </td>
+                </tr>
+            <% }); %>
+        </tbody>
+    </table>
+<% } else { %>
+    <div class="empty-state">
+        <p>No invoices found</p>
+    </div>
+<% } %>
+
+<script>
+function applyFilters() {
+    const status = document.getElementById('status-filter').value;
+    const source = document.getElementById('source-filter').value;
+    
+    const params = new URLSearchParams();
+    if (status) params.append('status', status);
+    if (source) params.append('source', source);
+    
+    window.location.search = params.toString();
+}
+
+function clearFilters() {
+    window.location.href = '/admin/invoices';
+}
+
+async function approveInvoice(invoiceId) {
+    if (!confirm('Are you sure you want to approve this invoice?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/admin/invoices/${invoiceId}/approve`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            alert('Invoice approved successfully!');
+            window.location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Failed to approve invoice'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Failed to approve invoice. Please try again.');
+    }
+}
+
+async function rejectInvoice(invoiceId) {
+    const reason = prompt('Please provide a reason for rejection:');
+    if (!reason) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/admin/invoices/${invoiceId}/reject`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ reason })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            alert('Invoice rejected successfully!');
+            window.location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Failed to reject invoice'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Failed to reject invoice. Please try again.');
+    }
+}
+
+// Add event listeners for approve/reject buttons
+document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.btn-approve').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const invoiceId = this.getAttribute('data-invoice-id');
+            approveInvoice(parseInt(invoiceId));
+        });
+    });
+    
+    document.querySelectorAll('.btn-reject').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const invoiceId = this.getAttribute('data-invoice-id');
+            rejectInvoice(parseInt(invoiceId));
+        });
+    });
+});
+</script>
+

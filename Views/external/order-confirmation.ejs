@@ -1,0 +1,150 @@
+<%- include('../layouts/portal') %>
+
+<div class="confirmation-container">
+    <div class="confirmation-content">
+        <div class="confirmation-icon">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+        </div>
+        
+        <h1 class="confirmation-title">Order Submitted Successfully!</h1>
+        
+        <div class="confirmation-message">
+            <p>Your order has been received and is pending approval.</p>
+            <% if (salesRepName) { %>
+                <p class="sales-rep-info">
+                    <strong>Your sales rep <span class="sales-rep-name"><%= salesRepName %></span> will contact you if needed.</strong>
+                </p>
+            <% } else { %>
+                <p class="sales-rep-info">
+                    <strong>Your sales representative will contact you if needed.</strong>
+                </p>
+            <% } %>
+        </div>
+        
+        <div class="confirmation-details">
+            <div class="detail-item">
+                <span class="detail-label">Order Number:</span>
+                <span class="detail-value"><%= invoiceNumber || 'N/A' %></span>
+            </div>
+            <% if (orderTotal) { %>
+            <div class="detail-item">
+                <span class="detail-label">Order Total:</span>
+                <span class="detail-value">$<%= parseFloat(orderTotal).toFixed(2) %></span>
+            </div>
+            <% } %>
+            <% if (creditApplied && creditApplied > 0) { %>
+            <div class="detail-item">
+                <span class="detail-label">Credit Applied:</span>
+                <span class="detail-value credit-amount">-$<%= parseFloat(creditApplied).toFixed(2) %></span>
+            </div>
+            <% } %>
+        </div>
+        
+        <div class="confirmation-actions">
+            <a href="/external/store/<%= uuid %>" class="btn btn-primary">Continue Shopping</a>
+        </div>
+    </div>
+</div>
+
+<style>
+    .confirmation-container {
+        max-width: 600px;
+        margin: 60px auto;
+        padding: 20px;
+    }
+    
+    .confirmation-content {
+        background: white;
+        border-radius: 12px;
+        padding: 40px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        text-align: center;
+    }
+    
+    .confirmation-icon {
+        margin-bottom: 24px;
+    }
+    
+    .confirmation-title {
+        font-size: 28px;
+        color: #1f2937;
+        margin-bottom: 20px;
+        font-weight: 600;
+    }
+    
+    .confirmation-message {
+        margin-bottom: 30px;
+        color: #4b5563;
+        font-size: 16px;
+        line-height: 1.6;
+    }
+    
+    .sales-rep-info {
+        margin-top: 16px;
+        padding: 16px;
+        background: #f0fdf4;
+        border-radius: 8px;
+        border-left: 4px solid #10b981;
+    }
+    
+    .sales-rep-name {
+        color: #059669;
+        font-weight: 600;
+    }
+    
+    .confirmation-details {
+        background: #f9fafb;
+        border-radius: 8px;
+        padding: 24px;
+        margin-bottom: 30px;
+        text-align: left;
+    }
+    
+    .detail-item {
+        display: flex;
+        justify-content: space-between;
+        padding: 12px 0;
+        border-bottom: 1px solid #e5e7eb;
+    }
+    
+    .detail-item:last-child {
+        border-bottom: none;
+    }
+    
+    .detail-label {
+        color: #6b7280;
+        font-weight: 500;
+    }
+    
+    .detail-value {
+        color: #1f2937;
+        font-weight: 600;
+    }
+    
+    .credit-amount {
+        color: #10b981;
+    }
+    
+    .confirmation-actions {
+        margin-top: 30px;
+    }
+    
+    .btn {
+        display: inline-block;
+        padding: 12px 24px;
+        background: #3b82f6;
+        color: white;
+        text-decoration: none;
+        border-radius: 8px;
+        font-weight: 500;
+        transition: background 0.2s;
+    }
+    
+    .btn:hover {
+        background: #2563eb;
+    }
+</style>
+

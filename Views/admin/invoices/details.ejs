@@ -1,0 +1,209 @@
+<!-- Invoice Details Page -->
+<style>
+.invoice-details-card {
+    background: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.detail-row {
+    display: flex;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid #eee;
+}
+
+.detail-label {
+    font-weight: 600;
+    width: 150px;
+    color: #666;
+}
+
+.detail-value {
+    flex: 1;
+    color: #333;
+}
+
+.line-items-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+}
+
+.line-items-table th {
+    background: #f8f9fa;
+    padding: 12px;
+    text-align: left;
+    font-weight: 600;
+}
+
+.line-items-table td {
+    padding: 12px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.history-timeline {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 8px;
+    margin-top: 1rem;
+}
+
+.history-item {
+    padding: 0.75rem;
+    border-left: 3px solid #667eea;
+    margin-bottom: 0.5rem;
+    background: white;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.status-draft { background: #e3f2fd; color: #1976d2; }
+.status-pending_approval { background: #fff3e0; color: #e65100; }
+.status-approved { background: #e8f5e9; color: #2e7d32; }
+.status-fulfillment_accepted { background: #f3e5f5; color: #7b1fa2; }
+.status-manifested { background: #e0f2f1; color: #00695c; }
+.status-shipped { background: #e8eaf6; color: #283593; }
+.status-delivered { background: #c8e6c9; color: #1b5e20; }
+.status-paid { background: #4caf50; color: white; }
+</style>
+
+<div class="page-header">
+    <h1>Invoice <%= invoice.invoice_number %></h1>
+    <div style="display: flex; gap: 8px;">
+        <button onclick="cloneInvoice()" class="btn btn-secondary" style="background: #6c757d; color: white; padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer;">Clone Invoice</button>
+        <a href="/admin/invoices" class="btn btn-secondary" style="background: #6c757d; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; display: inline-block;">← Back to Invoices</a>
+    </div>
+</div>
+
+<!-- Invoice Info -->
+<div class="invoice-details-card">
+    <h3>Invoice Information</h3>
+    <div class="detail-row">
+        <div class="detail-label">Invoice Number:</div>
+        <div class="detail-value"><strong><%= invoice.invoice_number %></strong></div>
+    </div>
+    <div class="detail-row">
+        <div class="detail-label">Buyer:</div>
+        <div class="detail-value"><%= invoice.buyer_name %></div>
+    </div>
+    <div class="detail-row">
+        <div class="detail-label">Location:</div>
+        <div class="detail-value"><%= invoice.location_name %></div>
+    </div>
+    <div class="detail-row">
+        <div class="detail-label">Status:</div>
+        <div class="detail-value">
+            <span class="status-badge status-<%= invoice.status.toLowerCase() %>">
+                <%= invoice.status %>
+            </span>
+        </div>
+    </div>
+    <div class="detail-row">
+        <div class="detail-label">Source:</div>
+        <div class="detail-value"><%= invoice.source %></div>
+    </div>
+    <div class="detail-row">
+        <div class="detail-label">Created:</div>
+        <div class="detail-value"><%= new Date(invoice.created_at).toLocaleString() %></div>
+    </div>
+    <% if (invoice.customer_notes) { %>
+    <div class="detail-row">
+        <div class="detail-label">Customer Notes:</div>
+        <div class="detail-value"><%= invoice.customer_notes %></div>
+    </div>
+    <% } %>
+</div>
+
+<!-- Line Items -->
+<div class="invoice-details-card">
+    <h3>Line Items</h3>
+    <% if (lineItems && lineItems.length > 0) { %>
+        <table class="line-items-table">
+            <thead>
+                <tr>
+                    <th>Product</th>
+                    <th>Batch</th>
+                    <th>Quantity</th>
+                    <th>Unit Price</th>
+                    <th>Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% lineItems.forEach(item => { %>
+                    <tr>
+                        <td>
+                            <strong><%= item.brand_name || 'AMAZE' %> <%= item.product_name %></strong>
+                        </td>
+                        <td><%= item.batch_name %></td>
+                        <td><%= item.quantity_ordered %> Case</td>
+                        <td>$<%= parseFloat(item.unit_price || 0).toFixed(2) %></td>
+                        <td><strong>$<%= parseFloat(item.line_total || 0).toFixed(2) %></strong></td>
+                    </tr>
+                <% }); %>
+            </tbody>
+        </table>
+        <div style="text-align: right; margin-top: 1rem; font-size: 1.2rem;">
+            <strong>Total: $<%= parseFloat(invoice.total || 0).toFixed(2) %></strong>
+        </div>
+    <% } else { %>
+        <p>No line items</p>
+    <% } %>
+</div>
+
+<!-- History -->
+<% if (history && history.length > 0) { %>
+<div class="invoice-details-card">
+    <h3>Change History</h3>
+    <div class="history-timeline">
+        <% history.forEach(entry => { %>
+            <div class="history-item">
+                <div><strong><%= entry.modification_type %></strong></div>
+                <div style="color: #666; font-size: 0.9rem;">
+                    <%= entry.reason %> - <%= new Date(entry.changed_at).toLocaleString() %>
+                </div>
+            </div>
+        <% }); %>
+    </div>
+</div>
+<% } %>
+
+<script>
+async function cloneInvoice() {
+    if (!confirm('Create a duplicate of this invoice? This will copy all products and amounts.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/admin/invoices/<%= invoice.id %>/clone`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            let message = `Invoice cloned successfully!\n\nNew Invoice: ${data.invoice_number}`;
+            if (data.errors && data.errors.length > 0) {
+                message += '\n\nWarnings:\n' + data.errors.join('\n');
+            }
+            alert(message);
+            window.location.href = `/admin/invoices/${data.invoice_id}`;
+        } else {
+            alert('Error: ' + (data.error || 'Failed to clone invoice'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        alert('Failed to clone invoice. Please try again.');
+    }
+}
+</script>
+

@@ -1,0 +1,867 @@
+/**
+ * Invoice Controller
+ * 
+ * Handles invoice creation, management, and state transitions
+ */
+
+const invoiceStateMachine = require('../Services/invoiceStateMachineService');
+const { query } = require('../config/database');
+const auditLogger = require('../Services/auditLogger');
+
+class InvoiceController {
+    /**
+     * Get all invoices with optional filtering
+     * GET /api/v1/invoices
+     */
+    async getAllInvoices(req, res) {
+        try {
+            const { status, buyer_id, location_id, source } = req.query;
+            
+            let queryStr = `
+                SELECT 
+                    i.*,
+                    b.name as buyer_name,
+                    l.name as location_name
+                FROM "ORDERS-invoices" i
+                INNER JOIN "ORDERS-buyers" b ON i.fk_buyer_id = b.entry_id
+                INNER JOIN "ORDERS-buyer_locations" l ON i.fk_location_id = l.entry_id
+                WHERE 1=1
+            `;
+            
+            const params = [];
+            let paramIndex = 1;
+            
+            if (status) {
+                queryStr += ` AND i.status = $${paramIndex}`;
+                params.push(status);
+                paramIndex++;
+            }
+            
+            if (buyer_id) {
+                queryStr += ` AND i.fk_buyer_id = $${paramIndex}`;
+                params.push(buyer_id);
+                paramIndex++;
+            }
+            
+            if (location_id) {
+                queryStr += ` AND i.fk_location_id = $${paramIndex}`;
+                params.push(location_id);
+                paramIndex++;
+            }
+            
+            if (source) {
+                queryStr += ` AND i.source = $${paramIndex}`;
+                params.push(source);
+                paramIndex++;
+            }
+            
+            queryStr += ` ORDER BY i.created_at DESC`;
+            
+            const invoices = await query(queryStr, params);
+            
+            res.json({
+                success: true,
+                count: invoices.rows.length,
+                invoices: invoices.rows
+            });
+        } catch (error) {
+            console.error('Error fetching invoices:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to fetch invoices',
+                message: error.message
+            });
+        }
+    }
+
+    /**
+     * Get invoice by ID
+     * GET /api/v1/invoices/:id
+     */
+    async getInvoiceById(req, res) {
+        try {
+            const { id } = req.params;
+            
+            const invoice = await query(`
+                SELECT 
+                    i.*,
+                    b.name as buyer_name,
+                    l.name as location_name
+                FROM "ORDERS-invoices" i
+                INNER JOIN "ORDERS-buyers" b ON i.fk_buyer_id = b.entry_id
+                INNER JOIN "ORDERS-buyer_locations" l ON i.fk_location_id = l.entry_id
+                WHERE i.id = $1
+            `, [id]);
+            
+            if (invoice.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Invoice not found'
+                });
+            }
+            
+            // Get line items
+            const lineItems = await query(`
+                SELECT 
+                    li.*,
+                    p.name as product_name,
+                    p.brand_name,
+                    p.cultivar_name,
+                    b.batch_name
+                FROM "ORDERS-invoice-line-items" li
+                INNER JOIN "ORDERS-products" p ON li.fk_master_product_id = p.entry_id
+                INNER JOIN "ORDERS-batches" b ON li.fk_batch_id = b.id
+                WHERE li.fk_invoice_id = $1
+                ORDER BY li.line_item_order
+            `, [id]);
+            
+            // Get modification history
+            const history = await query(`
+                SELECT *
+                FROM "ORDERS-invoice-history"
+                WHERE fk_invoice_id = $1
+                ORDER BY changed_at DESC
+            `, [id]);
+            
+            res.json({
+                success: true,
+                invoice: {
+                    ...invoice.rows[0],
+                    line_items: lineItems.rows,
+                    history: history.rows
+                }
+            });
+        } catch (error) {
+            console.error('Error fetching invoice:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to fetch invoice',
+                message: error.message
+            });
+        }
+    }
+
+    /**
+     * Create new invoice (internal or external)
+     * POST /api/v1/invoices
+     */
+    async createInvoice(req, res) {
+        try {
+            const {
+                buyer_id,
+                location_id,
+                source = 'Internal', // or 'External'
+                assigned_sales_rep_id,
+                customer_notes,
+                internal_notes
+            } = req.body;
+            
+            const userId = req.session?.userId || req.user?.id || null;
+            
+            if (!buyer_id || !location_id) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'buyer_id and location_id are required'
+                });
+            }
+            
+            // Get location license number
+            const location = await query(`
+                SELECT license_number, assigned_sales_rep_id
+                FROM "ORDERS-buyer_locations"
+                WHERE id = $1
+            `, [location_id]);
+            
+            if (location.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Location not found'
+                });
+            }
+            
+            const licenseNumber = location.rows[0].license_number;
+            const defaultSalesRep = location.rows[0].assigned_sales_rep_id;
+            
+            // Generate invoice number
+            const invoiceNumber = await this.generateInvoiceNumber();
+            
+            // For external orders, set cart expiry
+            let cartCreatedAt = null;
+            let cartExpiresAt = null;
+            if (source === 'External') {
+                cartCreatedAt = new Date();
+                cartExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+            }
+            
+            // Create invoice
+            const invoice = await query(`
+                INSERT INTO "ORDERS-invoices" (
+                    invoice_number, fk_buyer_id, fk_location_id,
+                    location_license_number, source, created_by_user_id,
+                    assigned_sales_rep_id, status, cart_created_at, cart_expires_at,
+                    customer_notes, internal_notes
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                RETURNING *
+            `, [
+                invoiceNumber,
+                buyer_id,
+                location_id,
+                licenseNumber,
+                source,
+                userId,
+                assigned_sales_rep_id || defaultSalesRep,
+                'Draft',
+                cartCreatedAt,
+                cartExpiresAt,
+                customer_notes || null,
+                internal_notes || null
+            ]);
+            
+            // Log history
+            await query(`
+                INSERT INTO "ORDERS-invoice-history" (
+                    fk_invoice_id, modification_type, reason, changed_by_user_id, changed_by_system
+                ) VALUES ($1, 'invoice_created', 'Invoice created', $2, false)
+            `, [invoice.rows[0].id, userId]);
+            
+            // Audit log
+            await auditLogger.logAction({
+                userId,
+                action: 'invoice_created',
+                resourceType: 'Invoice',
+                resourceId: invoice.rows[0].id.toString(),
+                details: {
+                    invoice_number: invoiceNumber,
+                    buyer_id,
+                    location_id,
+                    source
+                },
+                status: 'success',
+                sourceIp: req.ip
+            });
+            
+            res.status(201).json({
+                success: true,
+                invoice: invoice.rows[0]
+            });
+        } catch (error) {
+            console.error('Error creating invoice:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to create invoice',
+                message: error.message
+            });
+        }
+    }
+
+    /**
+     * Transition invoice to a new status
+     * POST /api/v1/invoices/:id/transition
+     */
+    async transitionInvoice(req, res) {
+        try {
+            const { id } = req.params;
+            const { status, reason } = req.body;
+            
+            const userId = req.session?.userId || req.user?.id || null;
+            
+            if (!status) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'status is required'
+                });
+            }
+            
+            const result = await invoiceStateMachine.transitionTo(
+                id,
+                status,
+                userId,
+                reason
+            );
+            
+            if (!result.success) {
+                return res.status(400).json(result);
+            }
+            
+            // Audit log
+            await auditLogger.logAction({
+                userId,
+                action: 'invoice_status_transition',
+                resourceType: 'Invoice',
+                resourceId: id.toString(),
+                details: {
+                    old_status: result.oldStatus,
+                    new_status: result.newStatus,
+                    reason
+                },
+                status: 'success',
+                sourceIp: req.ip
+            });
+            
+            res.json({
+                success: true,
+                message: `Invoice transitioned from ${result.oldStatus} to ${result.newStatus}`,
+                ...result
+            });
+        } catch (error) {
+            console.error('Error transitioning invoice:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to transition invoice',
+                message: error.message
+            });
+        }
+    }
+
+    /**
+     * Generate unique invoice number
+     */
+    async generateInvoiceNumber() {
+        const year = new Date().getFullYear();
+        const result = await query(`
+            SELECT COUNT(*) as count
+            FROM "ORDERS-invoices"
+            WHERE invoice_number LIKE $1
+        `, [`INV-${year}-%`]);
+        
+        const count = parseInt(result.rows[0].count || 0) + 1;
+        return `INV-${year}-${String(count).padStart(5, '0')}`;
+    }
+
+    /**
+     * Show invoice list page (Admin UI)
+     * GET /admin/invoices
+     */
+    async showInvoiceList(req, res) {
+        try {
+            const { status, source } = req.query;
+            const userId = req.session.userId || req.user?.id;
+            
+            // Check if user is admin or sales rep
+            const userRole = await query(`
+                SELECT r.name as role_name
+                FROM users u
+                INNER JOIN user_roles ur ON u.id = ur.user_id
+                INNER JOIN roles r ON ur.role_id = r.id
+                WHERE u.id = $1
+                LIMIT 1
+            `, [userId]);
+            
+            const isAdmin = userRole.rows.length > 0 && 
+                (userRole.rows[0].role_name === 'admin' || userRole.rows[0].role_name === 'sales_admin');
+            
+            let queryStr = `
+                SELECT 
+                    i.*,
+                    b.name as buyer_name,
+                    l.name as location_name,
+                    u.username as created_by_username,
+                    sr.first_name || ' ' || sr.last_name as sales_rep_name
+                FROM "ORDERS-invoices" i
+                INNER JOIN "ORDERS-buyers" b ON i.fk_buyer_id = b.entry_id
+                INNER JOIN "ORDERS-buyer_locations" l ON i.fk_location_id = l.entry_id
+                LEFT JOIN users u ON i.created_by_user_id = u.id
+                LEFT JOIN users sr ON i.assigned_sales_rep_id = sr.id
+                WHERE 1=1
+            `;
+            
+            const params = [];
+            let paramIndex = 1;
+            
+            // Filter by sales rep assignment if not admin
+            if (!isAdmin) {
+                queryStr += ` AND i.assigned_sales_rep_id = $${paramIndex}`;
+                params.push(userId);
+                paramIndex++;
+            }
+            
+            if (status) {
+                queryStr += ` AND i.status = $${paramIndex}`;
+                params.push(status);
+                paramIndex++;
+            }
+            
+            if (source) {
+                queryStr += ` AND i.source = $${paramIndex}`;
+                params.push(source);
+                paramIndex++;
+            }
+            
+            queryStr += ` ORDER BY i.created_at DESC LIMIT 100`;
+            
+            const invoices = await query(queryStr, params);
+            
+            res.render('admin/invoices/index', {
+                title: 'Invoices',
+                layout: 'layouts/main',
+                invoices: invoices.rows,
+                filters: { status, source },
+                user: req.session.user,
+                isAdmin: isAdmin
+            });
+        } catch (error) {
+            console.error('Error loading invoice list:', error);
+            res.status(500).send('Error loading invoices: ' + error.message);
+        }
+    }
+    
+    /**
+     * Approve pending invoice
+     * POST /admin/invoices/:id/approve
+     */
+    async approveInvoice(req, res) {
+        try {
+            const { id } = req.params;
+            const userId = req.session.userId || req.user?.id;
+            
+            const invoiceStateMachine = require('../Services/invoiceStateMachineService');
+            const result = await invoiceStateMachine.transitionTo(
+                parseInt(id),
+                'Approved',
+                userId,
+                'Invoice approved by sales rep/admin'
+            );
+            
+            if (result.success) {
+                res.json({ success: true, message: 'Invoice approved successfully' });
+            } else {
+                res.status(400).json({ 
+                    success: false, 
+                    error: result.error,
+                    validTransitions: result.validTransitions 
+                });
+            }
+        } catch (error) {
+            console.error('Error approving invoice:', error);
+            res.status(500).json({ success: false, error: 'Failed to approve invoice' });
+        }
+    }
+    
+    /**
+     * Reject pending invoice
+     * POST /admin/invoices/:id/reject
+     */
+    async rejectInvoice(req, res) {
+        try {
+            const { id } = req.params;
+            const userId = req.session.userId || req.user?.id;
+            const { reason } = req.body;
+            
+            const invoiceStateMachine = require('../Services/invoiceStateMachineService');
+            const result = await invoiceStateMachine.transitionTo(
+                parseInt(id),
+                'Rejected',
+                userId,
+                reason || 'Invoice rejected by sales rep/admin'
+            );
+            
+            if (result.success) {
+                res.json({ success: true, message: 'Invoice rejected successfully' });
+            } else {
+                res.status(400).json({ 
+                    success: false, 
+                    error: result.error,
+                    validTransitions: result.validTransitions 
+                });
+            }
+        } catch (error) {
+            console.error('Error rejecting invoice:', error);
+            res.status(500).json({ success: false, error: 'Failed to reject invoice' });
+        }
+    }
+
+    /**
+     * Show create invoice form (Admin UI)
+     * GET /admin/invoices/create
+     */
+    async showCreateInvoiceForm(req, res) {
+        try {
+            // Get all buyers with locations for dropdown
+            const buyers = await query(`
+                SELECT 
+                    b.entry_id as buyer_id,
+                    b.name as buyer_name,
+                    l.entry_id as location_id,
+                    l.name as location_name
+                FROM "ORDERS-buyers" b
+                INNER JOIN "ORDERS-buyer_locations" l ON b.entry_id = l.orders_buyer_id
+                ORDER BY b.name, l.name
+            `);
+            
+            res.render('admin/invoices/create', {
+                title: 'Create Invoice',
+                layout: 'layouts/main',
+                buyers: buyers.rows,
+                user: req.session.user
+            });
+        } catch (error) {
+            console.error('Error loading create invoice form:', error);
+            res.status(500).send('Error loading create invoice form: ' + error.message);
+        }
+    }
+    
+    /**
+     * Clone invoice
+     * POST /admin/invoices/:id/clone
+     */
+    async cloneInvoice(req, res) {
+        try {
+            const { id } = req.params;
+            const { new_location_id } = req.body;
+            const userId = req.session.userId || req.user?.id;
+            
+            // Get original invoice
+            const original = await query(`
+                SELECT * FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [id]);
+            
+            if (original.rows.length === 0) {
+                return res.status(404).json({ success: false, error: 'Invoice not found' });
+            }
+            
+            const origInvoice = original.rows[0];
+            
+            // Get original line items
+            const lineItems = await query(`
+                SELECT 
+                    fk_master_product_id,
+                    fk_batch_id,
+                    quantity_ordered,
+                    unit_price,
+                    specific_package_labels
+                FROM "ORDERS-invoice-line-items"
+                WHERE fk_invoice_id = $1
+            `, [id]);
+            
+            // Get location details
+            const locationId = new_location_id || origInvoice.fk_location_id;
+            const location = await query(`
+                SELECT license_number, assigned_sales_rep_id
+                FROM "ORDERS-buyer_locations"
+                WHERE id = $1
+            `, [locationId]);
+            
+            if (location.rows.length === 0) {
+                return res.status(404).json({ success: false, error: 'Location not found' });
+            }
+            
+            const locationData = location.rows[0];
+            
+            // Generate new invoice number
+            const invoiceNumber = await this.generateInvoiceNumber();
+            
+            // Create new invoice
+            const newInvoice = await query(`
+                INSERT INTO "ORDERS-invoices" (
+                    invoice_number, fk_buyer_id, fk_location_id,
+                    location_license_number, source, created_by_user_id,
+                    assigned_sales_rep_id, status, customer_notes, internal_notes
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'Draft', $8, $9)
+                RETURNING id
+            `, [
+                invoiceNumber,
+                origInvoice.fk_buyer_id,
+                locationId,
+                locationData.license_number,
+                origInvoice.source,
+                userId,
+                locationData.assigned_sales_rep_id || userId,
+                origInvoice.customer_notes,
+                `Cloned from invoice ${origInvoice.invoice_number}`
+            ]);
+            
+            const newInvoiceId = newInvoice.rows[0].id;
+            const internalInvoiceService = require('../Services/internalInvoiceService');
+            const client = await internalInvoiceService.pool.connect();
+            
+            try {
+                await client.query('BEGIN');
+                
+                const errors = [];
+                
+                // Clone line items
+                for (const item of lineItems.rows) {
+                    // Check batch availability
+                    const batch = await client.query(`
+                        SELECT quantity, allocated_quantity, status
+                        FROM "ORDERS-batches"
+                        WHERE id = $1
+                    `, [item.fk_batch_id]);
+                    
+                    if (batch.rows.length === 0) {
+                        errors.push(`Batch ${item.fk_batch_id} not found`);
+                        continue;
+                    }
+                    
+                    const batchData = batch.rows[0];
+                    const available = batchData.quantity - batchData.allocated_quantity;
+                    
+                    if (batchData.status !== 'Sellable') {
+                        errors.push(`Batch ${item.fk_batch_id} is not sellable`);
+                        continue;
+                    }
+                    
+                    if (available < item.quantity_ordered) {
+                        errors.push(`Batch ${item.fk_batch_id} has insufficient inventory (available: ${available}, needed: ${item.quantity_ordered})`);
+                        continue;
+                    }
+                    
+                    // Add line item
+                    await internalInvoiceService.addLineItem(
+                        newInvoiceId,
+                        {
+                            fk_batch_id: item.fk_batch_id,
+                            quantity: item.quantity_ordered,
+                            partial_packages_selected: item.specific_package_labels 
+                                ? JSON.parse(item.specific_package_labels) 
+                                : null
+                        },
+                        userId,
+                        client
+                    );
+                }
+                
+                await internalInvoiceService.recalculateTotals(newInvoiceId, client);
+                
+                // Log clone history
+                await client.query(`
+                    INSERT INTO "ORDERS-invoice-history" (
+                        fk_invoice_id, modification_type, reason, changed_by_user_id, changed_by_system
+                    ) VALUES ($1, 'cloned_from', $2, $3, false)
+                `, [newInvoiceId, `Cloned from invoice ${origInvoice.invoice_number}`, userId]);
+                
+                await client.query('COMMIT');
+                
+                res.json({
+                    success: true,
+                    invoice_id: newInvoiceId,
+                    invoice_number: invoiceNumber,
+                    errors: errors.length > 0 ? errors : undefined
+                });
+            } catch (error) {
+                await client.query('ROLLBACK');
+                throw error;
+            } finally {
+                client.release();
+            }
+        } catch (error) {
+            console.error('Error cloning invoice:', error);
+            res.status(500).json({ success: false, error: 'Failed to clone invoice', details: error.message });
+        }
+    }
+    
+    /**
+     * Show invoice details page (Admin UI)
+     * GET /admin/invoices/:id
+     */
+    async showInvoiceDetails(req, res) {
+        try {
+            const { id } = req.params;
+            
+            const invoice = await query(`
+                SELECT 
+                    i.*,
+                    b.name as buyer_name,
+                    l.name as location_name,
+                    u.username as created_by_username
+                FROM "ORDERS-invoices" i
+                INNER JOIN "ORDERS-buyers" b ON i.fk_buyer_id = b.entry_id
+                INNER JOIN "ORDERS-buyer_locations" l ON i.fk_location_id = l.entry_id
+                LEFT JOIN users u ON i.created_by_user_id = u.id
+                WHERE i.id = $1
+            `, [id]);
+            
+            if (invoice.rows.length === 0) {
+                return res.status(404).send('Invoice not found');
+            }
+            
+            // Get line items
+            const lineItems = await query(`
+                SELECT 
+                    li.*,
+                    p.name as product_name,
+                    p.brand_name,
+                    b.batch_name
+                FROM "ORDERS-invoice-line-items" li
+                INNER JOIN "ORDERS-products" p ON li.fk_master_product_id = p.entry_id
+                INNER JOIN "ORDERS-batches" b ON li.fk_batch_id = b.id
+                WHERE li.fk_invoice_id = $1
+                ORDER BY li.line_item_order
+            `, [id]);
+            
+            // Get modification history
+            const history = await query(`
+                SELECT *
+                FROM "ORDERS-invoice-history"
+                WHERE fk_invoice_id = $1
+                ORDER BY changed_at DESC
+            `, [id]);
+            
+            res.render('admin/invoices/details', {
+                title: 'Invoice Details',
+                layout: 'layouts/main',
+                invoice: invoice.rows[0],
+                lineItems: lineItems.rows,
+                history: history.rows,
+                user: req.session.user
+            });
+        } catch (error) {
+            console.error('Error loading invoice details:', error);
+            res.status(500).send('Error loading invoice: ' + error.message);
+        }
+    }
+
+    /**
+     * Get products for location (API endpoint for invoice creation UI)
+     * GET /api/v1/invoices/products?location_id=123&search=keyword
+     */
+    async getProductsForLocation(req, res) {
+        try {
+            const { location_id, search } = req.query;
+            
+            if (!location_id) {
+                return res.status(400).json({ success: false, error: 'location_id is required' });
+            }
+            
+            let queryStr = `
+                SELECT DISTINCT
+                    p.entry_id as product_id,
+                    p.name,
+                    p.brand_name,
+                    p.product_type_name,
+                    p.category_name,
+                    p.default_price,
+                    p.cultivar_name,
+                    p.cultivar_type_name
+                FROM "ORDERS-products" p
+                INNER JOIN "ORDERS-batches" b ON p.entry_id = b.fk_master_product_id
+                WHERE b.status = 'Sellable'
+                  AND (b.quantity - b.allocated_quantity) > 0
+            `;
+            
+            const params = [];
+            let paramIndex = 1;
+            
+            if (search) {
+                queryStr += ` AND (
+                    p.name ILIKE $${paramIndex} OR 
+                    p.brand_name ILIKE $${paramIndex} OR 
+                    p.cultivar_name ILIKE $${paramIndex}
+                )`;
+                params.push(`%${search}%`);
+                paramIndex++;
+            }
+            
+            queryStr += ` ORDER BY p.brand_name, p.name LIMIT 50`;
+            
+            const products = await query(queryStr, params);
+            
+            res.json({
+                success: true,
+                products: products.rows
+            });
+        } catch (error) {
+            console.error('Error getting products:', error);
+            res.status(500).json({ success: false, error: 'Failed to get products' });
+        }
+    }
+
+    /**
+     * Get batches for a product at a location (API endpoint for invoice creation UI)
+     * GET /api/v1/invoices/products/:productId/batches?location_id=123
+     */
+    async getBatchesForProduct(req, res) {
+        try {
+            const { productId } = req.params;
+            const { location_id } = req.query;
+            
+            if (!productId || !location_id) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'productId and location_id are required' 
+                });
+            }
+            
+            const batches = await query(`
+                SELECT 
+                    b.id,
+                    b.batch_name,
+                    b.quantity,
+                    b.allocated_quantity,
+                    (b.quantity - b.allocated_quantity) as available_quantity,
+                    COALESCE(b.override_price, p.default_price, 0) as unit_price,
+                    b.status
+                FROM "ORDERS-batches" b
+                INNER JOIN "ORDERS-products" p ON b.fk_master_product_id = p.entry_id
+                WHERE b.fk_master_product_id = $1
+                  AND b.status = 'Sellable'
+                  AND (b.quantity - b.allocated_quantity) > 0
+                ORDER BY b.created_at DESC
+            `, [productId]);
+            
+            res.json({
+                success: true,
+                batches: batches.rows
+            });
+        } catch (error) {
+            console.error('Error getting batches:', error);
+            res.status(500).json({ success: false, error: 'Failed to get batches' });
+        }
+    }
+
+    /**
+     * Create internal invoice (API endpoint for invoice creation UI)
+     * POST /api/v1/invoices/internal
+     */
+    async createInternalInvoice(req, res) {
+        try {
+            const {
+                buyer_id,
+                location_id,
+                line_items,
+                customer_notes,
+                internal_notes
+            } = req.body;
+            
+            const userId = req.session.userId || req.user?.id;
+            
+            if (!buyer_id || !location_id || !line_items || line_items.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'buyer_id, location_id, and line_items are required'
+                });
+            }
+            
+            const internalInvoiceService = require('../Services/internalInvoiceService');
+            
+            const result = await internalInvoiceService.createInvoice(userId, {
+                fk_buyer_id: parseInt(buyer_id),
+                fk_location_id: parseInt(location_id),
+                line_items: line_items.map(item => ({
+                    fk_batch_id: item.fk_batch_id,
+                    quantity: parseInt(item.quantity),
+                    partial_packages_selected: item.partial_packages_selected || null
+                })),
+                customer_notes: customer_notes || null,
+                internal_notes: internal_notes || null
+            });
+            
+            res.json({
+                success: true,
+                invoice_id: result.invoice_id,
+                invoice_number: result.invoice_number
+            });
+        } catch (error) {
+            console.error('Error creating internal invoice:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to create invoice',
+                details: error.message
+            });
+        }
+    }
+}
+
+module.exports = new InvoiceController();
+

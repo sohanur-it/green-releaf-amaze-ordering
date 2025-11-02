@@ -49,6 +49,10 @@ class PortalAccessController {
                 return res.status(400).json({ error: 'Buyer ID is required' });
             }
             
+            if (!location_id) {
+                return res.status(400).json({ error: 'Location ID is required' });
+            }
+            
             const result = await query(`
                 INSERT INTO "ORDERS-portal-access" (
                     fk_buyer_id,
@@ -61,7 +65,7 @@ class PortalAccessController {
                 RETURNING access_uuid, id
             `, [
                 buyer_id,
-                location_id || buyer_id,
+                location_id,
                 expires_at || null,
                 notes || null,
                 req.user.id
@@ -126,6 +130,40 @@ class PortalAccessController {
     }
     
     /**
+     * Regenerate UUID for portal access (for security if link is leaked)
+     */
+    static async regenerateUuid(req, res) {
+        try {
+            const { id } = req.params;
+            
+            const result = await query(`
+                UPDATE "ORDERS-portal-access"
+                SET access_uuid = gen_random_uuid()
+                WHERE id = $1
+                RETURNING access_uuid
+            `, [id]);
+            
+            if (result.rows.length === 0) {
+                return res.status(404).json({ error: 'Portal access not found' });
+            }
+            
+            const host = req.get('host');
+            const protocol = req.protocol;
+            const url = `${protocol}://${host}/external/store/${result.rows[0].access_uuid}`;
+            
+            res.json({
+                success: true,
+                message: 'UUID regenerated successfully',
+                access_uuid: result.rows[0].access_uuid,
+                url: url
+            });
+        } catch (error) {
+            console.error('Error regenerating UUID:', error);
+            res.status(500).json({ error: 'Failed to regenerate UUID' });
+        }
+    }
+    
+    /**
      * Get portal URL
      */
     static async getUrl(req, res) {
@@ -154,6 +192,38 @@ class PortalAccessController {
         } catch (error) {
             console.error('Error getting portal URL:', error);
             res.status(500).json({ error: 'Failed to get portal URL' });
+        }
+    }
+    
+    /**
+     * Get locations for a buyer
+     */
+    static async getLocationsForBuyer(req, res) {
+        try {
+            const { buyerId } = req.params;
+            
+            const locations = await query(`
+                SELECT 
+                    entry_id as id,
+                    name,
+                    line_one,
+                    line_two,
+                    city,
+                    state,
+                    zip,
+                    state_license
+                FROM "ORDERS-buyer_locations"
+                WHERE orders_buyer_id = $1
+                ORDER BY name
+            `, [buyerId]);
+            
+            res.json({
+                success: true,
+                locations: locations.rows
+            });
+        } catch (error) {
+            console.error('Error fetching locations:', error);
+            res.status(500).json({ error: 'Failed to fetch locations' });
         }
     }
 }

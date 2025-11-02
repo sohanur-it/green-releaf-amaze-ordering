@@ -6,6 +6,7 @@ const buyerController = require('../Controllers/crm/buyerController');
 const salesRepController = require('../Controllers/crm/salesRepController');
 const productController = require('../Controllers/productController');
 const portalAccessController = require('../Controllers/portalAccessController');
+const invoiceController = require('../Controllers/invoiceController');
 const UserModel = require('../Models/userModel');
 const { requireAuth, requirePermission } = require('../Middleware/auth');
 const syncFailureTracker = require('../Services/syncFailureTracker');
@@ -84,6 +85,28 @@ router.get('/audit-logs', requirePermission('admin', 'audit'), (req, res) => {
 });
 
 // =============================================
+// INVOICE MANAGEMENT ROUTES (Module 4)
+// =============================================
+
+// List invoices
+router.get('/invoices', requirePermission('admin', 'dashboard'), invoiceController.showInvoiceList);
+
+// Show create invoice form
+router.get('/invoices/create', requirePermission('admin', 'dashboard'), invoiceController.showCreateInvoiceForm);
+
+// Clone invoice
+router.post('/invoices/:id/clone', requirePermission('admin', 'dashboard'), invoiceController.cloneInvoice);
+
+// Show invoice details
+router.get('/invoices/:id', requirePermission('admin', 'dashboard'), invoiceController.showInvoiceDetails);
+
+// Approve pending invoice
+router.post('/invoices/:id/approve', requirePermission('admin', 'dashboard'), invoiceController.approveInvoice);
+
+// Reject pending invoice
+router.post('/invoices/:id/reject', requirePermission('admin', 'dashboard'), invoiceController.rejectInvoice);
+
+// =============================================
 // PORTAL ACCESS MANAGEMENT ROUTES (Module 4)
 // =============================================
 
@@ -96,8 +119,14 @@ router.post('/api/portal-access', requirePermission('admin', 'buyers'), portalAc
 // Toggle portal access active status
 router.post('/api/portal-access/:id/toggle', requirePermission('admin', 'buyers'), portalAccessController.toggleActive);
 
+// Regenerate UUID for portal access
+router.post('/api/portal-access/:id/regenerate', requirePermission('admin', 'buyers'), portalAccessController.regenerateUuid);
+
 // Delete portal access
 router.delete('/api/portal-access/:id', requirePermission('admin', 'buyers'), portalAccessController.delete);
+
+// Get locations for a buyer (must come before /:id/url to avoid route conflict)
+router.get('/api/portal-access/buyers/:buyerId/locations', requirePermission('admin', 'buyers'), portalAccessController.getLocationsForBuyer);
 
 // Get portal URL
 router.get('/api/portal-access/:id/url', requirePermission('admin', 'buyers'), portalAccessController.getUrl);

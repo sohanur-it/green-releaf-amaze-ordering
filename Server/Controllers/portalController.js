@@ -730,12 +730,44 @@ class PortalController {
             // Get cart items for display
             const cartData = await PortalController.getCartData(portalAccess);
             
+            // Get ALL locations for this buyer (for dropdown)
+            const allLocations = await query(`
+                SELECT 
+                    l.entry_id as location_id,
+                    l.name,
+                    l.line_one,
+                    l.line_two,
+                    l.city,
+                    l.state,
+                    l.zip,
+                    l.state_license
+                FROM "ORDERS-buyer_locations" l
+                WHERE l.orders_buyer_id = $1
+                ORDER BY l.name
+            `, [portalAccess.buyerId]);
+            
+            // Get the current location data for shipping address pre-fill
+            const locationData = await query(`
+                SELECT 
+                    l.name,
+                    l.line_one as address,
+                    l.line_two,
+                    l.city,
+                    l.state,
+                    l.zip as zip_code
+                FROM "ORDERS-buyer_locations" l
+                WHERE l.entry_id = $1
+            `, [portalAccess.locationId]);
+            
+            const shippingAddress = locationData.rows[0] || {};
+            
             console.log('Checkout - Cart data:', {
                 buyerId: portalAccess.buyerId,
                 locationId: portalAccess.locationId,
                 itemCount: cartData.items ? cartData.items.length : 0,
                 subtotal: cartData.subtotal,
-                total: cartData.total
+                total: cartData.total,
+                locationsFound: allLocations.rows.length
             });
             
             res.render('external/checkout', {
@@ -743,7 +775,9 @@ class PortalController {
                 layout: 'layouts/portal',
                 cart: cartData,
                 portalAccess: portalAccess,
-                uuid: uuid
+                uuid: uuid,
+                shippingAddress: shippingAddress,
+                locations: allLocations.rows
             });
         } catch (error) {
             console.error('Error loading checkout:', error);
@@ -751,6 +785,61 @@ class PortalController {
                 title: 'Error',
                 layout: 'layouts/portal',
                 error: 'Failed to load checkout',
+                message: 'Please try again later'
+            });
+        }
+    }
+    
+    /**
+     * Show order confirmation page
+     */
+    static async showConfirmation(req, res) {
+        try {
+            const { uuid, invoiceId } = req.params;
+            const portalAccess = req.session.portalAccess || {};
+            
+            // Get invoice details with sales rep info
+            const invoiceDetails = await query(`
+                SELECT 
+                    i.invoice_number,
+                    i.total,
+                    i.credit_applied,
+                    u.first_name,
+                    u.last_name
+                FROM "ORDERS-invoices" i
+                LEFT JOIN users u ON i.assigned_sales_rep_id = u.id
+                WHERE i.id = $1 AND i.fk_location_id = $2
+            `, [invoiceId, portalAccess.locationId]);
+            
+            if (invoiceDetails.rows.length === 0) {
+                return res.status(404).render('external/error', {
+                    title: 'Order Not Found',
+                    layout: 'layouts/portal',
+                    error: 'Order Not Found',
+                    message: 'The requested order could not be found.'
+                });
+            }
+            
+            const invoice = invoiceDetails.rows[0];
+            const salesRepName = invoice.first_name && invoice.last_name 
+                ? `${invoice.first_name} ${invoice.last_name}` 
+                : null;
+            
+            res.render('external/order-confirmation', {
+                title: 'Order Confirmation',
+                layout: 'layouts/portal',
+                uuid: uuid,
+                invoiceNumber: invoice.invoice_number,
+                orderTotal: invoice.total,
+                creditApplied: invoice.credit_applied || 0,
+                salesRepName: salesRepName
+            });
+        } catch (error) {
+            console.error('Error loading confirmation:', error);
+            res.status(500).render('external/error', {
+                title: 'Error',
+                layout: 'layouts/portal',
+                error: 'Failed to load confirmation',
                 message: 'Please try again later'
             });
         }
@@ -851,12 +940,13 @@ class PortalController {
     }
     
     /**
-     * Process checkout and create order
+     * Process checkout and submit cart for approval
+     * Transitions external cart from Draft to Pending_Approval
      */
     static async processCheckout(req, res) {
         try {
             const portalAccess = req.session.portalAccess;
-            const { billing } = req.body;
+            const { notes } = req.body;
             
             if (!portalAccess) {
                 return res.status(401).json({ error: 'Not authenticated' });
@@ -865,20 +955,76 @@ class PortalController {
             // Get cart data
             const cartData = await PortalController.getCartData(portalAccess);
             
+            if (!cartData.invoice_id) {
+                return res.status(400).json({ error: 'No active cart found' });
+            }
+            
             if (!cartData.items || cartData.items.length === 0) {
                 return res.status(400).json({ error: 'Cart is empty' });
             }
             
-            // TODO: Implement actual order creation logic
-            // For now, just return success
+            // Update customer notes if provided
+            if (notes) {
+                await query(`
+                    UPDATE "ORDERS-invoices"
+                    SET customer_notes = $1
+                    WHERE id = $2
+                `, [notes, cartData.invoice_id]);
+            }
+            
+            // Apply available credits to invoice
+            const accountCreditService = require('../Services/accountCreditService');
+            const creditResult = await accountCreditService.applyCreditsToInvoice(cartData.invoice_id);
+            console.log('Credit application result:', creditResult);
+            
+            // Validate purchase limits (for external orders)
+            try {
+                const purchaseLimitService = require('../Services/purchaseLimitService');
+                await purchaseLimitService.validatePurchaseLimits(cartData.invoice_id);
+                console.log('Purchase limits validated successfully');
+            } catch (error) {
+                if (error.constructor.name === 'PurchaseLimitError') {
+                    return res.status(400).json({
+                        success: false,
+                        error: 'Purchase limit validation failed',
+                        violations: error.violations
+                    });
+                }
+                console.error('Error validating purchase limits:', error);
+                // Continue - don't fail checkout if validation errors out
+            }
+            
+            // Submit cart for approval using state machine
+            const invoiceStateMachine = require('../Services/invoiceStateMachineService');
+            const result = await invoiceStateMachine.transitionTo(
+                cartData.invoice_id,
+                'Pending_Approval',
+                portalAccess.buyerId, // Use buyer ID as user reference for audit
+                'External order submitted'
+            );
+            
+            if (!result.success) {
+                return res.status(400).json({ 
+                    success: false,
+                    error: result.error || 'Failed to submit order',
+                    validTransitions: result.validTransitions
+                });
+            }
+            
+            // Return JSON with invoice_id for client redirect
             res.json({ 
                 success: true, 
-                message: 'Order placed successfully',
-                order_id: cartData.invoice_id 
+                message: 'Order submitted successfully and pending approval',
+                invoice_id: cartData.invoice_id,
+                credit_applied: creditResult.applied || 0
             });
         } catch (error) {
             console.error('Error processing checkout:', error);
-            res.status(500).json({ error: 'Failed to process checkout' });
+            res.status(500).json({ 
+                success: false,
+                error: 'Failed to process checkout',
+                details: error.message 
+            });
         }
     }
 }

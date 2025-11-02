@@ -51,6 +51,9 @@
                                         <button class="btn-sm btn-info" onclick="getPortalUrl(<%= access.id %>)" title="Get URL">
                                             <i class="fas fa-link"></i> Get URL
                                         </button>
+                                        <button class="btn-sm btn-secondary" onclick="regenerateUuid(<%= access.id %>)" title="Regenerate UUID">
+                                            <i class="fas fa-key"></i> Regenerate
+                                        </button>
                                         <button class="btn-sm btn-warning" onclick="toggleActive(<%= access.id %>)" title="Toggle Status">
                                             <i class="fas fa-toggle-<%= access.is_active ? 'on' : 'off' %>"></i>
                                         </button>
@@ -81,9 +84,16 @@
         <form id="createForm" onsubmit="createAccess(event)">
             <div class="form-group">
                 <label for="buyer_id">Buyer</label>
-                <select id="buyer_id" name="buyer_id" required>
+                <select id="buyer_id" name="buyer_id" required onchange="loadLocations(this.value)">
                     <option value="">Select a buyer...</option>
                 </select>
+            </div>
+            <div class="form-group">
+                <label for="location_id">Location</label>
+                <select id="location_id" name="location_id" required>
+                    <option value="">Select a location...</option>
+                </select>
+                <small style="color: #666; font-size: 0.9rem;">Please select a buyer first</small>
             </div>
             <div class="form-group">
                 <label for="expires_at">Expiration Date (Optional)</label>
@@ -152,6 +162,11 @@
     color: white;
 }
 
+.btn-secondary {
+    background-color: #6c757d;
+    color: white;
+}
+
 .badge {
     padding: 4px 8px;
     border-radius: 4px;
@@ -173,38 +188,153 @@
 <script>
 // Load buyers for dropdown
 async function loadBuyers() {
+    const select = document.getElementById('buyer_id');
+    
     try {
-        const response = await fetch('/admin/api/crm/buyers');
-        const data = await response.json();
-        const select = document.getElementById('buyer_id');
+        console.log('Fetching buyers from /api/crm/buyers...');
+        const response = await fetch('/api/crm/buyers');
         
-        data.buyers.forEach(buyer => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('Buyers API response:', data);
+        
+        // Clear existing options (except placeholder)
+        select.innerHTML = '<option value="">Select a buyer...</option>';
+        
+        // The API returns an array directly, not wrapped in { buyers: [...] }
+        if (Array.isArray(data)) {
+            if (data.length === 0) {
+                console.warn('No buyers found in database');
+                const option = document.createElement('option');
+                option.value = '';
+                option.textContent = 'No buyers found';
+                option.disabled = true;
+                select.appendChild(option);
+            } else {
+                console.log(`Loading ${data.length} buyers into dropdown`);
+                data.forEach(buyer => {
+                    const option = document.createElement('option');
+                    option.value = buyer.entry_id;
+                    option.textContent = buyer.name;
+                    select.appendChild(option);
+                });
+                console.log('Buyers loaded successfully');
+            }
+        } else if (data.buyers && Array.isArray(data.buyers)) {
+            // Handle case where it's wrapped in { buyers: [...] }
+            console.log(`Loading ${data.buyers.length} buyers into dropdown (wrapped format)`);
+            data.buyers.forEach(buyer => {
+                const option = document.createElement('option');
+                option.value = buyer.entry_id;
+                option.textContent = buyer.name;
+                select.appendChild(option);
+            });
+        } else {
+            console.error('Unexpected data format:', data);
             const option = document.createElement('option');
-            option.value = buyer.entry_id;
-            option.textContent = buyer.name;
+            option.value = '';
+            option.textContent = 'Error loading buyers';
+            option.disabled = true;
             select.appendChild(option);
-        });
+        }
     } catch (error) {
         console.error('Error loading buyers:', error);
+        select.innerHTML = '<option value="">Error loading buyers</option>';
+        alert('Failed to load buyers. Please check the browser console for details.');
+    }
+}
+
+async function loadLocations(buyerId) {
+    const locationSelect = document.getElementById('location_id');
+    locationSelect.innerHTML = '<option value="">Loading locations...</option>';
+    locationSelect.disabled = true;
+    
+    if (!buyerId) {
+        locationSelect.innerHTML = '<option value="">Select a location...</option>';
+        locationSelect.disabled = true;
+        return;
+    }
+    
+    try {
+        console.log(`Fetching locations for buyer ${buyerId}...`);
+        const response = await fetch(`/admin/api/portal-access/buyers/${buyerId}/locations`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('Locations API response:', data);
+        
+        locationSelect.innerHTML = '<option value="">Select a location...</option>';
+        
+        if (data.success && data.locations && data.locations.length > 0) {
+            console.log(`Loading ${data.locations.length} locations into dropdown`);
+            data.locations.forEach(location => {
+                const option = document.createElement('option');
+                option.value = location.id;
+                // Format: "Location Name | License Number" (matching checkout format)
+                let displayText = location.name;
+                if (location.state_license) {
+                    displayText += ` | ${location.state_license}`;
+                }
+                option.textContent = displayText;
+                locationSelect.appendChild(option);
+            });
+            locationSelect.disabled = false;
+            console.log('Locations loaded successfully');
+        } else {
+            console.warn('No locations found for buyer');
+            locationSelect.innerHTML = '<option value="">No locations found for this buyer</option>';
+            locationSelect.disabled = true;
+        }
+    } catch (error) {
+        console.error('Error loading locations:', error);
+        locationSelect.innerHTML = '<option value="">Error loading locations</option>';
+        locationSelect.disabled = true;
+        alert('Failed to load locations. Please check the browser console for details.');
     }
 }
 
 function showCreateModal() {
-    document.getElementById('createModal').style.display = 'flex';
+    const modal = document.getElementById('createModal');
+    modal.style.display = 'flex';
+    
+    // Reset form and dropdowns
+    document.getElementById('createForm').reset();
+    document.getElementById('location_id').innerHTML = '<option value="">Select a location...</option>';
+    document.getElementById('location_id').disabled = true;
+    
+    // Load buyers
+    console.log('Loading buyers for portal access form...');
     loadBuyers();
 }
 
 function hideCreateModal() {
     document.getElementById('createModal').style.display = 'none';
     document.getElementById('createForm').reset();
+    // Reset location dropdown
+    const locationSelect = document.getElementById('location_id');
+    locationSelect.innerHTML = '<option value="">Select a location...</option>';
 }
 
 async function createAccess(event) {
     event.preventDefault();
     
     const formData = new FormData(event.target);
+    const locationId = formData.get('location_id');
+    
+    if (!locationId) {
+        alert('Please select a location');
+        return;
+    }
+    
     const data = {
         buyer_id: formData.get('buyer_id'),
+        location_id: locationId,
         expires_at: formData.get('expires_at') || null,
         notes: formData.get('notes') || null
     };
@@ -224,7 +354,7 @@ async function createAccess(event) {
             alert('Portal access created successfully!');
             location.reload();
         } else {
-            alert('Error creating portal access');
+            alert('Error creating portal access: ' + (result.error || 'Unknown error'));
         }
     } catch (error) {
         console.error('Error creating access:', error);
@@ -267,6 +397,34 @@ async function toggleActive(id) {
     } catch (error) {
         console.error('Error toggling access:', error);
         alert('Error updating portal access');
+    }
+}
+
+async function regenerateUuid(id) {
+    if (!confirm('Are you sure you want to regenerate the UUID? The old link will stop working immediately.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/admin/api/portal-access/${id}/regenerate`, {
+            method: 'POST'
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            navigator.clipboard.writeText(result.url).then(() => {
+                alert(`UUID regenerated successfully!\n\nNew URL copied to clipboard:\n${result.url}\n\nOld link is now invalid.`);
+            }).catch(() => {
+                alert(`UUID regenerated successfully!\n\nNew URL: ${result.url}\n\nOld link is now invalid.`);
+            });
+            location.reload();
+        } else {
+            alert('Error regenerating UUID: ' + (result.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error regenerating UUID:', error);
+        alert('Error regenerating UUID');
     }
 }
 

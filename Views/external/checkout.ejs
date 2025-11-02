@@ -100,8 +100,23 @@
             <!-- Left: Shipping Information -->
             <div class="shipping-section">
                 <h3 class="section-header purple-header">Select Location</h3>
-                <select id="location-select" class="location-dropdown">
+                <select id="location-select" class="location-dropdown" onchange="handleLocationChange(this.value)">
                     <option value="">Select a location...</option>
+                    <% if (locations && locations.length > 0) { %>
+                        <% locations.forEach(loc => { %>
+                            <option value="<%= loc.location_id %>" 
+                                    data-line-one="<%= loc.line_one || '' %>"
+                                    data-line-two="<%= loc.line_two || '' %>"
+                                    data-city="<%= loc.city || '' %>"
+                                    data-state="<%= loc.state || '' %>"
+                                    data-zip="<%= loc.zip || '' %>"
+                                    <%= (portalAccess && portalAccess.locationId == loc.location_id) ? 'selected' : '' %>>
+                                <%= loc.name %><% if (loc.state_license) { %> | <%= loc.state_license %><% } %>
+                            </option>
+                        <% }); %>
+                    <% } else { %>
+                        <option value="" disabled>No locations available</option>
+                    <% } %>
                 </select>
                 
                 <div class="shipping-form-grid">
@@ -115,23 +130,23 @@
                     </div>
                     <div class="form-group full-width">
                         <label for="address-line-one">Address Line One</label>
-                        <input type="text" id="address-line-one" name="address_line_one">
+                        <input type="text" id="address-line-one" name="address_line_one" value="<%= shippingAddress.address || '' %>">
                     </div>
                     <div class="form-group full-width">
                         <label for="address-line-two">Address Line Two</label>
-                        <input type="text" id="address-line-two" name="address_line_two">
+                        <input type="text" id="address-line-two" name="address_line_two" value="<%= shippingAddress.line_two || '' %>">
                     </div>
                     <div class="form-group">
                         <label for="city">City</label>
-                        <input type="text" id="city" name="city">
+                        <input type="text" id="city" name="city" value="<%= shippingAddress.city || '' %>">
                     </div>
                     <div class="form-group">
                         <label for="state">State</label>
-                        <input type="text" id="state" name="state" value="Missouri">
+                        <input type="text" id="state" name="state" value="<%= shippingAddress.state || 'Missouri' %>">
                     </div>
                     <div class="form-group">
                         <label for="postal-code">Postal Code</label>
-                        <input type="text" id="postal-code" name="postal_code">
+                        <input type="text" id="postal-code" name="postal_code" value="<%= shippingAddress.zip_code || '' %>">
                     </div>
                     <div class="form-group">
                         <label for="country">Country</label>
@@ -314,35 +329,25 @@ async function removeLineItem(lineItemId, reload = true) {
     }
 }
 
+function handleLocationChange(locationId) {
+    const select = document.getElementById('location-select');
+    const selectedOption = select.options[select.selectedIndex];
+    
+    if (selectedOption && selectedOption.value) {
+        // Update address fields when location is selected
+        document.getElementById('address-line-one').value = selectedOption.getAttribute('data-line-one') || '';
+        document.getElementById('address-line-two').value = selectedOption.getAttribute('data-line-two') || '';
+        document.getElementById('city').value = selectedOption.getAttribute('data-city') || '';
+        document.getElementById('state').value = selectedOption.getAttribute('data-state') || 'Missouri';
+        document.getElementById('postal-code').value = selectedOption.getAttribute('data-zip') || '';
+    }
+}
+
 async function placeOrder() {
     const orderNotes = document.getElementById('order-notes').value;
-    const shipTo = document.getElementById('ship-to').value;
-    const stateLicense = document.getElementById('state-license').value;
-    const addressLineOne = document.getElementById('address-line-one').value;
-    const addressLineTwo = document.getElementById('address-line-two').value;
-    const city = document.getElementById('city').value;
-    const state = document.getElementById('state').value;
-    const postalCode = document.getElementById('postal-code').value;
-    const country = document.getElementById('country').value;
-    
-    if (!addressLineOne || !city || !state || !postalCode) {
-        alert('Please fill in all required shipping information');
-        return;
-    }
     
     const orderData = {
-        shipping: {
-            ship_to: shipTo,
-            state_license: stateLicense,
-            address_line_one: addressLineOne,
-            address_line_two: addressLineTwo,
-            city: city,
-            state: state,
-            postal_code: postalCode,
-            country: country
-        },
-        order_notes: orderNotes,
-        uuid: uuid
+        notes: orderNotes
     };
     
     try {
@@ -356,14 +361,29 @@ async function placeOrder() {
         
         const data = await response.json();
         if (data.success) {
-            alert('Order placed successfully!');
-            window.location.href = `/external/store/${uuid}`;
+            if (typeof showNotification !== 'undefined') {
+                showNotification('Order submitted successfully! Pending approval.', 'success');
+            } else {
+                alert('Order submitted successfully! Pending approval.');
+            }
+            // Redirect to confirmation page
+            setTimeout(() => {
+                window.location.href = `/external/store/${uuid}/confirmation/${data.invoice_id}`;
+            }, 1500);
         } else {
-            alert('Error placing order: ' + (data.error || 'Unknown error'));
+            if (typeof showNotification !== 'undefined') {
+                showNotification('Error: ' + (data.error || 'Unknown error'), 'error');
+            } else {
+                alert('Error placing order: ' + (data.error || 'Unknown error'));
+            }
         }
     } catch (error) {
         console.error('Error:', error);
-        alert('Failed to place order. Please try again.');
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Failed to place order. Please try again.', 'error');
+        } else {
+            alert('Failed to place order. Please try again.');
+        }
     }
 }
 </script>

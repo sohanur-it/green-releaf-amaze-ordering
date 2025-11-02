@@ -44,20 +44,21 @@ END $$;
 
 -- Modification type enum
 DO $$ BEGIN
-    CREATE TYPE modification_type AS ENUM (
-        'line_item_added',
-        'line_item_removed',
-        'line_item_quantity_changed',
-        'discount_applied',
-        'discount_removed',
-        'credit_applied',
-        'status_changed',
-        'fulfillment_issue_reported',
-        'fulfillment_issue_resolved',
-        'cancelled',
-        'cloned_from',
-        'metrc_allocation_conflict'
-    );
+CREATE TYPE modification_type AS ENUM (
+    'line_item_added',
+    'line_item_removed',
+    'line_item_quantity_changed',
+    'discount_applied',
+    'discount_removed',
+    'credit_applied',
+    'status_changed',
+    'fulfillment_issue_reported',
+    'fulfillment_issue_resolved',
+    'cancelled',
+    'cloned_from',
+    'metrc_allocation_conflict',
+    'invoice_created'
+);
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
