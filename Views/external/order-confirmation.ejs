@@ -1,5 +1,3 @@
-<%- include('../layouts/portal') %>
-
 <div class="confirmation-container">
     <div class="confirmation-content">
         <div class="confirmation-icon">
@@ -147,4 +145,39 @@
         background: #2563eb;
     }
 </style>
+
+<script>
+// Clear cart on confirmation page load
+document.addEventListener('DOMContentLoaded', function() {
+    const uuid = '<%= uuid %>';
+    
+    // Initialize cart manager if not already initialized
+    if (typeof initCartManager === 'function') {
+        initCartManager(uuid);
+    }
+    
+    // Get cart manager and clear it
+    if (typeof getCartManager === 'function') {
+        const cart = getCartManager();
+        if (cart && typeof cart.clearCart === 'function') {
+            cart.clearCart();
+            console.log('Cart cleared after order confirmation');
+        }
+    }
+    
+    // Also clear localStorage directly as backup
+    try {
+        const storageKey = `portal_cart_${uuid}`;
+        localStorage.removeItem(storageKey);
+        
+        // Update cart icon
+        const cartBadge = document.getElementById('cart-count-badge');
+        if (cartBadge) {
+            cartBadge.style.display = 'none';
+        }
+    } catch (e) {
+        console.error('Error clearing cart:', e);
+    }
+});
+</script>
 

@@ -586,15 +586,14 @@
 
 <script>
 // Cart management functions
-let currentCart = {
-    items: [],
-    subtotal: 0,
-    total: 0
-};
-
-// Load cart on page load
+// Initialize cart manager on page load
 document.addEventListener('DOMContentLoaded', function() {
-    loadCart();
+    const uuid = '<%= uuid %>';
+    initCartManager(uuid);
+    const cart = getCartManager();
+    if (cart) {
+        renderCart();
+    }
     
     // Load saved view preference (URL param overrides localStorage)
     const params = new URLSearchParams(window.location.search);
@@ -721,74 +720,8 @@ document.addEventListener('DOMContentLoaded', function() {
         inlineToggle.addEventListener('click', toggleSidebar);
     }
 
-    // Cart toggle button in header
-    const cartToggleBtn = document.getElementById('cart-toggle');
-    const cartOverlay = document.getElementById('cart-overlay');
-    
-    function toggleCart(show) {
-        const cartEl = document.querySelector('.portal-cart');
-        if (cartEl) {
-            if (show === undefined) {
-                // Toggle current state
-                const isCurrentlyCollapsed = cartEl.classList.contains('collapsed');
-                show = isCurrentlyCollapsed;
-            }
-            
-            if (show) {
-                cartEl.classList.remove('collapsed');
-                localStorage.setItem('cartCollapsed', 'false');
-                if (cartOverlay) {
-                    cartOverlay.style.display = 'block';
-                    setTimeout(() => { cartOverlay.style.opacity = '1'; }, 10);
-                }
-            } else {
-                cartEl.classList.add('collapsed');
-                localStorage.setItem('cartCollapsed', 'true');
-                if (cartOverlay) {
-                    cartOverlay.style.opacity = '0';
-                    setTimeout(() => { cartOverlay.style.display = 'none'; }, 300);
-                }
-            }
-        }
-    }
-    
-    if (cartToggleBtn) {
-        cartToggleBtn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            toggleCart();
-        });
-    }
-    
-    // Close cart when clicking overlay
-    if (cartOverlay) {
-        cartOverlay.addEventListener('click', function() {
-            toggleCart(false);
-        });
-    }
-
-    // Initialize cart collapsed state (default hidden)
-    const cartEl = document.querySelector('.portal-cart');
-    const cartCollapsedPref = localStorage.getItem('cartCollapsed');
-    if (cartCollapsedPref === null) {
-        localStorage.setItem('cartCollapsed', 'true');
-    }
-    if (cartEl) {
-        // 'true' in localStorage means hidden, which means collapsed class
-        // 'false' means visible
-        if (localStorage.getItem('cartCollapsed') === 'true') {
-            cartEl.classList.add('collapsed');
-            if (cartOverlay) {
-                cartOverlay.style.display = 'none';
-                cartOverlay.style.opacity = '0';
-            }
-        } else {
-            cartEl.classList.remove('collapsed');
-            if (cartOverlay) {
-                cartOverlay.style.display = 'block';
-                cartOverlay.style.opacity = '1';
-            }
-        }
-    }
+    // Cart toggle is now handled by shared cart-toggle.js
+    // No need to duplicate the logic here
     
     // Initialize pagination and filters
     initProducts();
@@ -846,22 +779,30 @@ async function loadCart() {
     }
 }
 
+// INSTANT CART - Frontend only, no backend API call
 async function addToCart(event, batchId) {
     event.preventDefault();
+    
+    // Get cart manager
+    const cart = getCartManager();
+    if (!cart) {
+        console.error('Cart manager not initialized');
+        return;
+    }
+    
+    // Get quantity
     let quantity = 1;
     const container = event.target.closest('.quantity-selector-container');
     if (container) {
         const quantityInput = container.querySelector('.quantity-input');
         const inputValue = quantityInput?.value || '1';
         quantity = parseInt(inputValue, 10);
-        console.log('addToCart - Grid view:', { inputValue, parsedQuantity: quantity, batchId });
     } else {
         // Table view
         const td = event.target.closest('td');
         const tableInput = td ? td.querySelector('.table-qty-input') : null;
         const inputValue = tableInput?.value || '1';
         quantity = parseInt(inputValue, 10);
-        console.log('addToCart - Table view:', { inputValue, parsedQuantity: quantity, batchId });
     }
     
     if (!quantity || isNaN(quantity) || quantity <= 0) {
@@ -873,158 +814,84 @@ async function addToCart(event, batchId) {
         return;
     }
     
-    const uuid = '<%= uuid %>';
-    console.log('addToCart - Sending to API:', { batchId, quantity, uuid });
-    try {
-        const response = await fetch(`/api/portal/${uuid}/cart/add`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                batch_id: batchId,
-                quantity: quantity
-            })
-        });
-        const data = await response.json();
-
-        // If backend successfully added item, reload cart from server
-        if (data.success) {
-            await loadCart();
-            
-            // Show success notification
-            const itemText = quantity === 1 ? '1 item' : `${quantity} items`;
+    // Get product data from DOM
+    const card = event.target.closest('.product-card');
+    const row = event.target.closest('.product-row');
+    const element = card || row;
+    
+    if (!element) {
+        console.error('Could not find product element');
+        return;
+    }
+    
+    // Extract product data from data attributes
+    const productData = {
+        product_id: element.dataset.productId,
+        batch_id: batchId,
+        product_name: element.dataset.productName || 'Product',
+        batch_name: element.dataset.batchName || '',
+        brand_name: element.dataset.brandName || 'AMAZE',
+        cultivar_name: element.dataset.cultivarName || '',
+        category_name: element.dataset.categoryName || '',
+        product_type: element.dataset.productType || '',
+        unit_size: element.dataset.unitSize || '',
+        unit_measurement_name: element.dataset.unitMeasurementName || '',
+        units_per_case: parseInt(element.dataset.unitsPerCase || '24', 10),
+        unit_price: parseFloat(element.dataset.unitPrice || '0'),
+        quantity_available: parseInt(element.dataset.quantityAvailable || '0', 10),
+        image_url: element.dataset.imageUrl || '/public/images/placeholder.jpg'
+    };
+    
+    // Check inventory limit
+    const currentQuantity = cart.cart.items.find(item => item.batch_id === batchId)?.quantity || 0;
+    const totalRequested = currentQuantity + quantity;
+    
+    if (totalRequested > productData.quantity_available) {
+        const available = productData.quantity_available - currentQuantity;
+        if (available <= 0) {
             if (typeof showNotification !== 'undefined') {
-                showNotification(`${itemText} added to cart`, 'success');
+                showNotification('This item is out of stock', 'error');
             } else {
-                alert(`${itemText} added to cart successfully!`);
-            }
-            
-            // Ensure cart is visible when adding first item
-            const cartEl = document.querySelector('.portal-cart');
-            const cartOverlay = document.getElementById('cart-overlay');
-            if (cartEl && cartEl.classList.contains('collapsed')) {
-                cartEl.classList.remove('collapsed');
-                localStorage.setItem('cartCollapsed', 'false');
-                if (cartOverlay) {
-                    cartOverlay.style.display = 'block';
-                    setTimeout(() => { cartOverlay.style.opacity = '1'; }, 10);
-                }
+                alert('This item is out of stock');
             }
             return;
         } else {
-            // Show error notification
+            quantity = available; // Adjust to max available
             if (typeof showNotification !== 'undefined') {
-                showNotification(data.error || 'Failed to add item to cart', 'error');
-            } else {
-                alert(data.error || 'Failed to add item to cart');
-            }
-        }
-
-        // Fallback to client-side cart if backend fails or not implemented
-        if (!data || data.error) {
-            const card = event.target.closest('.product-card');
-            const row = event.target.closest('.product-row');
-            
-            if (card || row) {
-                const element = card || row;
-                const productName = element.dataset.productName;
-                const batchName = element.dataset.batchName;
-                const unitPrice = parseFloat(element.dataset.unitPrice || '0');
-                
-                // Get image URL from data attribute or from image element
-                let imageUrl = element.dataset.imageUrl || '/public/images/placeholder.jpg';
-                if (!imageUrl || imageUrl === '') {
-                    if (card) {
-                        const imgEl = card.querySelector('img.product-image');
-                        imageUrl = imgEl ? (imgEl.getAttribute('src') || '/public/images/placeholder.jpg') : '/public/images/placeholder.jpg';
-                    }
-                }
-                
-                const lineItem = {
-                    line_item_id: Date.now(),
-                    product_id: element.dataset.productId,
-                    batch_id: element.dataset.batchId,
-                    product_name: productName,
-                    batch_name: batchName,
-                    quantity: quantity,
-                    unit_price: unitPrice,
-                    line_total: unitPrice * quantity,
-                    image_url: imageUrl
-                };
-
-                if (!currentCart.items) currentCart.items = [];
-                currentCart.items.push(lineItem);
-                currentCart.subtotal = (currentCart.subtotal || 0) + lineItem.line_total;
-                currentCart.total = (currentCart.total || 0) + lineItem.line_total;
-                renderCart();
-
-                // Ensure cart is visible when adding first item
-                const cartEl = document.querySelector('.portal-cart');
-                const cartOverlay = document.getElementById('cart-overlay');
-                if (cartEl && cartEl.classList.contains('collapsed')) {
-                    cartEl.classList.remove('collapsed');
-                    localStorage.setItem('cartCollapsed', 'false');
-                    if (cartOverlay) {
-                        cartOverlay.style.display = 'block';
-                        setTimeout(() => { cartOverlay.style.opacity = '1'; }, 10);
-                    }
-                }
-            }
-        }
-    } catch (error) {
-        // Client-side fallback on error as well
-        console.error('Error adding to cart:', error);
-        const card = event.target.closest('.product-card');
-        const row = event.target.closest('.product-row');
-        
-        if (card || row) {
-            const element = card || row;
-            const productName = element.dataset.productName;
-            const batchName = element.dataset.batchName;
-            const unitPrice = parseFloat(element.dataset.unitPrice || '0');
-            
-            let imageUrl = '/public/images/placeholder.jpg';
-            if (card) {
-                const imgEl = card.querySelector('img.product-image');
-                imageUrl = imgEl ? imgEl.getAttribute('src') : '/public/images/placeholder.jpg';
-            }
-            
-            const lineItem = {
-                line_item_id: Date.now(),
-                product_id: element.dataset.productId,
-                batch_id: element.dataset.batchId,
-                product_name: productName,
-                batch_name: batchName,
-                quantity: quantity,
-                unit_price: unitPrice,
-                line_total: unitPrice * quantity,
-                image_url: imageUrl
-            };
-            if (!currentCart.items) currentCart.items = [];
-            currentCart.items.push(lineItem);
-            currentCart.subtotal = (currentCart.subtotal || 0) + lineItem.line_total;
-            currentCart.total = (currentCart.total || 0) + lineItem.line_total;
-            renderCart();
-
-            const cartEl = document.querySelector('.portal-cart');
-            if (cartEl && cartEl.classList.contains('collapsed')) {
-                cartEl.classList.remove('collapsed');
-                localStorage.setItem('cartCollapsed', 'false');
+                showNotification(`Only ${available} cases available. Adjusted quantity.`, 'warning');
             }
         }
     }
+    
+    // Add to cart instantly (frontend only)
+    cart.addItem(batchId, quantity, productData);
+    
+    // Show success notification
+    const itemText = quantity === 1 ? '1 item' : `${quantity} items`;
+    if (typeof showNotification !== 'undefined') {
+        showNotification(`${itemText} added to cart`, 'success');
+    }
+    
+    // Update cart UI
+    renderCart();
+    
+    // Don't auto-open cart - user must click cart icon to open
+    // This keeps the UI clean and gives user control
 }
 
 function renderCart() {
+    const cart = getCartManager();
+    if (!cart) return;
+    
+    const cartData = cart.getCart();
     const cartItemsDiv = document.getElementById('cart-items');
     const cartCountSpan = document.getElementById('cart-count');
     const cartSubtotalSpan = document.getElementById('cart-subtotal');
     const cartTotalSpan = document.getElementById('cart-total');
     const checkoutBtn = document.getElementById('checkout-btn');
     
-    if (currentCart.items && currentCart.items.length > 0) {
-        cartItemsDiv.innerHTML = currentCart.items.map(item => {
+    if (cartData.items && cartData.items.length > 0) {
+        cartItemsDiv.innerHTML = cartData.items.map(item => {
             const imageUrl = (item.image_url && item.image_url !== '') 
                 ? item.image_url 
                 : '/public/images/placeholder.jpg';
@@ -1049,13 +916,13 @@ function renderCart() {
                     <span class="price-label">$${item.unit_price.toFixed(2)} / Case</span>
                 </div>
                 <div class="cart-quantity-controls">
-                    <button class="quantity-btn" onclick="updateQuantity(${item.line_item_id}, -1)">-</button>
+                    <button class="quantity-btn" onclick="updateQuantity('${String(item.line_item_id)}', -1)">-</button>
                     <span>${item.quantity}</span>
-                    <button class="quantity-btn" onclick="updateQuantity(${item.line_item_id}, 1)">+</button>
+                    <button class="quantity-btn" onclick="updateQuantity('${String(item.line_item_id)}', 1)">+</button>
                 </div>
                 <div class="cart-item-total">
                     <span>Total: $${item.line_total.toFixed(2)}</span>
-                    <button class="remove-item-btn" onclick="removeItem(${item.line_item_id}, ${item.batch_id})">
+                    <button class="remove-item-btn" onclick="removeItem('${String(item.line_item_id)}', ${item.batch_id})">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -1063,9 +930,13 @@ function renderCart() {
         `;
         }).join('');
         
-        cartCountSpan.textContent = currentCart.items.length;
+        const itemCount = cart.getItemCount();
+        cartCountSpan.textContent = itemCount;
         const headerBadge = document.getElementById('cart-count-badge');
-        if (headerBadge) headerBadge.textContent = currentCart.items.length;
+        if (headerBadge) {
+            headerBadge.textContent = itemCount;
+            headerBadge.style.display = itemCount > 0 ? 'inline-block' : 'none';
+        }
         checkoutBtn.disabled = false;
     } else {
         cartItemsDiv.innerHTML = `
@@ -1076,57 +947,69 @@ function renderCart() {
         `;
         cartCountSpan.textContent = '0';
         const headerBadge = document.getElementById('cart-count-badge');
-        if (headerBadge) headerBadge.textContent = '0';
+        if (headerBadge) {
+            headerBadge.textContent = '0';
+            headerBadge.style.display = 'none';
+        }
         checkoutBtn.disabled = true;
     }
     
-    cartSubtotalSpan.textContent = `$${currentCart.subtotal.toFixed(2)}`;
-    cartTotalSpan.textContent = `$${currentCart.total.toFixed(2)}`;
+    cartSubtotalSpan.textContent = `$${cartData.subtotal.toFixed(2)}`;
+    cartTotalSpan.textContent = `$${cartData.total.toFixed(2)}`;
+    
+    // Listen for cart changes
+    window.addEventListener('cartChanged', function() {
+        renderCart();
+    });
 }
 
 // Debounce timer for cart updates
 let cartUpdateTimer = null;
 let pendingCartUpdates = new Map();
 
-async function updateQuantity(lineItemId, delta) {
-    if (!currentCart.items) return;
-    
-    const item = currentCart.items.find(i => i.line_item_id === lineItemId);
-    if (!item) return;
-    
-    const newQuantity = item.quantity + delta;
-    if (newQuantity <= 0) {
-        await removeItem(lineItemId, item.batch_id);
+// INSTANT CART UPDATE - Frontend only
+function updateQuantity(lineItemId, delta) {
+    const cart = getCartManager();
+    if (!cart) {
+        console.error('Cart manager not initialized');
         return;
     }
     
-    // OPTIMISTIC UPDATE: Update UI immediately (client-side)
-    item.quantity = newQuantity;
-    item.line_total = item.unit_price * newQuantity;
-    
-    // Recalculate totals
-    currentCart.subtotal = currentCart.items.reduce((sum, i) => sum + i.line_total, 0);
-    currentCart.total = currentCart.subtotal;
-    
-    // Update UI immediately
-    renderCart();
-    
-    // Store pending update for debounced sync
-    pendingCartUpdates.set(lineItemId, {
-        line_item_id: lineItemId,
-        quantity: newQuantity,
-        batch_id: item.batch_id
+    // Find item by line_item_id (could be temp_* or actual ID)
+    const item = cart.cart.items.find(i => {
+        // Handle both string and number comparisons
+        return String(i.line_item_id) === String(lineItemId);
     });
     
-    // Clear existing timer
-    if (cartUpdateTimer) {
-        clearTimeout(cartUpdateTimer);
+    if (!item) {
+        console.error('Item not found in cart:', lineItemId, cart.cart.items);
+        return;
     }
     
-    // Debounce: Wait 300ms for more changes, then sync with backend
-    cartUpdateTimer = setTimeout(async () => {
-        await syncCartUpdates();
-    }, 300);
+    const newQuantity = item.quantity + delta;
+    if (newQuantity <= 0) {
+        // Remove item if quantity goes to 0 or below
+        removeItem(lineItemId, item.batch_id);
+        return;
+    }
+    
+    // Check inventory limit
+    if (item.quantity_available && newQuantity > item.quantity_available) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification(`Maximum available: ${item.quantity_available} cases`, 'warning');
+        } else {
+            alert(`Maximum available: ${item.quantity_available} cases`);
+        }
+        return;
+    }
+    
+    // Update instantly (frontend only)
+    const updated = cart.updateQuantity(item.batch_id, newQuantity);
+    if (updated) {
+        renderCart();
+    } else {
+        console.error('Failed to update quantity for batch:', item.batch_id);
+    }
 }
 
 async function syncCartUpdates() {
@@ -1172,71 +1055,140 @@ async function syncCartUpdates() {
     await loadCart();
 }
 
-async function removeItem(lineItemId, batchId) {
-    if (!currentCart.items) return;
+// INSTANT CART REMOVE - Frontend only
+function removeItem(lineItemId, batchId) {
+    const cart = getCartManager();
+    if (!cart) {
+        console.error('Cart manager not initialized');
+        return;
+    }
+    
+    // Verify item exists
+    const item = cart.cart.items.find(i => {
+        return String(i.line_item_id) === String(lineItemId) || i.batch_id === batchId;
+    });
+    
+    if (!item) {
+        console.error('Item not found in cart:', { lineItemId, batchId, items: cart.cart.items });
+        return;
+    }
     
     if (!confirm('Are you sure you want to remove this item?')) {
         return;
     }
     
-    // OPTIMISTIC UPDATE: Remove from UI immediately
-    const item = currentCart.items.find(i => i.line_item_id === lineItemId);
-    if (item) {
-        currentCart.items = currentCart.items.filter(i => i.line_item_id !== lineItemId);
-        currentCart.subtotal = currentCart.items.reduce((sum, i) => sum + i.line_total, 0);
-        currentCart.total = currentCart.subtotal;
-        renderCart();
-    }
+    // Remove instantly (frontend only) - use batch_id as that's what the cart manager uses
+    cart.removeItem(batchId || item.batch_id);
+    renderCart();
     
-    // Cancel any pending updates for this item
-    pendingCartUpdates.delete(lineItemId);
-    
-    // Sync with backend
-    const uuid = '<%= uuid %>';
-    try {
-        const response = await fetch(`/api/portal/${uuid}/cart/remove`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                line_item_id: lineItemId,
-                batch_id: batchId  // Include batch_id to remove all duplicates
-            })
-        });
-        
-        const data = await response.json();
-        if (data.success) {
-            // Reload cart from server to ensure consistency
-            await loadCart();
-            
-            if (typeof showNotification !== 'undefined') {
-                showNotification('Item removed from cart', 'success');
-            }
-        } else {
-            // Revert on failure
-            await loadCart();
-            if (typeof showNotification !== 'undefined') {
-                showNotification(data.error || 'Failed to remove item', 'error');
-            } else {
-                alert(data.error || 'Failed to remove item');
-            }
-        }
-    } catch (error) {
-        console.error('Error removing item:', error);
-        // Revert on error
-        await loadCart();
-        if (typeof showNotification !== 'undefined') {
-            showNotification('Failed to remove item', 'error');
-        } else {
-            alert('Failed to remove item');
-        }
+    if (typeof showNotification !== 'undefined') {
+        showNotification('Item removed from cart', 'success');
+    } else {
+        console.log('Item removed from cart');
     }
 }
 
-function goToCheckout() {
+// Show loading overlay (shared function - check if already exists)
+if (typeof window.showLoader !== 'function') {
+    window.showLoader = function(message = 'Processing...', subtext = 'Please wait') {
+        let loaderOverlay = document.getElementById('loader-overlay');
+        if (!loaderOverlay) {
+            loaderOverlay = document.createElement('div');
+            loaderOverlay.id = 'loader-overlay';
+            loaderOverlay.className = 'loader-overlay';
+            loaderOverlay.innerHTML = `
+                <div class="loader-container">
+                    <div class="loader-spinner"></div>
+                    <p class="loader-text">${message}</p>
+                    <p class="loader-subtext">${subtext}</p>
+                </div>
+            `;
+            document.body.appendChild(loaderOverlay);
+        }
+        
+        const loaderText = loaderOverlay.querySelector('.loader-text');
+        const loaderSubtext = loaderOverlay.querySelector('.loader-subtext');
+        if (loaderText) loaderText.textContent = message;
+        if (loaderSubtext) loaderSubtext.textContent = subtext;
+        
+        // Trigger reflow and show
+        loaderOverlay.offsetHeight;
+        loaderOverlay.classList.add('show');
+    };
+}
+
+// Hide loading overlay (if not already defined)
+if (typeof window.hideLoader !== 'function') {
+    window.hideLoader = function() {
+        const loaderOverlay = document.getElementById('loader-overlay');
+        if (loaderOverlay) {
+            loaderOverlay.classList.remove('show');
+            setTimeout(() => {
+                if (loaderOverlay.parentNode) {
+                    loaderOverlay.parentNode.removeChild(loaderOverlay);
+                }
+            }, 300);
+        }
+    };
+}
+
+async function goToCheckout() {
+    const cart = getCartManager();
+    if (!cart) {
+        alert('Cart not initialized');
+        return;
+    }
+
+    if (cart.cart.items.length === 0) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Your cart is empty', 'warning');
+        } else {
+            alert('Your cart is empty');
+        }
+        return;
+    }
+    
+    // Show loader
+    if (typeof window.showLoader === 'function') {
+        window.showLoader('Preparing Checkout', 'Syncing your cart...');
+    }
+    
+    // Sync cart to backend before checkout
     const uuid = '<%= uuid %>';
-    window.location.href = `/external/store/${uuid}/checkout`;
+    try {
+        const syncResult = await cart.syncToBackend();
+        if (!syncResult.success) {
+            if (typeof window.hideLoader === 'function') {
+                window.hideLoader();
+            }
+            if (typeof showNotification !== 'undefined') {
+                showNotification(syncResult.error || 'Failed to sync cart', 'error');
+            } else {
+                alert(syncResult.error || 'Failed to sync cart');
+            }
+            return;
+        }
+        
+        // Update loader message before redirect
+        if (typeof window.showLoader === 'function') {
+            window.showLoader('Loading Checkout', 'Redirecting to checkout page...');
+        }
+        
+        // Small delay to show message, then redirect
+        setTimeout(() => {
+            window.location.href = `/external/store/${uuid}/checkout`;
+        }, 300);
+    } catch (error) {
+        console.error('Error syncing cart:', error);
+        if (typeof window.hideLoader === 'function') {
+            window.hideLoader();
+        }
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Failed to sync cart. Please try again.', 'error');
+        } else {
+            alert('Failed to sync cart. Please try again.');
+        }
+    }
 }
 
 // Product Details Modal Functions

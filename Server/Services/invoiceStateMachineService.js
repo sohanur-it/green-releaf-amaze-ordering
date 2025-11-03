@@ -486,7 +486,8 @@ class InvoiceStateMachineService {
      */
     async notifySalesRep(invoiceId) {
         try {
-            const invoice = await client.query(`
+            const { query } = require('../config/database');
+            const invoice = await query(`
                 SELECT assigned_sales_rep_id
                 FROM "ORDERS-invoices"
                 WHERE id = $1

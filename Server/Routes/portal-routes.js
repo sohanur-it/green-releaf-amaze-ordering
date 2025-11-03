@@ -10,6 +10,7 @@ router.get('/external/store/:uuid', authenticatePortalAccess, PortalController.s
 
 // Shopping cart API endpoints
 router.get('/api/portal/:uuid/cart', authenticatePortalAccess, PortalController.getCart);
+router.get('/api/portal/:uuid/inventory', authenticatePortalAccess, PortalController.getInventory);
 router.post('/api/portal/:uuid/cart/add', authenticatePortalAccess, PortalController.addToCart);
 router.post('/api/portal/:uuid/cart/remove', authenticatePortalAccess, PortalController.removeFromCart);
 router.post('/api/portal/:uuid/cart/update', authenticatePortalAccess, PortalController.updateCartItem);

@@ -2,7 +2,91 @@
 
 const { query } = require('../config/database');
 
+// Cache for system user ID (avoids repeated queries)
+let cachedSystemUserId = null;
+let systemUserIdCacheTime = 0;
+const SYSTEM_USER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 class PortalController {
+    /**
+     * Get system user ID with caching
+     */
+    static async getSystemUserId() {
+        const now = Date.now();
+        if (cachedSystemUserId && (now - systemUserIdCacheTime) < SYSTEM_USER_CACHE_TTL) {
+            return cachedSystemUserId;
+        }
+
+        try {
+            // Try superuser first
+            try {
+                const superUserResult = await query(`
+                    SELECT id FROM users 
+                    WHERE is_superuser = true
+                    LIMIT 1
+                `);
+                if (superUserResult.rows.length > 0) {
+                    cachedSystemUserId = superUserResult.rows[0].id;
+                    systemUserIdCacheTime = now;
+                    return cachedSystemUserId;
+                }
+            } catch (e) {
+                // Column might not exist
+            }
+            
+            // Try admin role
+            try {
+                const roleUserResult = await query(`
+                    SELECT u.id 
+                    FROM users u
+                    INNER JOIN user_roles ur ON u.id = ur.user_id
+                    INNER JOIN roles r ON ur.role_id = r.id
+                    WHERE LOWER(r.name) IN ('admin', 'sales_rep')
+                    LIMIT 1
+                `);
+                if (roleUserResult.rows.length > 0) {
+                    cachedSystemUserId = roleUserResult.rows[0].id;
+                    systemUserIdCacheTime = now;
+                    return cachedSystemUserId;
+                }
+            } catch (e) {
+                // Table might not exist
+            }
+            
+            // Fallback: any active user
+            const anyUserResult = await query(`
+                SELECT id FROM users 
+                WHERE status IN ('active', 'pending')
+                LIMIT 1
+            `);
+            if (anyUserResult.rows.length > 0) {
+                cachedSystemUserId = anyUserResult.rows[0].id;
+                systemUserIdCacheTime = now;
+                return cachedSystemUserId;
+            }
+            
+            // Last resort: any user
+            const lastResortResult = await query(`
+                SELECT id FROM users 
+                LIMIT 1
+            `);
+            if (lastResortResult.rows.length > 0) {
+                cachedSystemUserId = lastResortResult.rows[0].id;
+                systemUserIdCacheTime = now;
+                return cachedSystemUserId;
+            }
+            
+            // Default fallback
+            cachedSystemUserId = 1;
+            systemUserIdCacheTime = now;
+            return cachedSystemUserId;
+        } catch (err) {
+            console.log('Could not find system user, using default ID 1:', err.message);
+            cachedSystemUserId = 1;
+            systemUserIdCacheTime = now;
+            return cachedSystemUserId;
+        }
+    }
     /**
      * Show product catalog with shopping cart
      */
@@ -73,6 +157,35 @@ class PortalController {
                 error: 'Failed to load products',
                 message: 'Please try again later'
             });
+        }
+    }
+    
+    /**
+     * Get inventory data for validation (batch availability)
+     */
+    static async getInventory(req, res) {
+        try {
+            const portalAccess = req.session.portalAccess;
+            if (!portalAccess) {
+                return res.status(401).json({ error: 'Not authenticated' });
+            }
+            
+            // Get batch availability for all batches in cart
+            const batches = await query(`
+                SELECT 
+                    b.id as batch_id,
+                    (b.quantity - b.allocated_quantity)::INTEGER as quantity_available
+                FROM "ORDERS-batches" b
+                WHERE b.status = 'Sellable'
+            `);
+            
+            res.json({
+                success: true,
+                batches: batches.rows
+            });
+        } catch (error) {
+            console.error('Error getting inventory:', error);
+            res.status(500).json({ error: 'Failed to get inventory data', details: error.message });
         }
     }
     
@@ -216,112 +329,102 @@ class PortalController {
             }
             
             // Get or create draft invoice
-            let invoiceResult = await query(`
-                SELECT id, invoice_number
-                FROM "ORDERS-invoices"
-                WHERE fk_buyer_id = $1
-                AND fk_location_id = $2
-                AND status = 'Draft'
-                AND source = 'External'
-                ORDER BY created_at DESC
-                LIMIT 1
-            `, [portalAccess.buyerId, portalAccess.locationId]);
+            // Note: Only reuse Draft invoices. If invoice was checked out, it's now Pending_Approval
+            // and we'll create a new Draft invoice for the next cart session
+            let invoiceResult;
+            try {
+                invoiceResult = await query(`
+                    SELECT id, invoice_number, status
+                    FROM "ORDERS-invoices"
+                    WHERE fk_buyer_id = $1
+                    AND fk_location_id = $2
+                    AND status = 'Draft'
+                    AND source = 'External'
+                    AND (cart_expires_at IS NULL OR cart_expires_at > NOW())
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                `, [portalAccess.buyerId, portalAccess.locationId]);
+            } catch (err) {
+                // Fallback if 'source' column doesn't exist - check by invoice_number pattern
+                if (err.code === '42703') {
+                    console.log('Source column not found, using invoice_number pattern fallback');
+                    invoiceResult = await query(`
+                        SELECT id, invoice_number, status
+                        FROM "ORDERS-invoices"
+                        WHERE fk_buyer_id = $1
+                        AND fk_location_id = $2
+                        AND status = 'Draft'
+                        AND invoice_number LIKE 'EXT-%'
+                        AND (cart_expires_at IS NULL OR cart_expires_at > NOW())
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                    `, [portalAccess.buyerId, portalAccess.locationId]);
+                } else {
+                    throw err;
+                }
+            }
             
             let invoiceId;
             let invoiceNumber;
             
             if (invoiceResult.rows.length === 0) {
-                // Create new invoice
-                // Generate invoice number
-                const countResult = await query(`
-                    SELECT COUNT(*) as count FROM "ORDERS-invoices"
-                    WHERE source = 'External'
-                `);
-                const count = parseInt(countResult.rows[0].count) + 1;
-                invoiceNumber = `EXT-${new Date().getFullYear()}-${String(count).padStart(5, '0')}`;
+                console.log('addToCart - No existing Draft invoice found, creating new one');
                 
-                // Get location license number from buyer locations table
-                // Note: state_license might not exist in all schemas, so we'll try it or use fallback
+                // Generate invoice number - Simplified approach to avoid regex issues
+                const year = new Date().getFullYear();
+                const yearPrefix = `EXT-${year}-`;
+                
+                try {
+                    // First try: optimized MAX with simple string replacement
+                    const maxNumberResult = await query(`
+                        SELECT COALESCE(MAX(
+                            CAST(
+                                SUBSTRING(invoice_number FROM LENGTH($1) + 1) AS INTEGER
+                            )
+                        ), 0) as max_num
+                        FROM "ORDERS-invoices"
+                        WHERE invoice_number LIKE $1 || '%'
+                        AND invoice_number ~ ('^' || $1 || '[0-9]+$')
+                    `, [yearPrefix]);
+                    const maxNum = parseInt(maxNumberResult.rows[0].max_num || 0);
+                    invoiceNumber = `${yearPrefix}${String(maxNum + 1).padStart(5, '0')}`;
+                } catch (err) {
+                    // Fallback: simple count if regex/SUBSTRING fails
+                    console.log('Using fallback invoice number generation:', err.message);
+                    try {
+                        const countResult = await query(`
+                            SELECT COUNT(*)::INTEGER as count 
+                            FROM "ORDERS-invoices"
+                            WHERE invoice_number LIKE $1 || '%'
+                        `, [yearPrefix]);
+                        const count = parseInt(countResult.rows[0].count || 0) + 1;
+                        invoiceNumber = `${yearPrefix}${String(count).padStart(5, '0')}`;
+                    } catch (fallbackErr) {
+                        // Ultimate fallback: timestamp-based invoice number
+                        const timestamp = Date.now();
+                        invoiceNumber = `${yearPrefix}${String(timestamp).slice(-5)}`;
+                        console.log('Using timestamp-based invoice number:', invoiceNumber);
+                    }
+                }
+                
+                // Get location license number - OPTIMIZED: Single query
                 let locationLicense = 'UNKNOWN';
                 try {
                     const locationResult = await query(`
                         SELECT state_license 
                         FROM "ORDERS-buyer_locations"
                         WHERE entry_id = $1
+                        LIMIT 1
                     `, [portalAccess.locationId]);
                     if (locationResult.rows.length > 0 && locationResult.rows[0].state_license) {
                         locationLicense = locationResult.rows[0].state_license;
                     }
                 } catch (err) {
                     // Column might not exist, use default
-                    console.log('Note: state_license column may not exist, using default');
                 }
                 
-                // Get a system user ID (or use a default)
-                // For external portal orders, we need a system user ID
-                // Try multiple approaches to find a valid user ID
-                let userId = 1; // Default fallback
-                try {
-                    // First try: superuser (if column exists)
-                    try {
-                        const superUserResult = await query(`
-                            SELECT id FROM users 
-                            WHERE is_superuser = true
-                            LIMIT 1
-                        `);
-                        if (superUserResult.rows.length > 0) {
-                            userId = superUserResult.rows[0].id;
-                        }
-                    } catch (e) {
-                        // is_superuser column might not exist, continue
-                    }
-                    
-                    // Second try: admin role via user_roles join
-                    if (userId === 1) {
-                        try {
-                            const roleUserResult = await query(`
-                                SELECT u.id 
-                                FROM users u
-                                INNER JOIN user_roles ur ON u.id = ur.user_id
-                                INNER JOIN roles r ON ur.role_id = r.id
-                                WHERE LOWER(r.name) IN ('admin', 'sales_rep')
-                                LIMIT 1
-                            `);
-                            if (roleUserResult.rows.length > 0) {
-                                userId = roleUserResult.rows[0].id;
-                            }
-                        } catch (e) {
-                            // user_roles might not be set up, continue
-                        }
-                    }
-                    
-                    // Final fallback: get any active user
-                    if (userId === 1) {
-                        const anyUserResult = await query(`
-                            SELECT id FROM users 
-                            WHERE status = 'active' OR status = 'pending'
-                            LIMIT 1
-                        `);
-                        if (anyUserResult.rows.length > 0) {
-                            userId = anyUserResult.rows[0].id;
-                        }
-                    }
-                    
-                    // Last resort: get any user
-                    if (userId === 1) {
-                        const anyUserResult = await query(`
-                            SELECT id FROM users 
-                            LIMIT 1
-                        `);
-                        if (anyUserResult.rows.length > 0) {
-                            userId = anyUserResult.rows[0].id;
-                        }
-                    }
-                } catch (err) {
-                    console.log('Could not find system user, using default ID 1:', err.message);
-                }
-                
-                console.log('Using user ID for external invoice:', userId);
+                // Get system user ID using cached method
+                const userId = await PortalController.getSystemUserId();
                 
                 // Set cart expiry (24 hours from now)
                 const cartExpiresAt = new Date();
@@ -340,11 +443,10 @@ class PortalController {
             } else {
                 invoiceId = invoiceResult.rows[0].id;
                 invoiceNumber = invoiceResult.rows[0].invoice_number;
+                console.log('addToCart - Reusing existing Draft invoice:', { invoiceId, invoiceNumber, status: invoiceResult.rows[0].status });
             }
             
-            // Check if line item already exists for this batch
-            // Note: There can be multiple line items for the same batch if they were created before the fix
-            // We'll update the first one found and aggregate others later
+            // Check if line item already exists for this batch - OPTIMIZED: Single query
             const existingLineItem = await query(`
                 SELECT id, quantity_ordered
                 FROM "ORDERS-invoice-line-items"
@@ -352,17 +454,6 @@ class PortalController {
                 ORDER BY id ASC
                 LIMIT 1
             `, [invoiceId, batch_id]);
-            
-            // Check for duplicate line items (same batch)
-            const duplicateCheck = await query(`
-                SELECT COUNT(*) as count
-                FROM "ORDERS-invoice-line-items"
-                WHERE fk_invoice_id = $1 AND fk_batch_id = $2
-            `, [invoiceId, batch_id]);
-            
-            if (parseInt(duplicateCheck.rows[0].count) > 1) {
-                console.warn(`Warning: Found ${duplicateCheck.rows[0].count} line items for batch ${batch_id} in invoice ${invoiceId}`);
-            }
             
             const unitPrice = batch.override_price || batch.default_price || 0;
             const lineTotal = unitPrice * quantity;
@@ -402,25 +493,26 @@ class PortalController {
                 `, [invoiceId, batch.fk_master_product_id, batch_id, insertQuantity, unitPrice, lineTotal, lineItemOrder]);
             }
             
-            // Recalculate invoice totals
-            const totalsResult = await query(`
-                SELECT 
-                    COALESCE(SUM(line_total), 0) as subtotal,
-                    COALESCE(SUM(quantity_ordered), 0) as total_items
-                FROM "ORDERS-invoice-line-items"
-                WHERE fk_invoice_id = $1
+            // Recalculate invoice totals - OPTIMIZED: Single UPDATE with subquery instead of two queries
+            const updateResult = await query(`
+                UPDATE "ORDERS-invoices"
+                SET subtotal = (
+                    SELECT COALESCE(SUM(line_total), 0)
+                    FROM "ORDERS-invoice-line-items"
+                    WHERE fk_invoice_id = $1
+                ),
+                total = (
+                    SELECT COALESCE(SUM(line_total), 0)
+                    FROM "ORDERS-invoice-line-items"
+                    WHERE fk_invoice_id = $1
+                ),
+                updated_at = NOW()
+                WHERE id = $1
+                RETURNING subtotal, total
             `, [invoiceId]);
             
-            const subtotal = parseFloat(totalsResult.rows[0].subtotal || 0);
-            const total = subtotal; // No discounts/credits for now
-            
-            await query(`
-                UPDATE "ORDERS-invoices"
-                SET subtotal = $1,
-                    total = $2,
-                    updated_at = NOW()
-                WHERE id = $3
-            `, [subtotal, total, invoiceId]);
+            const subtotal = parseFloat(updateResult.rows[0].subtotal || 0);
+            const total = subtotal;
             
             console.log('Cart item added:', {
                 invoiceId,
@@ -855,60 +947,65 @@ class PortalController {
             }
             
             // Get active draft invoice for this buyer/location
-            // Use CTE to aggregate duplicate batch items (same batch in multiple line items)
+            // OPTIMIZED: Simplified query structure - filter invoice first, then join
             const draftInvoice = await query(`
-                WITH line_items_aggregated AS (
+                WITH invoice_base AS (
+                    SELECT id, subtotal, total
+                    FROM "ORDERS-invoices"
+                    WHERE fk_buyer_id = $1
+                    AND fk_location_id = $2
+                    AND status = 'Draft'
+                    AND source = 'External'
+                    AND (cart_expires_at IS NULL OR cart_expires_at > NOW())
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                ),
+                line_items_agg AS (
                     SELECT 
                         li.fk_invoice_id,
                         li.fk_batch_id,
                         li.fk_master_product_id,
-                        SUM(li.quantity_ordered) as total_quantity,
+                        SUM(li.quantity_ordered)::INTEGER as total_quantity,
                         AVG(li.unit_price) as unit_price,
                         SUM(li.line_total) as total_line_total,
                         MAX(li.id) as line_item_id,
                         MAX(li.line_item_order) as line_item_order
                     FROM "ORDERS-invoice-line-items" li
-                    INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
-                    WHERE i.fk_buyer_id = $1
-                    AND i.fk_location_id = $2
-                    AND i.status = 'Draft'
-                    AND i.source = 'External'
+                    INNER JOIN invoice_base ib ON li.fk_invoice_id = ib.id
                     GROUP BY li.fk_invoice_id, li.fk_batch_id, li.fk_master_product_id
                 )
                 SELECT 
-                    i.id as invoice_id,
-                    i.subtotal,
-                    i.total,
-                    jsonb_agg(
-                        jsonb_build_object(
-                            'line_item_id', lia.line_item_id,
-                            'product_id', lia.fk_master_product_id,
-                            'batch_id', lia.fk_batch_id,
-                            'product_name', p.name,
-                            'cultivar_name', p.cultivar_name,
-                            'brand_name', p.brand_name,
-                            'category_name', p.category_name,
-                            'product_type', p.product_type_name,
-                            'units_per_case', p.units_per_case,
-                            'unit_size', p.unit_size,
-                            'unit_measurement_name', p.unit_measurement_name,
-                            'batch_name', b.batch_name,
-                            'quantity', lia.total_quantity::INTEGER,
-                            'unit_price', lia.unit_price,
-                            'line_total', lia.total_line_total
-                        ) ORDER BY lia.line_item_order
+                    ib.id as invoice_id,
+                    ib.subtotal,
+                    ib.total,
+                    COALESCE(
+                        jsonb_agg(
+                            jsonb_build_object(
+                                'line_item_id', lia.line_item_id,
+                                'product_id', lia.fk_master_product_id,
+                                'batch_id', lia.fk_batch_id,
+                                'product_name', p.name,
+                                'cultivar_name', p.cultivar_name,
+                                'brand_name', p.brand_name,
+                                'category_name', p.category_name,
+                                'product_type', p.product_type_name,
+                                'units_per_case', p.units_per_case,
+                                'unit_size', p.unit_size,
+                                'unit_measurement_name', p.unit_measurement_name,
+                                'batch_name', b.batch_name,
+                                'quantity', lia.total_quantity,
+                                'unit_price', lia.unit_price,
+                                'line_total', lia.total_line_total,
+                                'quantity_available', (b.quantity - b.allocated_quantity)::INTEGER
+                            ) ORDER BY lia.line_item_order
+                        ),
+                        '[]'::jsonb
                     ) as items
-                FROM "ORDERS-invoices" i
-                INNER JOIN line_items_aggregated lia ON i.id = lia.fk_invoice_id
-                INNER JOIN "ORDERS-products" p ON lia.fk_master_product_id = p.entry_id
-                INNER JOIN "ORDERS-batches" b ON lia.fk_batch_id = b.id
-                WHERE i.fk_buyer_id = $1
-                AND i.fk_location_id = $2
-                AND i.status = 'Draft'
-                AND i.source = 'External'
-                GROUP BY i.id, i.subtotal, i.total
-                ORDER BY i.id DESC
-                LIMIT 1
+                FROM invoice_base ib
+                LEFT JOIN line_items_agg lia ON ib.id = lia.fk_invoice_id
+                LEFT JOIN "ORDERS-products" p ON lia.fk_master_product_id = p.entry_id
+                LEFT JOIN "ORDERS-batches" b ON lia.fk_batch_id = b.id
+                GROUP BY ib.id, ib.subtotal, ib.total
             `, [portalAccess.buyerId, portalAccess.locationId]);
             
             if (draftInvoice.rows.length === 0) {
@@ -977,26 +1074,13 @@ class PortalController {
             const creditResult = await accountCreditService.applyCreditsToInvoice(cartData.invoice_id);
             console.log('Credit application result:', creditResult);
             
-            // Validate purchase limits (for external orders)
-            try {
-                const purchaseLimitService = require('../Services/purchaseLimitService');
-                await purchaseLimitService.validatePurchaseLimits(cartData.invoice_id);
-                console.log('Purchase limits validated successfully');
-            } catch (error) {
-                if (error.constructor.name === 'PurchaseLimitError') {
-                    return res.status(400).json({
-                        success: false,
-                        error: 'Purchase limit validation failed',
-                        violations: error.violations
-                    });
-                }
-                console.error('Error validating purchase limits:', error);
-                // Continue - don't fail checkout if validation errors out
-            }
+            // Note: Purchase limit validation happens inside state machine transition
+            // No need to validate twice - state machine handles it
             
             // Submit cart for approval using state machine
             // Note: For external portal orders, there's no logged-in user, so pass null for userId
             // The system will record this as a system change
+            console.log('Starting state machine transition to Pending_Approval...');
             const invoiceStateMachine = require('../Services/invoiceStateMachineService');
             const result = await invoiceStateMachine.transitionTo(
                 cartData.invoice_id,
@@ -1005,13 +1089,18 @@ class PortalController {
                 'External order submitted'
             );
             
+            console.log('State machine transition result:', result);
+            
             if (!result.success) {
+                console.error('State machine transition failed:', result.error);
                 return res.status(400).json({ 
                     success: false,
                     error: result.error || 'Failed to submit order',
                     validTransitions: result.validTransitions
                 });
             }
+            
+            console.log(`✅ Invoice ${cartData.invoice_id} successfully transitioned to Pending_Approval`);
             
             // Return JSON with invoice_id for client redirect
             res.json({ 

@@ -68,14 +68,14 @@ class PurchaseLimitService {
                 });
             }
             
-            // Check 2: Unshipped orders (with row-level locking)
+            // Check 2: Unshipped orders
+            // Note: No FOR UPDATE needed - advisory lock already provides concurrency protection
             const unshipped = await queryFunc(`
                 SELECT COUNT(*) as count
                 FROM "ORDERS-invoices"
                 WHERE fk_location_id = $1
                   AND status NOT IN ('Shipped', 'Delivered', 'Paid', 'Cancelled',
                                      'Cancelled_After_Ship', 'Fully_Rejected')
-                FOR UPDATE
             `, [locationId]);
             
             const currentUnshipped = parseInt(unshipped.rows[0].count);
@@ -89,14 +89,14 @@ class PurchaseLimitService {
                 });
             }
             
-            // Check 3: Unpaid invoices (with row-level locking)
+            // Check 3: Unpaid invoices
+            // Note: No FOR UPDATE needed - advisory lock already provides concurrency protection
             const unpaid = await queryFunc(`
                 SELECT COUNT(*) as count
                 FROM "ORDERS-invoices"
                 WHERE fk_location_id = $1
                   AND status IN ('Delivered', 'Partially_Rejected', 'Issue_After_Shipped')
                   AND status != 'Paid'
-                FOR UPDATE
             `, [locationId]);
             
             const currentUnpaid = parseInt(unpaid.rows[0].count);

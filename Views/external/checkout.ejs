@@ -1,3 +1,4 @@
+<link rel="stylesheet" href="/public/css/checkout-inventory-warnings.css">
 <div class="checkout-container">
     <div class="checkout-header">
         <h1>Checkout</h1>
@@ -7,6 +8,13 @@
     </div>
     
     <div class="checkout-content">
+        <!-- Inventory Warning Bar (hidden by default) -->
+        <div id="inventory-warning-bar" class="inventory-warning-bar" style="display: none;">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span>Inventory Update Required</span>
+            <p>Some items in your cart have limited availability. Please review the highlighted products below and adjust quantities as needed.</p>
+        </div>
+        
         <!-- Order Summary Table -->
         <div class="checkout-section order-summary-section">
             <h2>Order Summary</h2>
@@ -23,7 +31,7 @@
                     <tbody id="checkout-items">
                         <% if (cart && cart.items && cart.items.length > 0) { %>
                             <% cart.items.forEach((item, index) => { %>
-                                <tr class="checkout-item-row" data-line-item-id="<%= item.line_item_id %>">
+                                <tr class="checkout-item-row" data-line-item-id="<%= item.line_item_id %>" data-batch-id="<%= item.batch_id %>">
                                     <td class="item-name-cell">
                                         <div class="product-name-with-logo">
                                             <div class="amaze-logo-small">A</div>
@@ -48,23 +56,46 @@
                                     </td>
                                     <td class="item-quantity-cell">
                                         <div class="quantity-info">
-                                            <div><%= item.quantity %> Case</div>
+                                            <div class="quantity-display">
+                                                <span class="quantity-value"><%= item.quantity %></span> <%= item.quantity === 1 ? 'Case' : 'Cases' %>
+                                            </div>
                                             <% 
                                                 const totalUnits = (item.quantity || 0) * (item.units_per_case || 24);
+                                                const quantityAvailable = item.quantity_available || 0;
+                                                const quantityExceeded = item.quantity > quantityAvailable;
                                             %>
                                             <div class="units-info"><%= totalUnits %> Units total</div>
                                             <% if (item.unit_size) { %>
                                                 <div class="package-size">Package Size: <%= item.unit_size %></div>
                                             <% } %>
-                                            <button class="edit-quantity-btn" onclick="openQuantityModal(<%= item.line_item_id %>, <%= item.quantity %>, <%= item.batch_id %>)" title="Edit Quantity">
-                                                <i class="fas fa-pencil"></i>
-                                            </button>
+                                            
+                                            <!-- Inventory Warning (shown when quantity exceeds available) -->
+                                            <% if (quantityExceeded && quantityAvailable > 0) { %>
+                                                <div class="inventory-warning">
+                                                    <div class="warning-banner">
+                                                        <i class="fas fa-exclamation-triangle"></i>
+                                                        <span>Limited Inventory Available</span>
+                                                    </div>
+                                                    <div class="warning-details">
+                                                        Maximum available quantity: <strong><%= quantityAvailable %></strong> <%= quantityAvailable === 1 ? 'unit' : 'units' %>
+                                                    </div>
+                                                </div>
+                                            <% } %>
+                                            
+                                            <!-- Edit Quantity Button -->
+                                            <div class="quantity-edit-control">
+                                                <button class="edit-quantity-btn" 
+                                                        onclick="openQuantityModal('<%= String(item.line_item_id) %>', <%= item.quantity %>, '<%= String(item.batch_id) %>', <%= quantityAvailable %>)" 
+                                                        title="Edit Quantity"
+                                                        aria-label="Edit Quantity">
+                                                </button>
+                                            </div>
                                         </div>
                                     </td>
                                     <td class="item-line-cell">
                                         <div class="line-total-actions">
                                             <span class="line-total">$<%= item.line_total ? parseFloat(item.line_total).toFixed(2) : '0.00' %></span>
-                                            <button class="remove-item-btn" onclick="removeLineItem(<%= item.line_item_id %>)" title="Remove Item">
+                                            <button class="remove-item-btn" onclick="removeLineItem('<%= String(item.line_item_id) %>')" title="Remove Item">
                                                 <i class="fas fa-times"></i>
                                             </button>
                                         </div>
@@ -74,8 +105,26 @@
                         <% } else { %>
                             <tr>
                                 <td colspan="4" class="empty-cart-message">
-                                    <p>Your cart is empty.</p>
-                                    <a href="/external/store/<%= uuid %>" class="back-to-store-link">Return to Store</a>
+                                    <div class="empty-cart-container">
+                                        <div class="empty-cart-icon">
+                                            <svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <!-- Cart body -->
+                                                <rect x="20" y="40" width="80" height="60" rx="4" stroke="#4ade80" stroke-width="3" fill="none"/>
+                                                <!-- Cart handle -->
+                                                <path d="M 35 40 Q 35 30, 45 30 Q 55 30, 55 40" stroke="#4ade80" stroke-width="3" fill="none" stroke-linecap="round"/>
+                                                <!-- Sad eyes -->
+                                                <circle cx="40" cy="60" r="6" fill="#64748b"/>
+                                                <circle cx="80" cy="60" r="6" fill="#64748b"/>
+                                                <path d="M 38 58 Q 40 55, 42 58" stroke="#64748b" stroke-width="2" fill="none" stroke-linecap="round"/>
+                                                <path d="M 78 58 Q 80 55, 82 58" stroke="#64748b" stroke-width="2" fill="none" stroke-linecap="round"/>
+                                                <!-- Wheels -->
+                                                <circle cx="35" cy="95" r="8" stroke="#64748b" stroke-width="3" fill="none"/>
+                                                <circle cx="85" cy="95" r="8" stroke="#64748b" stroke-width="3" fill="none"/>
+                                            </svg>
+                                        </div>
+                                        <h3 class="empty-cart-title">This Cart Is Empty</h3>
+                                        <a href="/external/store/<%= uuid %>" class="add-items-btn">Add Items</a>
+                                    </div>
                                 </td>
                             </tr>
                         <% } %>
@@ -96,7 +145,7 @@
         </div>
         
         <!-- Shipping and Payment Section -->
-        <div class="checkout-bottom-section">
+        <div class="checkout-bottom-section" id="checkout-bottom-section">
             <!-- Left: Shipping Information -->
             <div class="shipping-section">
                 <h3 class="section-header purple-header">Select Location</h3>
@@ -163,10 +212,10 @@
                 <div class="terms-text">Terms: Net 15</div>
                 <button class="sign-in-btn">Sign In</button>
                 <div class="final-total">
-                    Final Total: $<%= cart && cart.total ? parseFloat(cart.total).toFixed(2) : '0.00' %>
+                    Final Total: <span class="final-total-amount">$<%= cart && cart.total ? parseFloat(cart.total).toFixed(2) : '0.00' %></span>
                 </div>
                 <button id="place-order-btn" class="place-order-guest-btn" onclick="placeOrder()" <%= (!cart || !cart.items || cart.items.length === 0) ? 'disabled' : '' %>>
-                    Place Order As Guest
+                    <span class="button-text">Place Order As Guest</span>
                 </button>
             </div>
         </div>
@@ -186,7 +235,7 @@
             <input type="number" id="modal-quantity-input" min="1" value="1">
             <div class="modal-actions">
                 <button class="btn-cancel" onclick="closeQuantityModal()">Cancel</button>
-                <button class="btn-save" onclick="saveQuantity()">Save</button>
+                <button class="btn-save" onclick="saveQuantity()">Update</button>
             </div>
         </div>
     </div>
@@ -195,11 +244,22 @@
 <script>
 const uuid = '<%= uuid %>';
 let currentEditingLineItemId = null;
+let currentEditingBatchId = null;
+let currentEditingMaxAvailable = 999;
 
 // Update cart badge count in header
 function updateCartBadge() {
-    // Use cart data from server (more accurate than counting DOM elements)
-    const itemCount = <%= (cart && cart.items) ? cart.items.length : 0 %>;
+    // Use cart manager if available, otherwise use server data
+    const cartMgr = getCartManager();
+    let itemCount = 0;
+    
+    if (cartMgr) {
+        itemCount = cartMgr.getItemCount();
+    } else {
+        // Fallback to server cart data
+        itemCount = <%= (cart && cart.items) ? cart.items.length : 0 %>;
+    }
+    
     const badge = document.getElementById('cart-count-badge');
     if (badge) {
         badge.textContent = itemCount;
@@ -212,30 +272,132 @@ document.addEventListener('DOMContentLoaded', function() {
     updateCartBadge();
 });
 
-function openQuantityModal(lineItemId, currentQuantity, batchId) {
+function openQuantityModal(lineItemId, currentQuantity, batchId, maxAvailable) {
     currentEditingLineItemId = lineItemId;
-    document.getElementById('modal-quantity-input').value = currentQuantity;
-    document.getElementById('modal-quantity-input').max = ''; // Will be set based on availability
+    currentEditingBatchId = batchId;
+    currentEditingMaxAvailable = maxAvailable || 999;
+    
+    const modalInput = document.getElementById('modal-quantity-input');
+    modalInput.value = currentQuantity;
+    modalInput.min = 1;
+    modalInput.max = currentEditingMaxAvailable;
+    
+    // Show availability message
+    const modalBody = document.querySelector('.quantity-modal-body');
+    let availabilityMsg = modalBody.querySelector('.availability-message');
+    if (!availabilityMsg) {
+        availabilityMsg = document.createElement('div');
+        availabilityMsg.className = 'availability-message';
+        modalBody.insertBefore(availabilityMsg, modalBody.querySelector('.modal-actions'));
+    }
+    availabilityMsg.textContent = `Maximum available: ${currentEditingMaxAvailable} cases`;
+    if (currentQuantity > currentEditingMaxAvailable) {
+        availabilityMsg.style.color = '#ef4444';
+        availabilityMsg.style.fontWeight = 'bold';
+    } else {
+        availabilityMsg.style.color = '#6b7280';
+        availabilityMsg.style.fontWeight = 'normal';
+    }
+    
     document.getElementById('quantityModal').style.display = 'flex';
 }
 
 function closeQuantityModal() {
     document.getElementById('quantityModal').style.display = 'none';
     currentEditingLineItemId = null;
+    currentEditingBatchId = null;
+    currentEditingMaxAvailable = 999;
 }
 
 async function saveQuantity() {
     const newQuantity = parseInt(document.getElementById('modal-quantity-input').value);
     if (!newQuantity || newQuantity <= 0) {
-        alert('Please enter a valid quantity');
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Please enter a valid quantity', 'warning');
+        } else {
+            alert('Please enter a valid quantity');
+        }
         return;
     }
     
-    if (!currentEditingLineItemId) {
-        alert('Error: Missing line item information');
+    // Check inventory limit
+    if (newQuantity > currentEditingMaxAvailable) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification(`Maximum available: ${currentEditingMaxAvailable} cases`, 'warning');
+        } else {
+            alert(`Maximum available: ${currentEditingMaxAvailable} cases`);
+        }
+        document.getElementById('modal-quantity-input').value = currentEditingMaxAvailable;
         return;
     }
     
+    if (!currentEditingLineItemId || !currentEditingBatchId) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Error: Missing item information', 'error');
+        } else {
+            alert('Error: Missing item information');
+        }
+        return;
+    }
+    
+    const cart = getCartManager();
+    if (!cart) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Cart manager not initialized', 'error');
+        } else {
+            alert('Cart manager not initialized');
+        }
+        return;
+    }
+    
+    // Get old quantity for potential revert
+    const oldItem = cart.cart.items.find(i => String(i.batch_id) === String(currentEditingBatchId));
+    if (!oldItem) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Item not found in cart', 'error');
+        } else {
+            alert('Item not found in cart');
+        }
+        return;
+    }
+    const oldQuantity = oldItem.quantity;
+    
+    // Update cart quantity in frontend first (instant update)
+    cart.updateQuantity(currentEditingBatchId, newQuantity);
+    const updatedItem = cart.cart.items.find(i => String(i.batch_id) === String(currentEditingBatchId));
+    
+    if (updatedItem) {
+        // Update DOM immediately
+        const row = document.querySelector(`tr[data-line-item-id="${currentEditingLineItemId}"]`);
+        if (row) {
+            // Update quantity display
+            const quantityDisplay = row.querySelector('.quantity-value');
+            if (quantityDisplay) {
+                quantityDisplay.textContent = newQuantity;
+            }
+            
+            // Update units total
+            const unitsInfo = row.querySelector('.units-info');
+            if (unitsInfo && updatedItem.units_per_case) {
+                const totalUnits = newQuantity * updatedItem.units_per_case;
+                unitsInfo.textContent = `${totalUnits} Units total`;
+            }
+            
+            // Update line total
+            const lineTotal = row.querySelector('.line-total');
+            if (lineTotal) {
+                lineTotal.textContent = `$${updatedItem.line_total.toFixed(2)}`;
+            }
+        }
+        
+        // Update checkout total
+        updateCheckoutTotal();
+        
+        // Update cart icon
+        cart.updateCartIcon();
+    }
+    
+    // Sync to backend
     try {
         const response = await fetch(`/api/portal/${uuid}/cart/update`, {
             method: 'POST',
@@ -250,23 +412,120 @@ async function saveQuantity() {
         
         const data = await response.json();
         if (data.success) {
+            // Reload cart from backend to get updated line_item_ids and totals
+            await cart.loadFromBackend();
+            
+            // Update DOM with fresh data
+            location.reload();
+            
             closeQuantityModal();
-            // Reload page to refresh cart and update badge
-            window.location.reload();
+            // Check inventory and toggle checkout section visibility
+            checkInventoryAndToggleCheckout();
+            if (typeof showNotification !== 'undefined') {
+                showNotification('Quantity updated successfully', 'success');
+            }
         } else {
-            alert('Error updating quantity: ' + (data.error || 'Unknown error'));
+            // Revert frontend change if backend fails
+            cart.updateQuantity(currentEditingBatchId, oldQuantity);
+            updateCheckoutTotal();
+            if (typeof showNotification !== 'undefined') {
+                showNotification('Error updating quantity: ' + (data.error || 'Unknown error'), 'error');
+            } else {
+                alert('Error updating quantity: ' + (data.error || 'Unknown error'));
+            }
         }
     } catch (error) {
         console.error('Error:', error);
-        alert('Failed to update quantity. Please try again.');
+        // Revert frontend change if sync fails
+        cart.updateQuantity(currentEditingBatchId, oldQuantity);
+        updateCheckoutTotal();
+        
+        // Reload page to ensure consistency
+        location.reload();
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Failed to sync quantity. Please try again.', 'error');
+        } else {
+            alert('Failed to sync quantity. Please try again.');
+        }
     }
 }
 
-async function removeLineItem(lineItemId, reload = true) {
+async function removeLineItem(lineItemId, reload = false) {
     if (!confirm('Are you sure you want to remove this item?')) {
         return;
     }
     
+    const cart = getCartManager();
+    if (!cart) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Cart manager not initialized', 'error');
+        } else {
+            alert('Cart manager not initialized');
+        }
+        return;
+    }
+    
+    // First, reload cart from backend to ensure we have latest data with real line_item_ids
+    await cart.loadFromBackend();
+    
+    // Find item by line_item_id (should match what's in the DOM)
+    let item = cart.cart.items.find(i => String(i.line_item_id) === String(lineItemId));
+    
+    // If still not found, try finding by row's batch_id attribute
+    if (!item) {
+        const row = document.querySelector(`tr[data-line-item-id="${lineItemId}"]`);
+        if (row) {
+            const batchId = row.getAttribute('data-batch-id');
+            if (batchId) {
+                item = cart.cart.items.find(i => String(i.batch_id) === String(batchId));
+            }
+        }
+    }
+    
+    if (!item) {
+        console.error('Item not found in cart:', { 
+            lineItemId, 
+            cartItems: cart.cart.items.map(i => ({ 
+                line_item_id: i.line_item_id, 
+                batch_id: i.batch_id 
+            })) 
+        });
+        
+        // Reload page to get fresh data
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Item not found. Refreshing page...', 'warning');
+        }
+        setTimeout(() => location.reload(), 1000);
+        return;
+    }
+    
+    // Remove from frontend cart first
+    cart.removeItem(item.batch_id);
+    
+    // Check if cart is now empty
+    if (cart.cart.items.length === 0) {
+        // Show empty cart UI
+        showEmptyCart();
+        // Hide checkout bottom section
+        hideCheckoutBottomSection();
+        // Sync to backend
+        try {
+            await fetch(`/api/portal/${uuid}/cart/remove`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    line_item_id: lineItemId
+                })
+            });
+        } catch (error) {
+            console.error('Error syncing removal:', error);
+        }
+        return;
+    }
+    
+    // Cart still has items - remove from backend and update UI
     try {
         const response = await fetch(`/api/portal/${uuid}/cart/remove`, {
             method: 'POST',
@@ -280,52 +539,153 @@ async function removeLineItem(lineItemId, reload = true) {
         
         const data = await response.json();
         if (data.success) {
-            // Optimistic update: Remove row immediately
+            // Update cart icon
+            cart.updateCartIcon();
+            
+            // Remove row from table
             const row = document.querySelector(`tr[data-line-item-id="${lineItemId}"]`);
             if (row) {
                 row.remove();
-                
-                // Recalculate badge count
-                const remainingItems = document.querySelectorAll('.checkout-item-row');
-                const itemCount = remainingItems.length;
-                const badge = document.getElementById('cart-count-badge');
-                if (badge) {
-                    badge.textContent = itemCount;
-                    badge.style.display = itemCount > 0 ? 'inline-block' : 'none';
-                }
             }
             
-            // Reload page if requested to get fresh data from server
-            if (reload) {
-                window.location.reload();
+            // Update totals
+            updateCheckoutTotal();
+            
+            // Reload cart from backend to ensure line_item_ids are correct
+            await cart.loadFromBackend();
+            
+            // Check inventory issues and show/hide checkout section
+            checkInventoryAndToggleCheckout();
+            
+            if (typeof showNotification !== 'undefined') {
+                showNotification('Item removed from cart', 'success');
             } else {
-                // Check if cart is empty
-                const remainingItems = document.querySelectorAll('.checkout-item-row');
-                if (remainingItems.length === 0) {
-                    // Show empty cart message
-                    const tbody = document.getElementById('checkout-items');
-                    tbody.innerHTML = `
-                        <tr>
-                            <td colspan="4" class="empty-cart-message">
-                                <p>Your cart is empty.</p>
-                                <a href="/external/store/${uuid}" class="back-to-store-link">Return to Store</a>
-                            </td>
-                        </tr>
-                    `;
-                    // Hide total row
-                    const totalRow = document.querySelector('.order-total-row');
-                    if (totalRow) totalRow.style.display = 'none';
-                    // Disable place order button
-                    const placeOrderBtn = document.getElementById('place-order-btn');
-                    if (placeOrderBtn) placeOrderBtn.disabled = true;
-                }
+                alert('Item removed from cart');
             }
+            
+            // Reload page to show updated cart with correct line_item_ids
+            setTimeout(() => location.reload(), 500);
         } else {
-            alert('Error removing item: ' + (data.error || 'Unknown error'));
+            // Revert frontend change - restore item
+            // Item already has all necessary fields from cart, so we can add it back directly
+            cart.cart.items.push(item);
+            cart.recalculateTotals();
+            cart.saveCart();
+            cart.updateCartIcon();
+            location.reload(); // Reload to show correct state
+            if (typeof showNotification !== 'undefined') {
+                showNotification('Error removing item: ' + (data.error || 'Unknown error'), 'error');
+            } else {
+                alert('Error removing item: ' + (data.error || 'Unknown error'));
+            }
         }
     } catch (error) {
         console.error('Error:', error);
-        alert('Failed to remove item. Please try again.');
+        // Revert frontend change - restore item
+        cart.cart.items.push(item);
+        cart.recalculateTotals();
+        cart.saveCart();
+        cart.updateCartIcon();
+        location.reload(); // Reload to show correct state
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Failed to remove item. Please try again.', 'error');
+        } else {
+            alert('Failed to remove item. Please try again.');
+        }
+    }
+}
+
+// Show empty cart state
+function showEmptyCart() {
+    const tableBody = document.querySelector('#checkout-items');
+    if (tableBody) {
+        tableBody.innerHTML = `
+            <tr>
+                <td colspan="4" class="empty-cart-message">
+                    <div class="empty-cart-container">
+                        <div class="empty-cart-icon">
+                            <svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <!-- Cart body -->
+                                <rect x="20" y="40" width="80" height="60" rx="4" stroke="#4ade80" stroke-width="3" fill="none"/>
+                                <!-- Cart handle -->
+                                <path d="M 35 40 Q 35 30, 45 30 Q 55 30, 55 40" stroke="#4ade80" stroke-width="3" fill="none" stroke-linecap="round"/>
+                                <!-- Sad eyes -->
+                                <circle cx="40" cy="60" r="6" fill="#64748b"/>
+                                <circle cx="80" cy="60" r="6" fill="#64748b"/>
+                                <path d="M 38 58 Q 40 55, 42 58" stroke="#64748b" stroke-width="2" fill="none" stroke-linecap="round"/>
+                                <path d="M 78 58 Q 80 55, 82 58" stroke="#64748b" stroke-width="2" fill="none" stroke-linecap="round"/>
+                                <!-- Wheels -->
+                                <circle cx="35" cy="95" r="8" stroke="#64748b" stroke-width="3" fill="none"/>
+                                <circle cx="85" cy="95" r="8" stroke="#64748b" stroke-width="3" fill="none"/>
+                            </svg>
+                        </div>
+                        <h3 class="empty-cart-title">This Cart Is Empty</h3>
+                        <a href="/external/store/${uuid}" class="add-items-btn">Add Items</a>
+                    </div>
+                </td>
+            </tr>
+        `;
+    }
+    
+    // Hide order total row
+    const totalRow = document.querySelector('.order-total-row');
+    if (totalRow) {
+        totalRow.style.display = 'none';
+    }
+    
+    // Update cart icon
+    const cart = getCartManager();
+    if (cart) {
+        cart.updateCartIcon();
+    }
+}
+
+// Hide checkout bottom section (shipping, payment, place order)
+function hideCheckoutBottomSection() {
+    const bottomSection = document.getElementById('checkout-bottom-section');
+    if (bottomSection) {
+        bottomSection.style.display = 'none';
+    }
+    
+    // Also hide order notes
+    const orderNotesSection = document.querySelector('.order-notes-section');
+    if (orderNotesSection) {
+        orderNotesSection.style.display = 'none';
+    }
+}
+
+// Show checkout bottom section
+function showCheckoutBottomSection() {
+    const bottomSection = document.getElementById('checkout-bottom-section');
+    if (bottomSection) {
+        bottomSection.style.display = '';
+    }
+    
+    const orderNotesSection = document.querySelector('.order-notes-section');
+    if (orderNotesSection) {
+        orderNotesSection.style.display = '';
+    }
+}
+
+// Check inventory issues and hide/show checkout section
+function checkInventoryAndToggleCheckout() {
+    const cart = getCartManager();
+    if (!cart) return;
+    
+    // Check if cart is empty
+    if (cart.cart.items.length === 0) {
+        hideCheckoutBottomSection();
+        return;
+    }
+    
+    // Check for inventory issues
+    const issues = cart.validateCartAgainstInventory();
+    if (issues.length > 0) {
+        // Hide checkout section if inventory is exceeded
+        hideCheckoutBottomSection();
+    } else {
+        // Show checkout section if no issues
+        showCheckoutBottomSection();
     }
 }
 
@@ -343,7 +703,319 @@ function handleLocationChange(locationId) {
     }
 }
 
+// Initialize checkout page
+document.addEventListener('DOMContentLoaded', async function() {
+    const uuid = '<%= uuid %>';
+    
+    // Initialize cart manager
+    initCartManager(uuid);
+    const cart = getCartManager();
+    
+    // The cart data is already rendered from server-side (EJS template)
+    // But we also need to sync it to localStorage for frontend management
+    // and ensure we have real line_item_ids
+    
+    // Always load/refresh cart from backend to ensure we have latest data with real IDs
+    const loaded = await cart.loadFromBackend();
+    
+    if (!loaded || cart.cart.items.length === 0) {
+        // Check if server-side cart has items (from EJS template)
+        const serverCartCount = <%= (cart && cart.items) ? cart.items.length : 0 %>;
+        if (serverCartCount === 0) {
+            // Cart is empty, redirect to store
+            window.location.href = `/external/store/${uuid}`;
+            return;
+        } else {
+            // Server has cart but backend API doesn't - sync it
+            await cart.syncToBackend();
+            await cart.loadFromBackend();
+        }
+    }
+    
+    // Fetch latest inventory data and update quantity_available
+    if (cart) {
+        await cart.fetchInventoryData();
+        
+        // Validate cart and show warnings
+        const issues = cart.validateCartAgainstInventory();
+        if (issues.length > 0) {
+            // Show warning bar
+            const warningBar = document.getElementById('inventory-warning-bar');
+            if (warningBar) {
+                warningBar.style.display = 'block';
+            }
+            
+            // Hide checkout section when inventory is exceeded
+            hideCheckoutBottomSection();
+            
+            // Highlight rows and disable controls
+            issues.forEach(issue => {
+                const row = document.querySelector(`tr[data-line-item-id="${issue.line_item_id}"]`);
+                if (row) {
+                    row.classList.add('inventory-exceeded');
+                }
+            });
+        } else {
+            // Show checkout section if no inventory issues
+            showCheckoutBottomSection();
+        }
+        
+        cart.updateCartIcon();
+    }
+    
+    // Initialize checkout validator
+    if (typeof initCheckoutValidator !== 'undefined') {
+        initCheckoutValidator(uuid);
+    }
+});
+
+// Update quantity on checkout page (frontend only, then sync to backend)
+async function updateCheckoutQuantity(batchId, delta) {
+    const cart = getCartManager();
+    if (!cart) return;
+    
+    const item = cart.cart.items.find(i => String(i.batch_id) === String(batchId));
+    if (!item) {
+        console.error('Item not found:', batchId);
+        return;
+    }
+    
+    const newQuantity = item.quantity + delta;
+    const maxAvailable = item.quantity_available || 999;
+    
+    if (newQuantity <= 0) {
+        if (confirm('Remove this item from cart?')) {
+            cart.removeItem(batchId);
+            location.reload(); // Reload to update page
+        }
+        return;
+    }
+    
+    if (newQuantity > maxAvailable) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification(`Maximum available: ${maxAvailable} cases`, 'warning');
+        }
+        return;
+    }
+    
+    // Update cart quantity (this also updates line_total)
+    cart.updateQuantity(batchId, newQuantity);
+    
+    // Get updated item from cart
+    const updatedItem = cart.cart.items.find(i => String(i.batch_id) === String(batchId));
+    if (!updatedItem) return;
+    
+    // Find the row by batch_id
+    const row = document.querySelector(`input[data-batch-id="${batchId}"]`)?.closest('tr');
+    if (row) {
+        // Update quantity display
+        const quantityDisplay = row.querySelector('.quantity-value');
+        if (quantityDisplay) {
+            quantityDisplay.textContent = newQuantity;
+        }
+        
+        // Update units total
+        const unitsInfo = row.querySelector('.units-info');
+        if (unitsInfo && updatedItem.units_per_case) {
+            const totalUnits = newQuantity * updatedItem.units_per_case;
+            unitsInfo.textContent = `${totalUnits} Units total`;
+        }
+        
+        // Update line total
+        const lineTotal = row.querySelector('.line-total');
+        if (lineTotal) {
+            lineTotal.textContent = `$${updatedItem.line_total.toFixed(2)}`;
+        }
+        
+        // Update input field
+        const input = row.querySelector('.quantity-input-checkout');
+        if (input) {
+            input.value = newQuantity;
+            input.classList.toggle('quantity-exceeded', newQuantity > maxAvailable);
+        }
+        
+        // Update +/- buttons
+        const minusBtn = row.querySelector('.quantity-btn-minus');
+        const plusBtn = row.querySelector('.quantity-btn-plus');
+        if (minusBtn) {
+            minusBtn.disabled = (newQuantity <= 1);
+        }
+        if (plusBtn) {
+            plusBtn.disabled = (newQuantity >= maxAvailable);
+        }
+        
+        // Update order total
+        updateCheckoutTotal();
+    }
+    
+    // Sync to backend (async, don't wait)
+    cart.syncToBackend().catch(err => {
+        console.error('Failed to sync cart:', err);
+    });
+}
+
+function updateCheckoutQuantityInput(batchId, value) {
+    const cart = getCartManager();
+    if (!cart) return;
+    
+    const quantity = parseInt(value) || 1;
+    const item = cart.cart.items.find(i => String(i.batch_id) === String(batchId));
+    if (!item) return;
+    
+    const maxAvailable = item.quantity_available || 999;
+    let finalQuantity = quantity;
+    
+    if (quantity > maxAvailable) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification(`Maximum available: ${maxAvailable} cases. Adjusting quantity.`, 'warning');
+        }
+        finalQuantity = maxAvailable;
+        const input = document.querySelector(`input[data-batch-id="${batchId}"]`);
+        if (input) {
+            input.value = maxAvailable;
+            input.classList.add('quantity-exceeded');
+        }
+    }
+    
+    // Update cart quantity (this also updates line_total)
+    cart.updateQuantity(batchId, finalQuantity);
+    
+    // Get updated item from cart
+    const updatedItem = cart.cart.items.find(i => String(i.batch_id) === String(batchId));
+    if (!updatedItem) return;
+    
+    // Find the row by batch_id
+    const input = document.querySelector(`input[data-batch-id="${batchId}"]`);
+    const row = input?.closest('tr');
+    if (row) {
+        // Update quantity display
+        const quantityDisplay = row.querySelector('.quantity-value');
+        if (quantityDisplay) {
+            quantityDisplay.textContent = finalQuantity;
+        }
+        
+        // Update units total
+        const unitsInfo = row.querySelector('.units-info');
+        if (unitsInfo && updatedItem.units_per_case) {
+            const totalUnits = finalQuantity * updatedItem.units_per_case;
+            unitsInfo.textContent = `${totalUnits} Units total`;
+        }
+        
+        // Update line total
+        const lineTotal = row.querySelector('.line-total');
+        if (lineTotal) {
+            lineTotal.textContent = `$${updatedItem.line_total.toFixed(2)}`;
+        }
+        
+        // Update input field styling
+        if (input) {
+            input.classList.toggle('quantity-exceeded', finalQuantity > maxAvailable);
+        }
+        
+        // Update +/- buttons
+        const minusBtn = row.querySelector('.quantity-btn-minus');
+        const plusBtn = row.querySelector('.quantity-btn-plus');
+        if (minusBtn) {
+            minusBtn.disabled = (finalQuantity <= 1);
+        }
+        if (plusBtn) {
+            plusBtn.disabled = (finalQuantity >= maxAvailable);
+        }
+        
+        // Update order total
+        updateCheckoutTotal();
+    }
+    
+    // Sync to backend (async, don't wait)
+    cart.syncToBackend().catch(err => {
+        console.error('Failed to sync cart:', err);
+    });
+}
+
+// Update checkout total from cart
+function updateCheckoutTotal() {
+    const cart = getCartManager();
+    if (!cart) return;
+    
+    const cartData = cart.getCart();
+    
+    // Update order summary total
+    const totalRow = document.querySelector('.order-total-row span');
+    if (totalRow) {
+        totalRow.textContent = `Total: $${cartData.total.toFixed(2)}`;
+    }
+    
+    // Update final total in payment section if it exists
+    const finalTotalElements = document.querySelectorAll('[data-total-display]');
+    finalTotalElements.forEach(el => {
+        el.textContent = `$${cartData.total.toFixed(2)}`;
+    });
+    
+    // Update final total in payment section
+    const finalTotalAmount = document.querySelector('.final-total-amount');
+    if (finalTotalAmount) {
+        finalTotalAmount.textContent = `$${cartData.total.toFixed(2)}`;
+    } else {
+        // Fallback: update entire final-total section
+        const finalTotalSection = document.querySelector('.final-total');
+        if (finalTotalSection) {
+            finalTotalSection.innerHTML = `Final Total: <span class="final-total-amount">$${cartData.total.toFixed(2)}</span>`;
+        }
+    }
+}
+
+// Show loading overlay
+function showLoader(message = 'Processing...', subtext = 'Please wait') {
+    let loaderOverlay = document.getElementById('loader-overlay');
+    if (!loaderOverlay) {
+        loaderOverlay = document.createElement('div');
+        loaderOverlay.id = 'loader-overlay';
+        loaderOverlay.className = 'loader-overlay';
+        loaderOverlay.innerHTML = `
+            <div class="loader-container">
+                <div class="loader-spinner"></div>
+                <p class="loader-text">${message}</p>
+                <p class="loader-subtext">${subtext}</p>
+            </div>
+        `;
+        document.body.appendChild(loaderOverlay);
+    }
+    
+    const loaderText = loaderOverlay.querySelector('.loader-text');
+    const loaderSubtext = loaderOverlay.querySelector('.loader-subtext');
+    if (loaderText) loaderText.textContent = message;
+    if (loaderSubtext) loaderSubtext.textContent = subtext;
+    
+    // Trigger reflow and show
+    loaderOverlay.offsetHeight;
+    loaderOverlay.classList.add('show');
+}
+
+// Hide loading overlay
+function hideLoader() {
+    const loaderOverlay = document.getElementById('loader-overlay');
+    if (loaderOverlay) {
+        loaderOverlay.classList.remove('show');
+        setTimeout(() => {
+            if (loaderOverlay.parentNode) {
+                loaderOverlay.parentNode.removeChild(loaderOverlay);
+            }
+        }, 300);
+    }
+}
+
 async function placeOrder() {
+    const placeOrderBtn = document.getElementById('place-order-btn');
+    
+    // Disable button and show loading state
+    if (placeOrderBtn) {
+        placeOrderBtn.disabled = true;
+        placeOrderBtn.classList.add('loading');
+    }
+    
+    // Show loader
+    showLoader('Submitting Order', 'Please wait while we process your order...');
+    
     const orderNotes = document.getElementById('order-notes').value;
     
     const orderData = {
@@ -361,16 +1033,42 @@ async function placeOrder() {
         
         const data = await response.json();
         if (data.success) {
+            // Update loader message
+            showLoader('Order Submitted Successfully', 'Redirecting to confirmation page...');
+            
+            // Clear cart after successful order placement
+            const cart = getCartManager();
+            if (cart) {
+                cart.clearCart();
+                // Update cart icon immediately
+                cart.updateCartIcon();
+            }
+            
+            // Also clear localStorage directly as backup
+            try {
+                const storageKey = `portal_cart_${uuid}`;
+                localStorage.removeItem(storageKey);
+            } catch (e) {
+                console.error('Error clearing localStorage:', e);
+            }
+            
             if (typeof showNotification !== 'undefined') {
                 showNotification('Order submitted successfully! Pending approval.', 'success');
-            } else {
-                alert('Order submitted successfully! Pending approval.');
             }
+            
             // Redirect to confirmation page
             setTimeout(() => {
                 window.location.href = `/external/store/${uuid}/confirmation/${data.invoice_id}`;
             }, 1500);
         } else {
+            hideLoader();
+            
+            // Re-enable button
+            if (placeOrderBtn) {
+                placeOrderBtn.disabled = false;
+                placeOrderBtn.classList.remove('loading');
+            }
+            
             if (typeof showNotification !== 'undefined') {
                 showNotification('Error: ' + (data.error || 'Unknown error'), 'error');
             } else {
@@ -379,6 +1077,14 @@ async function placeOrder() {
         }
     } catch (error) {
         console.error('Error:', error);
+        hideLoader();
+        
+        // Re-enable button
+        if (placeOrderBtn) {
+            placeOrderBtn.disabled = false;
+            placeOrderBtn.classList.remove('loading');
+        }
+        
         if (typeof showNotification !== 'undefined') {
             showNotification('Failed to place order. Please try again.', 'error');
         } else {

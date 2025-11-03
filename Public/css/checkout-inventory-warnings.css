@@ -1,0 +1,376 @@
+/* Checkout Inventory Warning Styles */
+
+/* Global inventory warning bar */
+.inventory-warning-bar {
+    background-color: #fef3c7;
+    border: 1px solid #fbbf24;
+    border-radius: 8px;
+    padding: 16px 20px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.inventory-warning-bar i {
+    color: #f59e0b;
+    font-size: 20px;
+    margin-top: 2px;
+}
+
+.inventory-warning-bar span {
+    font-weight: 600;
+    color: #92400e;
+    font-size: 16px;
+}
+
+.inventory-warning-bar p {
+    margin: 4px 0 0 0;
+    color: #78350f;
+    font-size: 14px;
+}
+
+/* Row highlight when inventory exceeded */
+.order-summary-table tbody tr.inventory-exceeded {
+    background-color: #fef2f2;
+    border-left: 4px solid #ef4444;
+}
+
+.order-summary-table tbody tr.inventory-exceeded td {
+    border-left: none;
+}
+
+/* Inventory warning in quantity cell */
+.inventory-warning {
+    margin-top: 12px;
+    padding: 12px;
+    background-color: #fef3c7;
+    border-radius: 6px;
+    border-left: 3px solid #f59e0b;
+}
+
+.warning-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+}
+
+.warning-banner i {
+    color: #f59e0b;
+    font-size: 16px;
+}
+
+.warning-banner span {
+    font-weight: 600;
+    color: #92400e;
+    font-size: 14px;
+}
+
+.warning-details {
+    color: #78350f;
+    font-size: 13px;
+    margin-top: 4px;
+}
+
+.warning-details strong {
+    color: #92400e;
+}
+
+/* Quantity controls on checkout */
+.quantity-controls-checkout {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.quantity-input-checkout {
+    width: 80px;
+    padding: 8px 12px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s;
+}
+
+.quantity-input-checkout.quantity-exceeded {
+    border-color: #ef4444;
+    background-color: #fef2f2;
+    color: #dc2626;
+}
+
+.quantity-input-checkout:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.quantity-input-checkout.quantity-exceeded:focus {
+    border-color: #ef4444;
+    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.1);
+}
+
+.quantity-btn-minus,
+.quantity-btn-plus {
+    width: 36px;
+    height: 36px;
+    border: 1px solid #d1d5db;
+    background-color: white;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: #374151;
+}
+
+.quantity-btn-minus:hover:not(:disabled),
+.quantity-btn-plus:hover:not(:disabled) {
+    background-color: #f9fafb;
+    border-color: #9ca3af;
+}
+
+.quantity-btn-minus:disabled,
+.quantity-btn-plus:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background-color: #f3f4f6;
+    border-color: #e5e7eb;
+}
+
+.quantity-btn-minus i,
+.quantity-btn-plus i {
+    font-size: 12px;
+}
+
+/* Field warning text */
+.field-warning {
+    color: #dc2626;
+    font-size: 12px;
+    margin-top: 4px;
+    font-weight: 500;
+}
+
+/* Quantity display */
+.quantity-display {
+    font-size: 16px;
+    font-weight: 600;
+    color: #1f2937;
+    margin-bottom: 8px;
+}
+
+.quantity-value {
+    color: #3b82f6;
+}
+
+/* Remove button styling */
+.remove-item-btn {
+    background: transparent;
+    border: none;
+    color: #ef4444;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.remove-item-btn:hover {
+    background-color: #fef2f2;
+}
+
+/* Edit quantity button */
+.quantity-edit-control {
+    margin-top: 12px;
+}
+
+.edit-quantity-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background-color: #a8b5a0; /* Muted olive/sage green */
+    color: #f9fafb; /* Light green/white for icon */
+    border: 1px solid #7d8878; /* Darker green border */
+    border-radius: 5px; /* Slightly rounded corners */
+    font-size: 0;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    position: relative;
+}
+
+.edit-quantity-btn:hover {
+    background-color: #94a18d; /* Slightly brighter on hover */
+    border-color: #6b7566;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.edit-quantity-btn:active {
+    transform: scale(0.96);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+/* Pencil icon using SVG background */
+.edit-quantity-btn::before {
+    content: '';
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='%23f9fafb' viewBox='0 0 16 16'%3E%3Cpath d='M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5L13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 9.207 8.793 7.5l2.293-2.293L12.793 5.5zM8.5 8.207l1.293 1.293L7.293 11.5 6 10.207 8.5 8.207zM6 11.207l1 1-2.293 2.293-1-1L6 11.207z'/%3E%3C/svg%3E");
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+/* Availability message in modal */
+.availability-message {
+    margin-top: 8px;
+    margin-bottom: 8px;
+    font-size: 13px;
+    padding: 8px;
+    background-color: #f9fafb;
+    border-radius: 4px;
+}
+
+/* Empty Cart State on Checkout */
+.empty-cart-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    text-align: center;
+}
+
+.empty-cart-icon {
+    margin-bottom: 24px;
+    opacity: 0.8;
+}
+
+.empty-cart-icon svg {
+    display: block;
+    margin: 0 auto;
+}
+
+.empty-cart-title {
+    font-size: 24px;
+    font-weight: 600;
+    color: #64748b;
+    margin: 0 0 24px 0;
+}
+
+.add-items-btn {
+    display: inline-block;
+    padding: 12px 32px;
+    background-color: #4ade80;
+    color: white;
+    border: 1px solid #22c55e;
+    border-radius: 6px;
+    font-size: 16px;
+    font-weight: 500;
+    text-decoration: none;
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.add-items-btn:hover {
+    background-color: #22c55e;
+    border-color: #16a34a;
+    transform: translateY(-1px);
+}
+
+.add-items-btn:active {
+    transform: translateY(0);
+}
+
+/* Loading Spinner */
+.loader-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.loader-overlay.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.loader-container {
+    background: white;
+    border-radius: 12px;
+    padding: 32px 40px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    min-width: 200px;
+}
+
+.loader-spinner {
+    width: 48px;
+    height: 48px;
+    border: 4px solid #f3f4f6;
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.loader-text {
+    font-size: 16px;
+    font-weight: 500;
+    color: #1f2937;
+    margin: 0;
+}
+
+.loader-subtext {
+    font-size: 14px;
+    color: #6b7280;
+    margin: 0;
+}
+
+/* Button loading state */
+button.loading {
+    position: relative;
+    color: transparent;
+    pointer-events: none;
+}
+
+button.loading::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 20px;
+    margin-left: -10px;
+    margin-top: -10px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
