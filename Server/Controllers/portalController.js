@@ -995,11 +995,13 @@ class PortalController {
             }
             
             // Submit cart for approval using state machine
+            // Note: For external portal orders, there's no logged-in user, so pass null for userId
+            // The system will record this as a system change
             const invoiceStateMachine = require('../Services/invoiceStateMachineService');
             const result = await invoiceStateMachine.transitionTo(
                 cartData.invoice_id,
                 'Pending_Approval',
-                portalAccess.buyerId, // Use buyer ID as user reference for audit
+                null, // No user ID for external portal orders - system change
                 'External order submitted'
             );
             

@@ -119,12 +119,13 @@ class InvoiceStateMachineService {
             `, [newStatus, invoiceId]);
             
             // Log history
+            // If userId is null (e.g., external portal order), mark as system change
             await client.query(`
                 INSERT INTO "ORDERS-invoice-history" (
                     fk_invoice_id, modification_type, field_name,
-                    old_value, new_value, reason, changed_by_user_id
-                ) VALUES ($1, 'status_changed', 'status', $2, $3, $4, $5)
-            `, [invoiceId, currentStatus, newStatus, reason || null, userId]);
+                    old_value, new_value, reason, changed_by_user_id, changed_by_system
+                ) VALUES ($1, 'status_changed', 'status', $2, $3, $4, $5, $6)
+            `, [invoiceId, currentStatus, newStatus, reason || null, userId, !userId]);
             
             await client.query('COMMIT');
             

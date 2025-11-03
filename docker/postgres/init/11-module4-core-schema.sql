@@ -303,7 +303,7 @@ CREATE INDEX IF NOT EXISTS idx_credit_apps_credit ON "orders-credit-applications
 -- 7. Create Purchase Limits Table
 -- =====================================================
 
-CREATE TABLE IF NOT EXISTS "orders-purchase-limits" (
+CREATE TABLE IF NOT EXISTS "ORDERS-purchase-limits" (
     id SERIAL PRIMARY KEY,
     fk_location_id INTEGER NOT NULL UNIQUE,  -- One set of limits per location
     
@@ -317,13 +317,13 @@ CREATE TABLE IF NOT EXISTS "orders-purchase-limits" (
     last_modified_at TIMESTAMPTZ
 );
 
-CREATE INDEX IF NOT EXISTS idx_purchase_limits_location ON "orders-purchase-limits"(fk_location_id);
+CREATE INDEX IF NOT EXISTS idx_purchase_limits_location ON "ORDERS-purchase-limits"(fk_location_id);
 
 -- =====================================================
 -- 8. Create Invoice Modification History Table
 -- =====================================================
 
-CREATE TABLE IF NOT EXISTS "orders-invoice-history" (
+CREATE TABLE IF NOT EXISTS "ORDERS-invoice-history" (
     id BIGSERIAL PRIMARY KEY,
     fk_invoice_id INTEGER NOT NULL REFERENCES "ORDERS-invoices"(id) ON DELETE CASCADE,
     
@@ -344,10 +344,10 @@ CREATE TABLE IF NOT EXISTS "orders-invoice-history" (
     changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_invoice_history_invoice ON "orders-invoice-history"(fk_invoice_id);
-CREATE INDEX IF NOT EXISTS idx_invoice_history_timestamp ON "orders-invoice-history"(changed_at DESC);
-CREATE INDEX IF NOT EXISTS idx_invoice_history_type ON "orders-invoice-history"(modification_type);
-CREATE INDEX IF NOT EXISTS idx_invoice_history_fulfillment_issue ON "orders-invoice-history"(triggered_by_fulfillment_issue) 
+CREATE INDEX IF NOT EXISTS idx_invoice_history_invoice ON "ORDERS-invoice-history"(fk_invoice_id);
+CREATE INDEX IF NOT EXISTS idx_invoice_history_timestamp ON "ORDERS-invoice-history"(changed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_invoice_history_type ON "ORDERS-invoice-history"(modification_type);
+CREATE INDEX IF NOT EXISTS idx_invoice_history_fulfillment_issue ON "ORDERS-invoice-history"(triggered_by_fulfillment_issue) 
     WHERE triggered_by_fulfillment_issue = true;
 
 -- =====================================================
@@ -359,8 +359,8 @@ COMMENT ON TABLE "ORDERS-invoice-line-items" IS 'Line items linking invoices to 
 COMMENT ON TABLE "orders-standing-discounts" IS 'Pre-configured discount rules that auto-apply based on location and product';
 COMMENT ON TABLE "ORDERS-account-credits" IS 'Location-specific credits for handling post-delivery issues';
 COMMENT ON TABLE "orders-credit-applications" IS 'Audit trail of credit applications to invoices';
-COMMENT ON TABLE "orders-purchase-limits" IS 'Per-location purchase limits for external portal orders';
-COMMENT ON TABLE "orders-invoice-history" IS 'Complete audit trail of all invoice modifications';
+COMMENT ON TABLE "ORDERS-purchase-limits" IS 'Per-location purchase limits for external portal orders';
+COMMENT ON TABLE "ORDERS-invoice-history" IS 'Complete audit trail of all invoice modifications';
 
 DO $$
 BEGIN
