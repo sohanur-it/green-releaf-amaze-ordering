@@ -1,9 +1,9 @@
 <div class="page-header">
     <div>
-        <h1>Portal Access Management</h1>
+        <!-- <h1>Portal Access Management</h1> -->
         <p>Manage access links for external buyer portal</p>
     </div>
-    <button class="btn btn-primary" onclick="showCreateModal()">
+    <button class="btn btn-primary" onclick="showCreateModal()" type="button">
         <i class="fas fa-plus"></i> Create Access Link
     </button>
 </div>
@@ -78,34 +78,42 @@
 </div>
 
 <!-- Create Access Modal -->
-<div id="createModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
-    <div style="background: white; padding: 24px; border-radius: 8px; max-width: 500px; width: 90%;">
-        <h2 style="margin-bottom: 20px;">Create Portal Access</h2>
-        <form id="createForm" onsubmit="createAccess(event)">
-            <div class="form-group">
-                <label for="buyer_id">Buyer</label>
-                <select id="buyer_id" name="buyer_id" required onchange="loadLocations(this.value)">
-                    <option value="">Select a buyer...</option>
-                </select>
+<div class="modal-overlay" id="createModal" aria-hidden="true" onclick="handleModalOverlayClick(event)">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="createModalTitle" onclick="event.stopPropagation()">
+        <form id="createForm" class="styled-form" onsubmit="createAccess(event)">
+            <div class="modal-header">
+                <h3 class="modal-title" id="createModalTitle">Create Portal Access</h3>
+                <button type="button" class="modal-close-btn" onclick="hideCreateModal()" aria-label="Close">&times;</button>
             </div>
-            <div class="form-group">
-                <label for="location_id">Location</label>
-                <select id="location_id" name="location_id" required>
-                    <option value="">Select a location...</option>
-                </select>
-                <small style="color: #666; font-size: 0.9rem;">Please select a buyer first</small>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="buyer_id">Buyer</label>
+                    <select id="buyer_id" name="buyer_id" required onchange="loadLocations(this.value)" class="form-select-modern">
+                        <option value="">Select a buyer...</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="location_id">Location</label>
+                    <select id="location_id" name="location_id" required class="form-select-modern">
+                        <option value="">Select a location...</option>
+                    </select>
+                    <small class="form-hint">Please select a buyer first to load available locations</small>
+                </div>
+                <div class="form-group">
+                    <label for="expires_at">Expiration Date <span style="color: var(--text-light); font-weight: normal;">(Optional)</span></label>
+                    <input type="date" id="expires_at" name="expires_at" class="form-select-modern">
+                    <small class="form-hint">Leave empty for no expiration</small>
+                </div>
+                <div class="form-group">
+                    <label for="notes">Notes <span style="color: var(--text-light); font-weight: normal;">(Optional)</span></label>
+                    <textarea id="notes" name="notes" rows="3" style="width: 100%; padding: 10px 12px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 16px; font-family: inherit; resize: vertical;"></textarea>
+                </div>
             </div>
-            <div class="form-group">
-                <label for="expires_at">Expiration Date (Optional)</label>
-                <input type="date" id="expires_at" name="expires_at">
-            </div>
-            <div class="form-group">
-                <label for="notes">Notes (Optional)</label>
-                <textarea id="notes" name="notes" rows="3"></textarea>
-            </div>
-            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+            <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="hideCreateModal()">Cancel</button>
-                <button type="submit" class="btn btn-primary">Create</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-link"></i> Create Access Link
+                </button>
             </div>
         </form>
     </div>
@@ -299,14 +307,34 @@ async function loadLocations(buyerId) {
     }
 }
 
+function handleModalOverlayClick(event) {
+    // Close modal if clicking directly on the overlay (not on the dialog)
+    if (event.target.id === 'createModal') {
+        hideCreateModal();
+    }
+}
+
 function showCreateModal() {
     const modal = document.getElementById('createModal');
-    modal.style.display = 'flex';
+    if (!modal) {
+        console.error('Modal element not found');
+        return;
+    }
+    modal.classList.add('active');
+    modal.setAttribute('aria-hidden', 'false');
+    modal.style.display = 'flex'; // Ensure it's visible
     
     // Reset form and dropdowns
-    document.getElementById('createForm').reset();
-    document.getElementById('location_id').innerHTML = '<option value="">Select a location...</option>';
-    document.getElementById('location_id').disabled = true;
+    const form = document.getElementById('createForm');
+    if (form) {
+        form.reset();
+    }
+    
+    const locationSelect = document.getElementById('location_id');
+    if (locationSelect) {
+        locationSelect.innerHTML = '<option value="">Select a location...</option>';
+        locationSelect.disabled = true;
+    }
     
     // Load buyers
     console.log('Loading buyers for portal access form...');
@@ -314,11 +342,24 @@ function showCreateModal() {
 }
 
 function hideCreateModal() {
-    document.getElementById('createModal').style.display = 'none';
-    document.getElementById('createForm').reset();
+    const modal = document.getElementById('createModal');
+    if (modal) {
+        modal.classList.remove('active');
+        modal.setAttribute('aria-hidden', 'true');
+        modal.style.display = 'none'; // Hide it completely
+    }
+    
+    const form = document.getElementById('createForm');
+    if (form) {
+        form.reset();
+    }
+    
     // Reset location dropdown
     const locationSelect = document.getElementById('location_id');
-    locationSelect.innerHTML = '<option value="">Select a location...</option>';
+    if (locationSelect) {
+        locationSelect.innerHTML = '<option value="">Select a location...</option>';
+        locationSelect.disabled = true;
+    }
 }
 
 async function createAccess(event) {

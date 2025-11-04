@@ -78,6 +78,24 @@ app.use((req, res, next) => {
     next();
 });
 
+// Make user roles and permissions available to all templates
+app.use((req, res, next) => {
+    if (req.session) {
+        res.locals.userRoles = req.session.roles || [];
+        res.locals.userPermissions = req.session.permissions || [];
+        res.locals.isSuperuser = req.session.isSuperuser || false;
+        res.locals.username = req.session.username || '';
+        res.locals.userEmail = req.session.email || '';
+    } else {
+        res.locals.userRoles = [];
+        res.locals.userPermissions = [];
+        res.locals.isSuperuser = false;
+        res.locals.username = '';
+        res.locals.userEmail = '';
+    }
+    next();
+});
+
 // Swagger API documentation
 app.use('/api-docs', swaggerAuth, swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerUiOptions));
 

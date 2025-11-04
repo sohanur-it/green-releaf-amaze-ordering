@@ -6,13 +6,21 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!modal) return;
         modal.classList.add('active');
         modal.setAttribute('aria-hidden', 'false');
+        modal.style.display = 'flex';
     };
 
     // === HELPER: Close any modal ===
-    const closeModal = (modal) => {
+    const closeModal = (modal, force = false) => {
         if (!modal) return;
+        // Check if this modal should not close on outside click
+        // Only allow closing if explicitly requested (not from outside click)
+        if (modal.dataset.noCloseOnOutsideClick === 'true' && force !== 'force') {
+            // Don't close if this is a protected modal unless explicitly forced
+            return;
+        }
         modal.classList.remove('active');
         modal.setAttribute('aria-hidden', 'true');
+        modal.style.display = 'none';
     };
 
     // === DOM SELECTORS ===
@@ -20,6 +28,34 @@ document.addEventListener('DOMContentLoaded', () => {
     const crudModal = document.getElementById('salesRepCrudModal');
     const crudForm = document.getElementById('salesRepCrudForm');
     const tableBody = document.getElementById('reps-table-body');
+
+    // === Handle modal overlay click (close on backdrop) ===
+    // This modal should NOT close on outside click - only on Cancel/Close button
+    if (crudModal) {
+        crudModal.addEventListener('click', (e) => {
+            // Only close if clicking directly on the overlay, not the dialog
+            if (e.target === crudModal && !e.target.closest('.modal-dialog')) {
+                // Prevent closing - this modal is protected
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false;
+            }
+        });
+    }
+
+    // === Close modal on close button click ===
+    // Only attach to buttons within our specific modal to avoid conflicts
+    if (crudModal) {
+        crudModal.querySelectorAll('[data-close-modal]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                // Force close when clicking close button (even for protected modals)
+                closeModal(crudModal, 'force');
+            });
+        });
+    }
 
     // === FORM & MODAL FIELDS ===
     const modalTitle = document.getElementById('salesRepCrudModalTitle');
@@ -59,7 +95,18 @@ document.addEventListener('DOMContentLoaded', () => {
     if (addRepBtn) {
         addRepBtn.addEventListener('click', () => {
             crudForm.reset();
-            modalTitle.textContent = 'Add New Rep';
+            const modalTitleText = document.getElementById('modalTitleText');
+            const saveButtonText = document.getElementById('saveButtonText');
+            const userAccountSection = document.getElementById('userAccountSection');
+            
+            if (modalTitleText) modalTitleText.textContent = 'Add New Rep';
+            if (saveButtonText) saveButtonText.textContent = 'Save Rep';
+            
+            // Show user account section for new reps
+            if (userAccountSection) {
+                userAccountSection.style.display = 'block';
+            }
+            
             crudForm.setAttribute('data-method', 'POST');
             crudForm.setAttribute('data-action', '/api/crm/sales-reps');
             repIdField.value = '';
@@ -80,7 +127,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (action === 'edit-rep') {
                 crudForm.reset();
-                modalTitle.textContent = `Edit ${repName}`;
+                const modalTitleText = document.getElementById('modalTitleText');
+                const saveButtonText = document.getElementById('saveButtonText');
+                const userAccountSection = document.getElementById('userAccountSection');
+                
+                if (modalTitleText) modalTitleText.textContent = `Edit ${repName}`;
+                if (saveButtonText) saveButtonText.textContent = 'Update Rep';
+                
+                // Hide user account section when editing
+                if (userAccountSection) {
+                    userAccountSection.style.display = 'none';
+                }
+                
                 crudForm.setAttribute('data-method', 'PATCH');
                 crudForm.setAttribute('data-action', `/api/crm/sales-reps/${repId}`);
                 repIdField.value = repId;
@@ -108,10 +166,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (crudForm) {
         crudForm.addEventListener('submit', async (e) => {
             e.preventDefault();
+            e.stopPropagation();
+            
             const action = crudForm.getAttribute('data-action');
             const method = crudForm.getAttribute('data-method');
             const formData = new FormData(crudForm);
             const repData = Object.fromEntries(formData.entries());
+
+            // Hide any previous errors
+            formError.style.display = 'none';
+            formError.textContent = '';
 
             try {
                 const response = await fetch(action, {
@@ -119,22 +183,75 @@ document.addEventListener('DOMContentLoaded', () => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(repData),
                 });
-                if (!response.ok) throw new Error((await response.json()).message);
-                const resultRep = await response.json();
+                
+                const responseData = await response.json();
+                console.log('Sales rep API response:', responseData);
+                
+                if (!response.ok) {
+                    throw new Error(responseData.message || responseData.error || 'Failed to save sales rep');
+                }
 
+                // Success - update table and close modal
                 if (method === 'POST') { // if we added a new one
+                    // Check if response has entry_id
+                    if (!responseData.entry_id) {
+                        console.warn('Response missing entry_id, reloading page:', responseData);
+                        // Reload page to ensure we have the latest data
+                        window.location.reload();
+                        return;
+                    }
+                    
                     document.getElementById('empty-reps-message')?.remove();
                     const newRow = tableBody.insertRow();
-                    newRow.dataset.repId = resultRep.entry_id;
-                    newRow.innerHTML = renderRepRow(resultRep);
+                    newRow.dataset.repId = responseData.entry_id;
+                    newRow.innerHTML = renderRepRow(responseData);
+                    
+                    // Show success notification
+                    if (typeof notify !== 'undefined') {
+                        notify.success('Sales rep created successfully!');
+                    } else {
+                        alert('Sales rep created successfully!');
+                    }
                 } else { // if we edited one
-                    const rowToUpdate = tableBody.querySelector(`[data-rep-id="${resultRep.entry_id}"]`);
-                    if (rowToUpdate) rowToUpdate.innerHTML = renderRepRow(resultRep);
+                    if (!responseData.entry_id) {
+                        console.warn('Response missing entry_id, reloading page:', responseData);
+                        // Reload page to ensure we have the latest data
+                        window.location.reload();
+                        return;
+                    }
+                    
+                    const rowToUpdate = tableBody.querySelector(`[data-rep-id="${responseData.entry_id}"]`);
+                    if (rowToUpdate) {
+                        rowToUpdate.innerHTML = renderRepRow(responseData);
+                    } else {
+                        // Row not found, reload page to sync
+                        console.warn('Row not found for entry_id, reloading page');
+                        window.location.reload();
+                        return;
+                    }
+                    
+                    // Show success notification
+                    if (typeof notify !== 'undefined') {
+                        notify.success('Sales rep updated successfully!');
+                    } else {
+                        alert('Sales rep updated successfully!');
+                    }
                 }
-                closeModal(crudModal);
+                
+                // Reset form
+                crudForm.reset();
+                
+                // Close modal only on success (force close after successful submission)
+                closeModal(crudModal, 'force');
             } catch (error) {
-                formError.textContent = `Error: ${error.message}`;
+                // Show error but keep modal open
+                formError.textContent = `Error: ${error.message || 'An unexpected error occurred'}`;
                 formError.style.display = 'block';
+                
+                // Scroll to error message
+                formError.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                
+                console.error('Error saving sales rep:', error);
             }
         });
     }

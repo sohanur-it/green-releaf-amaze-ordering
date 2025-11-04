@@ -1,28 +1,33 @@
 <!-- Invoice Details Page -->
 <style>
 .invoice-details-card {
-    background: white;
+    background: var(--card-bg, white);
     border-radius: 8px;
     padding: 1.5rem;
     margin-bottom: 1.5rem;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    box-shadow: var(--card-shadow, 0 2px 4px rgba(0,0,0,0.1));
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
+    color: var(--text-color);
 }
 
 .detail-row {
     display: flex;
     padding: 0.5rem 0;
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid var(--border-color, #eee);
+    transition: border-color 0.3s ease;
 }
 
 .detail-label {
     font-weight: 600;
     width: 150px;
-    color: #666;
+    color: var(--text-light, #666);
+    transition: color 0.3s ease;
 }
 
 .detail-value {
     flex: 1;
-    color: #333;
+    color: var(--text-color, #333);
+    transition: color 0.3s ease;
 }
 
 .line-items-table {
@@ -32,29 +37,36 @@
 }
 
 .line-items-table th {
-    background: #f8f9fa;
+    background: var(--bg-color, #f8f9fa);
     padding: 12px;
     text-align: left;
     font-weight: 600;
+    color: var(--text-color);
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 .line-items-table td {
     padding: 12px;
-    border-bottom: 1px solid #dee2e6;
+    border-bottom: 1px solid var(--border-color, #dee2e6);
+    color: var(--text-color);
+    transition: color 0.3s ease, border-color 0.3s ease;
 }
 
 .history-timeline {
-    background: #f8f9fa;
+    background: var(--bg-color, #f8f9fa);
     padding: 1rem;
     border-radius: 8px;
     margin-top: 1rem;
+    transition: background-color 0.3s ease;
 }
 
 .history-item {
     padding: 0.75rem;
     border-left: 3px solid #667eea;
     margin-bottom: 0.5rem;
-    background: white;
+    background: var(--card-bg, white);
+    color: var(--text-color);
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 
 .status-badge {
@@ -78,14 +90,16 @@
 <div class="page-header">
     <h1>Invoice <%= invoice.invoice_number %></h1>
     <div style="display: flex; gap: 8px;">
-        <button onclick="cloneInvoice()" class="btn btn-secondary" style="background: #6c757d; color: white; padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer;">Clone Invoice</button>
+        <% if (typeof isSalesRep === 'undefined' || !isSalesRep) { %>
+            <button onclick="cloneInvoice()" class="btn btn-secondary" style="background: #6c757d; color: white; padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer;">Clone Invoice</button>
+        <% } %>
         <a href="/admin/invoices" class="btn btn-secondary" style="background: #6c757d; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; display: inline-block;">← Back to Invoices</a>
     </div>
 </div>
 
 <!-- Invoice Info -->
 <div class="invoice-details-card">
-    <h3>Invoice Information</h3>
+    <h3 style="color: var(--text-color);">Invoice Information</h3>
     <div class="detail-row">
         <div class="detail-label">Invoice Number:</div>
         <div class="detail-value"><strong><%= invoice.invoice_number %></strong></div>
@@ -124,7 +138,7 @@
 
 <!-- Line Items -->
 <div class="invoice-details-card">
-    <h3>Line Items</h3>
+    <h3 style="color: var(--text-color);">Line Items</h3>
     <% if (lineItems && lineItems.length > 0) { %>
         <table class="line-items-table">
             <thead>
@@ -140,17 +154,17 @@
                 <% lineItems.forEach(item => { %>
                     <tr>
                         <td>
-                            <strong><%= item.brand_name || 'AMAZE' %> <%= item.product_name %></strong>
+                            <strong style="color: var(--text-color);"><%= item.brand_name || 'AMAZE' %> <%= item.product_name %></strong>
                         </td>
-                        <td><%= item.batch_name %></td>
-                        <td><%= item.quantity_ordered %> Case</td>
-                        <td>$<%= parseFloat(item.unit_price || 0).toFixed(2) %></td>
-                        <td><strong>$<%= parseFloat(item.line_total || 0).toFixed(2) %></strong></td>
+                        <td style="color: var(--text-color);"><%= item.batch_name %></td>
+                        <td style="color: var(--text-color);"><%= item.quantity_ordered %> Case</td>
+                        <td style="color: var(--text-color);">$<%= parseFloat(item.unit_price || 0).toFixed(2) %></td>
+                        <td><strong style="color: var(--text-color);">$<%= parseFloat(item.line_total || 0).toFixed(2) %></strong></td>
                     </tr>
                 <% }); %>
             </tbody>
         </table>
-        <div style="text-align: right; margin-top: 1rem; font-size: 1.2rem;">
+        <div style="text-align: right; margin-top: 1rem; font-size: 1.2rem; color: var(--text-color);">
             <strong>Total: $<%= parseFloat(invoice.total || 0).toFixed(2) %></strong>
         </div>
     <% } else { %>
@@ -161,12 +175,12 @@
 <!-- History -->
 <% if (history && history.length > 0) { %>
 <div class="invoice-details-card">
-    <h3>Change History</h3>
+    <h3 style="color: var(--text-color);">Change History</h3>
     <div class="history-timeline">
         <% history.forEach(entry => { %>
             <div class="history-item">
-                <div><strong><%= entry.modification_type %></strong></div>
-                <div style="color: #666; font-size: 0.9rem;">
+                <div><strong style="color: var(--text-color);"><%= entry.modification_type %></strong></div>
+                <div style="color: var(--text-light); font-size: 0.9rem;">
                     <%= entry.reason %> - <%= new Date(entry.changed_at).toLocaleString() %>
                 </div>
             </div>

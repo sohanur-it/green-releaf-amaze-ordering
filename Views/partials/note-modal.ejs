@@ -1,28 +1,38 @@
 <!-- Views/partials/note-modal.ejs -->
-<div class="modal-overlay" id="noteModal" aria-hidden="true">
-    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="noteModalTitle">
+<div class="modal-overlay" id="noteModal" aria-hidden="true" onclick="handleModalOverlayClick(event)">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="noteModalTitle" onclick="event.stopPropagation()">
         <form id="noteForm" class="styled-form" novalidate>
             <div class="modal-header">
                 <h3 class="modal-title" id="noteModalTitle">Add Note</h3>
-                <button type="button" class="modal-close-btn" data-close-modal>&times;</button>
+                <button type="button" class="modal-close-btn" data-close-modal aria-label="Close">&times;</button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body" style="padding: 2rem;">
                 <input type="hidden" id="noteId" name="noteId">
 
-                <div class="form-group">
-                    <label for="noteTitle">Title (Optional)</label>
-                    <input type="text" id="noteTitle" name="title">
-                </div>
-                <div class="form-group">
-                    <label for="noteText">Note</label>
-                    <textarea id="noteText" name="text" rows="8" required></textarea>
+                <div class="row" style="margin: 0;">
+                    <div class="col-md-12" style="padding: 0; margin-bottom: 1.5rem;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="noteTitle" style="display: block; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-color);">Title</label>
+                            <input type="text" id="noteTitle" name="title" class="form-input-modern" placeholder="Note title (optional)" style="width: 100%; box-sizing: border-box;">
+                            <small class="form-hint">A brief title for this note (optional)</small>
+                        </div>
+                    </div>
+                    <div class="col-md-12" style="padding: 0; margin-bottom: 1.5rem;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="noteText" style="display: block; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-color);">Note <span class="required">*</span></label>
+                            <textarea id="noteText" name="text" rows="8" class="form-textarea-modern" required placeholder="Enter your note here..." style="width: 100%; box-sizing: border-box;"></textarea>
+                            <small class="form-hint">Add detailed notes about this buyer</small>
+                        </div>
+                    </div>
                 </div>
 
                 <div id="noteFormError" class="form-error-message" style="display: none;"></div>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
-                <button type="submit" class="btn btn-primary">Save Note</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Save Note
+                </button>
             </div>
         </form>
     </div>

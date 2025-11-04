@@ -1,66 +1,159 @@
 <!-- Views/admin/crm/index.ejs -->
 
 <div class="page-header">
+    <div>
+        <h1>CRM - Buyers</h1>
+        <p style="margin: 0; color: var(--text-light);">Manage buyer relationships and sales representative assignments</p>
+    </div>
     <!-- this is just a simple wrapper to group the buttons -->
     <div style="display: flex; gap: 12px;">
-        <a href="/admin/crm/buyers/new" class="btn btn-primary">Add New Buyer</a>
+        <a href="/admin/crm/buyers/new" class="btn btn-primary">
+            <i class="fas fa-plus"></i> Add New Buyer
+        </a>
         <!-- this is the new link to the reps page -->
-        <a href="/admin/crm/sales-reps" class="btn btn-secondary">Manage Sales Reps</a>
+        <a href="/admin/crm/sales-reps" class="btn btn-secondary">
+            <i class="fas fa-users"></i> Manage Sales Reps
+        </a>
     </div>
 </div>
 
-<!-- this is where our fancy table will live -->
-<div id="buyer-table-wrapper"></div>
+<!-- Buyers Table -->
+<div class="dashboard-card">
+    <% if (!buyers || buyers.length === 0) { %>
+        <div class="empty-state" style="text-align: center; padding: 3rem;">
+            <i class="fas fa-building fa-4x" style="color: #d1d5da; margin-bottom: 1rem;"></i>
+            <h3>No Buyers Yet</h3>
+            <p style="color: var(--text-light);">Create your first buyer to get started</p>
+            <a href="/admin/crm/buyers/new" class="btn btn-primary" style="margin-top: 1rem;">
+                <i class="fas fa-plus"></i> Add New Buyer
+            </a>
+        </div>
+    <% } else { %>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0">All Buyers (<span id="buyerCount"><%= buyers.length %></span>)</h5>
+            <div class="search-toggle-container">
+                <button class="search-toggle-btn" id="searchToggleBtn" onclick="toggleBuyerSearch()">
+                    <i class="fas fa-search"></i>
+                    <span>Search</span>
+                </button>
+                <div class="search-input-container" id="searchInputContainer" style="display: none;">
+                    <input type="text" id="searchBuyers" class="form-control" placeholder="Search buyers...">
+                </div>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover modern-table">
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Stage</th>
+                        <th>Contacts</th>
+                        <th>Tags</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="buyersTableBody">
+                    <% buyers.forEach(buyer => { %>
+                        <tr data-buyer-id="<%= buyer.entry_id %>"
+                            data-name="<%= (buyer.name || '').toLowerCase() %>"
+                            data-type="<%= buyer.buyer_type || '' %>"
+                            data-stage="<%= (buyer.stage_name || '').toLowerCase() %>">
+                            <td>
+                                <strong><%= buyer.name %></strong>
+                                <% if (buyer.website_url) { %>
+                                    <br><small class="text-muted">
+                                        <a href="<%= buyer.website_url %>" target="_blank" style="color: var(--text-light); text-decoration: none;">
+                                            <i class="fas fa-external-link-alt"></i> <%= buyer.website_url %>
+                                        </a>
+                                    </small>
+                                <% } %>
+                            </td>
+                            <td>
+                                <span class="badge bg-secondary"><%= buyer.buyer_type || 'N/A' %></span>
+                            </td>
+                            <td>
+                                <% if (buyer.stage_name) { %>
+                                    <% 
+                                    const stageColor = buyer.stage_color || '#6c757d';
+                                    %>
+                                    <span class="badge" style="background-color: <%= stageColor %>; color: white;">
+                                        <%= buyer.stage_name %>
+                                    </span>
+                                <% } else { %>
+                                    <span class="text-muted">N/A</span>
+                                <% } %>
+                            </td>
+                            <td>
+                                <span class="badge bg-info"><%= buyer.contact_count || 0 %></span>
+                            </td>
+                            <td>
+                                <% if (buyer.tags && buyer.tags !== 'None') { %>
+                                    <span class="badge bg-light text-dark"><%= buyer.tags %></span>
+                                <% } else { %>
+                                    <span class="text-muted">-</span>
+                                <% } %>
+                            </td>
+                            <td>
+                                <a href="/admin/crm/buyers/<%= buyer.entry_id %>" class="table-action-link">
+                                    <i class="fas fa-eye"></i> View
+                                </a>
+                            </td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    <% } %>
+</div>
 
-<!-- a little script to kick off the Grid.js table -->
+<!-- Search and Filter Script -->
 <script>
-    // wait for the page to load before doin stuff
-    document.addEventListener('DOMContentLoaded', function () {
-        // we're creating a new Grid.js table.
-        new gridjs.Grid({
-            columns: [
-                { name: 'Name', width: '25%' },
-                { name: 'Type', width: '15%' },
-                { name: 'Stage', width: '15%' },
-                { name: 'Contacts', width: '10%' },
-                { name: 'Tags', width: '25%' },
-                {
-                    name: 'Actions',
-                    width: '10%',
-                    formatter: (cell, row) => {
-                        // we'll make these buttons do stuff later
-                        // the entry_id is hidden in row.cells[5].data
-                        return gridjs.html(`<a href="/admin/crm/buyers/${row.cells[6].data}" class="table-action-link">View</a>`);
-                    }
-                },
-                { name: 'entry_id', hidden: true } // hide the id, we just need it for the link
-                // this is the 7th column, at index 6
-            ],
-            search: true, //turn on the search bar.
-            sort: true, //let them sort columns
-            pagination: {
-                limit: 15,
-                summary: true
-            },
-            resizable: true, //let users resize the columns.
-            className: {
-                table: 'custom-table', //for our own styling
-                thead: 'custom-thead',
-                tbody: 'custom-tbody',
-            },
-            //this is how we load the data from our api
-            server: {
-                url: '/api/crm/buyers',
-                then: data => data.map(buyer => [
-                    buyer.name,
-                    buyer.buyer_type,
-                    buyer.stage_name,
-                    buyer.contact_count,
-                    buyer.tags || 'None',
-                    null, // placeholder for Actions (index 5)
-                    buyer.entry_id //the actual ID (index 6)
-                ])
+    document.addEventListener('DOMContentLoaded', function() {
+        // Search functionality
+        const searchInput = document.getElementById('searchBuyers');
+        const searchToggleBtn = document.getElementById('searchToggleBtn');
+        const searchInputContainer = document.getElementById('searchInputContainer');
+        const tableBody = document.getElementById('buyersTableBody');
+        
+        // Toggle search input
+        window.toggleBuyerSearch = function() {
+            if (searchInputContainer) {
+                const isVisible = searchInputContainer.style.display !== 'none';
+                searchInputContainer.style.display = isVisible ? 'none' : 'block';
+                if (!isVisible && searchInput) {
+                    searchInput.focus();
+                }
             }
-        }).render(document.getElementById('buyer-table-wrapper'));
+        };
+        
+        // Filter table rows based on search
+        if (searchInput && tableBody) {
+            searchInput.addEventListener('input', function(e) {
+                const searchTerm = e.target.value.toLowerCase().trim();
+                const rows = tableBody.querySelectorAll('tr');
+                let visibleCount = 0;
+                
+                rows.forEach(row => {
+                    const name = row.dataset.name || '';
+                    const type = row.dataset.type || '';
+                    const stage = row.dataset.stage || '';
+                    
+                    const matches = !searchTerm || 
+                        name.includes(searchTerm) ||
+                        type.includes(searchTerm) ||
+                        stage.includes(searchTerm);
+                    
+                    row.style.display = matches ? '' : 'none';
+                    if (matches) visibleCount++;
+                });
+                
+                // Update count
+                const countElement = document.getElementById('buyerCount');
+                if (countElement) {
+                    countElement.textContent = visibleCount;
+                }
+            });
+        }
     });
 </script>

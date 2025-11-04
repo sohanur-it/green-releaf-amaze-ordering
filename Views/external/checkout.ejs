@@ -689,7 +689,7 @@ function checkInventoryAndToggleCheckout() {
     }
 }
 
-function handleLocationChange(locationId) {
+async function handleLocationChange(locationId) {
     const select = document.getElementById('location-select');
     const selectedOption = select.options[select.selectedIndex];
     
@@ -700,6 +700,27 @@ function handleLocationChange(locationId) {
         document.getElementById('city').value = selectedOption.getAttribute('data-city') || '';
         document.getElementById('state').value = selectedOption.getAttribute('data-state') || 'Missouri';
         document.getElementById('postal-code').value = selectedOption.getAttribute('data-zip') || '';
+        
+        // Update invoice location in the database
+        try {
+            const uuid = '<%= uuid %>';
+            const response = await fetch(`/api/portal/${uuid}/update-location`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ location_id: locationId })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                console.log('Invoice location updated successfully');
+            } else {
+                console.error('Failed to update invoice location:', data.error);
+            }
+        } catch (error) {
+            console.error('Error updating invoice location:', error);
+        }
     }
 }
 
@@ -1017,9 +1038,12 @@ async function placeOrder() {
     showLoader('Submitting Order', 'Please wait while we process your order...');
     
     const orderNotes = document.getElementById('order-notes').value;
+    const locationSelect = document.getElementById('location-select');
+    const selectedLocationId = locationSelect ? locationSelect.value : null;
     
     const orderData = {
-        notes: orderNotes
+        notes: orderNotes,
+        location_id: selectedLocationId
     };
     
     try {

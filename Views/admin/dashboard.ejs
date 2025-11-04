@@ -1,11 +1,796 @@
 <!-- Views/admin/dashboard.ejs -->
+<% 
+// Determine dashboard type
+const showSimpleDashboard = !showFullDashboard && !showSalesDashboard;
+%>
+<% if (showSimpleDashboard) { %>
+<!-- Simple Dashboard for Sales Admin and Sales Reps -->
+<style>
+.welcome-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 60vh;
+    text-align: center;
+    padding: 3rem;
+}
+
+.welcome-card {
+    background: linear-gradient(135deg, var(--card-bg, #ffffff) 0%, var(--bg-color, #f8f9fa) 100%);
+    border-radius: 20px;
+    padding: 3.5rem;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+    max-width: 600px;
+    width: 100%;
+    border: 1px solid var(--border-color, rgba(0,0,0,0.05));
+    position: relative;
+    overflow: hidden;
+    transition: background 0.3s ease, border-color 0.3s ease;
+}
+
+.welcome-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+}
+
+.welcome-icon {
+    font-size: 4.5rem;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 1.5rem;
+    filter: drop-shadow(0 4px 6px rgba(102, 126, 234, 0.2));
+}
+
+.welcome-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-color);
+    margin-bottom: 0.5rem;
+}
+
+.welcome-subtitle {
+    font-size: 1.1rem;
+    color: var(--text-light);
+    margin-bottom: 2rem;
+}
+
+.user-email {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 1rem 1.75rem;
+    background: var(--bg-color, linear-gradient(135deg, #f0f4ff 0%, #e8f0fe 100%));
+    border-radius: 12px;
+    font-size: 1rem;
+    color: var(--text-color);
+    margin-top: 1.5rem;
+    border: 1px solid var(--border-color, rgba(74, 144, 226, 0.2));
+    font-weight: 500;
+    transition: background 0.3s ease, border-color 0.3s ease;
+}
+
+.user-email i {
+    color: var(--primary-color);
+}
+</style>
+
+<div class="welcome-container">
+    <div class="welcome-card">
+        <div class="welcome-icon">
+            <i class="fas fa-tachometer-alt"></i>
+        </div>
+        <h1 class="welcome-title">Welcome to Dashboard</h1>
+        <p class="welcome-subtitle">You're logged in as <%= isSalesAdmin ? 'Sales Admin' : isSalesRep ? 'Sales Representative' : 'User' %></p>
+        <div class="user-email">
+            <i class="fas fa-envelope"></i>
+            <span><%= userEmail || 'No email' %></span>
+        </div>
+    </div>
+</div>
+<% } else if (showSalesDashboard) { %>
+<!-- Sales Dashboard for Sales Admin -->
+<style>
+.sales-dashboard {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.sales-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.sales-stat-card {
+    background: var(--card-bg, #fff);
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: var(--card-shadow, 0 4px 12px rgba(0,0,0,0.08));
+    border: 1px solid var(--border-color, rgba(0,0,0,0.05));
+    transition: transform 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.sales-stat-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--card-shadow, 0 8px 24px rgba(0,0,0,0.12));
+}
+
+.sales-stat-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+}
+
+.sales-stat-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+    margin-bottom: 1rem;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.sales-stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-color);
+    margin-bottom: 0.25rem;
+    transition: color 0.3s ease;
+}
+
+.sales-stat-label {
+    font-size: 0.875rem;
+    color: var(--text-light);
+    font-weight: 500;
+    transition: color 0.3s ease;
+}
+
+.recent-invoices-card {
+    background: var(--card-bg, #fff);
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: var(--card-shadow, 0 4px 12px rgba(0,0,0,0.08));
+    border: 1px solid var(--border-color, rgba(0,0,0,0.05));
+    transition: background-color 0.3s ease;
+}
+
+.recent-invoices-card h3 {
+    margin: 0 0 1.5rem 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: color 0.3s ease;
+}
+
+.recent-invoices-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.recent-invoice-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem;
+    background: var(--bg-color, #f8f9fa);
+    border-radius: 8px;
+    border: 1px solid var(--border-color, rgba(0,0,0,0.05));
+    transition: background-color 0.3s ease, transform 0.2s ease;
+    cursor: pointer;
+    text-decoration: none;
+    color: inherit;
+}
+
+.recent-invoice-item:hover {
+    background: var(--bg-color, #e9ecef);
+    transform: translateX(4px);
+}
+
+.recent-invoice-info {
+    flex: 1;
+}
+
+.recent-invoice-number {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text-color);
+    margin-bottom: 0.25rem;
+    transition: color 0.3s ease;
+}
+
+.recent-invoice-meta {
+    font-size: 0.85rem;
+    color: var(--text-light);
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    transition: color 0.3s ease;
+}
+
+.recent-invoice-amount {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-color);
+    transition: color 0.3s ease;
+}
+
+.invoice-status-list-card {
+    background: var(--card-bg, #fff);
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: var(--card-shadow, 0 4px 12px rgba(0,0,0,0.08));
+    border: 1px solid var(--border-color, rgba(0,0,0,0.05));
+    transition: background-color 0.3s ease;
+}
+
+.invoice-status-list-card h3 {
+    margin: 0 0 1.5rem 0;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: color 0.3s ease;
+}
+
+.status-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.status-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    background: var(--bg-color, #f8f9fa);
+    border-radius: 8px;
+    border-left: 4px solid;
+    transition: background-color 0.3s ease;
+}
+
+.status-item-draft { border-left-color: #1976d2; }
+.status-item-pending_approval { border-left-color: #e65100; }
+.status-item-approved { border-left-color: #2e7d32; }
+.status-item-fulfillment_accepted { border-left-color: #7b1fa2; }
+.status-item-shipped { border-left-color: #283593; }
+.status-item-delivered { border-left-color: #1b5e20; }
+.status-item-paid { border-left-color: #4caf50; }
+.status-item-partially-rejected { border-left-color: #c62828; }
+.status-item-fully-rejected { border-left-color: #c62828; }
+.status-item-cancelled { border-left-color: #616161; }
+.status-item-cancelled-after-ship { border-left-color: #616161; }
+.status-item-fulfillment-issue { border-left-color: #e65100; }
+.status-item-manifested { border-left-color: #1976d2; }
+.status-item-issue-after-shipped { border-left-color: #d32f2f; }
+
+.status-item-name {
+    font-weight: 600;
+    color: var(--text-color);
+    font-size: 0.9rem;
+    transition: color 0.3s ease;
+}
+
+.status-item-count {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--text-color);
+    transition: color 0.3s ease;
+}
+
+.sales-charts-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 1.5rem;
+    margin-top: 2rem;
+}
+</style>
+
+<div class="sales-dashboard">
+    <!-- Sales Statistics Cards -->
+    <% if (invoiceStats && invoiceStats.total_invoices !== undefined) { %>
+    <div class="sales-stats-grid">
+        <div class="sales-stat-card">
+            <div class="sales-stat-icon">
+                <i class="fas fa-file-invoice-dollar"></i>
+            </div>
+            <div class="sales-stat-value"><%= invoiceStats.total_invoices || 0 %></div>
+            <div class="sales-stat-label">Total Invoices</div>
+        </div>
+        
+        <div class="sales-stat-card">
+            <div class="sales-stat-icon">
+                <i class="fas fa-dollar-sign"></i>
+            </div>
+            <div class="sales-stat-value">$<%= parseFloat(invoiceStats.total_revenue || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) %></div>
+            <div class="sales-stat-label">Total Revenue</div>
+        </div>
+        
+        <div class="sales-stat-card">
+            <div class="sales-stat-icon">
+                <i class="fas fa-check-circle"></i>
+            </div>
+            <div class="sales-stat-value"><%= invoiceStats.approved_count || 0 %></div>
+            <div class="sales-stat-label">Approved</div>
+        </div>
+        
+        <div class="sales-stat-card">
+            <div class="sales-stat-icon">
+                <i class="fas fa-clock"></i>
+            </div>
+            <div class="sales-stat-value"><%= invoiceStats.pending_count || 0 %></div>
+            <div class="sales-stat-label">Pending Approval</div>
+        </div>
+        
+        <div class="sales-stat-card">
+            <div class="sales-stat-icon">
+                <i class="fas fa-shipping-fast"></i>
+            </div>
+            <div class="sales-stat-value"><%= invoiceStats.shipped_count || 0 %></div>
+            <div class="sales-stat-label">Shipped</div>
+        </div>
+        
+        <div class="sales-stat-card">
+            <div class="sales-stat-icon">
+                <i class="fas fa-check-double"></i>
+            </div>
+            <div class="sales-stat-value"><%= invoiceStats.delivered_count || 0 %></div>
+            <div class="sales-stat-label">Delivered</div>
+        </div>
+    </div>
+    <% } %>
+    
+    <!-- Recent Invoices and Status List -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 1.5rem;">
+        <!-- Recent Invoices -->
+        <div class="recent-invoices-card">
+            <h3>
+                <i class="fas fa-clock"></i>
+                Recent Invoices
+            </h3>
+            <% if (typeof recentInvoices !== 'undefined' && recentInvoices && recentInvoices.length > 0) { %>
+            <div class="recent-invoices-list">
+                <% recentInvoices.forEach(invoice => { %>
+                <a href="/admin/invoices/<%= invoice.id %>" class="recent-invoice-item">
+                    <div class="recent-invoice-info">
+                        <div class="recent-invoice-number">#<%= invoice.invoice_number || invoice.id %></div>
+                        <div class="recent-invoice-meta">
+                            <span><%= invoice.buyer_name || 'Unknown Buyer' %></span>
+                            <span>•</span>
+                            <span><%= invoice.created_at ? new Date(invoice.created_at).toLocaleDateString() : 'N/A' %></span>
+                        </div>
+                    </div>
+                    <div class="recent-invoice-amount">
+                        $<%= parseFloat(invoice.total || 0).toFixed(2) %>
+                    </div>
+                </a>
+                <% }); %>
+            </div>
+            <% } else { %>
+            <div style="text-align: center; padding: 2rem; color: var(--text-light);">
+                <i class="fas fa-file-invoice" style="font-size: 2rem; opacity: 0.5; margin-bottom: 1rem; display: block;"></i>
+                <p style="margin: 0;">No recent invoices found</p>
+                <p style="margin: 0.5rem 0 0 0; font-size: 0.875rem;">Create your first invoice to see it here</p>
+            </div>
+            <% } %>
+        </div>
+        
+        <!-- Invoice Status List -->
+        <% if (invoiceStats && invoiceStats.statusBreakdown && invoiceStats.statusBreakdown.length > 0) { %>
+        <div class="invoice-status-list-card">
+            <h3>
+                <i class="fas fa-chart-pie"></i>
+                Invoice Status Breakdown
+            </h3>
+            <div class="status-list">
+                <% invoiceStats.statusBreakdown.forEach(status => { %>
+                <div class="status-item status-item-<%= (status.status || '').toLowerCase().replace(/_/g, '-') %>">
+                    <span class="status-item-name"><%= (status.status || 'Unknown').replace(/_/g, ' ') %></span>
+                    <span class="status-item-count"><%= status.count || 0 %></span>
+                </div>
+                <% }); %>
+            </div>
+        </div>
+        <% } else { %>
+        <div class="invoice-status-list-card">
+            <h3>
+                <i class="fas fa-chart-pie"></i>
+                Invoice Status Breakdown
+            </h3>
+            <div style="text-align: center; padding: 2rem; color: var(--text-light);">
+                <i class="fas fa-chart-pie" style="font-size: 2rem; opacity: 0.5; margin-bottom: 1rem; display: block;"></i>
+                <p style="margin: 0;">No invoice data available</p>
+            </div>
+        </div>
+        <% } %>
+    </div>
+    
+    <!-- Sales Charts -->
+    <% if (invoiceStats && (invoiceStats.statusBreakdown || invoiceStats.salesOverTime)) { %>
+    <div class="sales-charts-grid">
+        <!-- Invoice Status Breakdown Chart -->
+        <% if (invoiceStats.statusBreakdown) { %>
+        <div class="chart-card">
+            <div class="chart-header">
+                <h3><i class="fas fa-chart-pie"></i> Invoice Status Breakdown</h3>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="salesStatusChart"></canvas>
+            </div>
+        </div>
+        <% } %>
+        
+        <!-- Sales Over Time Chart -->
+        <% if (invoiceStats.salesOverTime) { %>
+        <div class="chart-card">
+            <div class="chart-header">
+                <h3><i class="fas fa-chart-line"></i> Sales Over Time (Last 30 Days)</h3>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="salesOverTimeChart"></canvas>
+            </div>
+        </div>
+        <% } %>
+        
+        <!-- Revenue by Status Chart -->
+        <% if (invoiceStats.statusBreakdown) { %>
+        <div class="chart-card">
+            <div class="chart-header">
+                <h3><i class="fas fa-chart-bar"></i> Revenue by Status</h3>
+            </div>
+            <div class="chart-wrapper">
+                <canvas id="revenueByStatusChart"></canvas>
+            </div>
+        </div>
+        <% } %>
+    </div>
+    <% } %>
+</div>
+
+<script>
+<% if (invoiceStats) { %>
+// Get current theme and chart colors (same as admin dashboard)
+function getChartTheme() {
+    const isDark = document.body.classList.contains('dark-theme');
+    return {
+        isDark: isDark,
+        textColor: isDark ? '#e4e6eb' : '#6b7280',
+        gridColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+        tooltipBg: isDark ? 'rgba(30, 30, 30, 0.95)' : 'rgba(0, 0, 0, 0.8)',
+        tooltipText: isDark ? '#e4e6eb' : '#ffffff'
+    };
+}
+
+// Initialize Sales Charts for Sales Admin
+document.addEventListener('DOMContentLoaded', function() {
+    const theme = getChartTheme();
+    const invoiceStatsData = <%- JSON.stringify(invoiceStats) %>;
+    
+    // Chart 1: Invoice Status Breakdown (Doughnut Chart)
+    <% if (invoiceStats.statusBreakdown) { %>
+    const statusCtx = document.getElementById('salesStatusChart');
+    if (statusCtx && invoiceStatsData.statusBreakdown) {
+        const statusBreakdown = invoiceStatsData.statusBreakdown;
+        const statusLabels = statusBreakdown.map(item => (item.status || 'Unknown').replace(/_/g, ' '));
+        const statusCounts = statusBreakdown.map(item => parseInt(item.count || 0));
+        
+        // Color mapping for statuses
+        const statusColors = {
+            'Draft': 'rgba(25, 118, 210, 0.8)',
+            'Pending Approval': 'rgba(230, 81, 0, 0.8)',
+            'Approved': 'rgba(46, 125, 50, 0.8)',
+            'Fulfillment Accepted': 'rgba(123, 31, 162, 0.8)',
+            'Shipped': 'rgba(40, 53, 147, 0.8)',
+            'Delivered': 'rgba(27, 94, 32, 0.8)',
+            'Paid': 'rgba(76, 175, 80, 0.8)',
+            'Partially Rejected': 'rgba(198, 40, 40, 0.8)',
+            'Fully Rejected': 'rgba(198, 40, 40, 0.8)',
+            'Cancelled': 'rgba(97, 97, 97, 0.8)',
+            'Cancelled After Ship': 'rgba(97, 97, 97, 0.8)',
+            'Fulfillment Issue': 'rgba(230, 81, 0, 0.8)',
+            'Manifested': 'rgba(25, 118, 210, 0.8)',
+            'Issue After Shipped': 'rgba(211, 47, 47, 0.8)'
+        };
+        
+        const backgroundColors = statusLabels.map(label => {
+            return statusColors[label] || 'rgba(156, 163, 175, 0.8)';
+        });
+        
+        new Chart(statusCtx, {
+            type: 'doughnut',
+            data: {
+                labels: statusLabels,
+                datasets: [{
+                    data: statusCounts,
+                    backgroundColor: backgroundColors,
+                    borderColor: backgroundColors.map(c => c.replace('0.8', '1')),
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            padding: 15,
+                            usePointStyle: true,
+                            color: theme.textColor
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: theme.tooltipBg,
+                        titleColor: theme.tooltipText,
+                        bodyColor: theme.tooltipText,
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.label || '';
+                                const value = context.parsed || 0;
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                return `${label}: ${value} (${percentage}%)`;
+                            }
+                        }
+                    }
+                },
+                animation: {
+                    animateRotate: true,
+                    animateScale: true
+                }
+            }
+        });
+    }
+    <% } %>
+    
+    // Chart 2: Sales Over Time (Line Chart)
+    <% if (invoiceStats.salesOverTime) { %>
+    const salesCtx = document.getElementById('salesOverTimeChart');
+    if (salesCtx && invoiceStatsData.salesOverTime) {
+        const salesData = invoiceStatsData.salesOverTime;
+        const labels = salesData.map(item => {
+            const date = new Date(item.date);
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        });
+        const invoiceCounts = salesData.map(item => parseInt(item.invoice_count || 0));
+        const revenues = salesData.map(item => parseFloat(item.daily_revenue || 0));
+        
+        new Chart(salesCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Invoice Count',
+                        data: invoiceCounts,
+                        borderColor: 'rgba(102, 126, 234, 1)',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        yAxisID: 'y',
+                        tension: 0.4,
+                        fill: true
+                    },
+                    {
+                        label: 'Revenue ($)',
+                        data: revenues,
+                        borderColor: 'rgba(16, 185, 129, 1)',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        yAxisID: 'y1',
+                        tension: 0.4,
+                        fill: true
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            color: theme.textColor
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: theme.tooltipBg,
+                        titleColor: theme.tooltipText,
+                        bodyColor: theme.tooltipText,
+                        callbacks: {
+                            label: function(context) {
+                                if (context.dataset.label === 'Revenue ($)') {
+                                    return `${context.dataset.label}: $${parseFloat(context.parsed.y).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                                }
+                                return `${context.dataset.label}: ${context.parsed.y}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            color: theme.gridColor
+                        },
+                        ticks: {
+                            color: theme.textColor
+                        }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: 'Invoice Count',
+                            color: theme.textColor
+                        },
+                        grid: {
+                            color: theme.gridColor
+                        },
+                        ticks: {
+                            color: theme.textColor
+                        }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: 'Revenue ($)',
+                            color: theme.textColor
+                        },
+                        grid: {
+                            drawOnChartArea: false,
+                        },
+                        ticks: {
+                            color: theme.textColor
+                        }
+                    }
+                },
+                animation: {
+                    duration: 1500,
+                    easing: 'easeOutQuart'
+                }
+            }
+        });
+    }
+    <% } %>
+    
+    // Chart 3: Revenue by Status (Bar Chart)
+    <% if (invoiceStats.statusBreakdown) { %>
+    const revenueCtx = document.getElementById('revenueByStatusChart');
+    if (revenueCtx && invoiceStatsData.statusBreakdown) {
+        const statusBreakdown = invoiceStatsData.statusBreakdown;
+        const statusLabels = statusBreakdown.map(item => (item.status || 'Unknown').replace(/_/g, ' '));
+        const revenueData = statusBreakdown.map(item => parseFloat(item.revenue || 0));
+        
+        // Color mapping for statuses
+        const statusColors = {
+            'Draft': 'rgba(25, 118, 210, 0.8)',
+            'Pending Approval': 'rgba(230, 81, 0, 0.8)',
+            'Approved': 'rgba(46, 125, 50, 0.8)',
+            'Fulfillment Accepted': 'rgba(123, 31, 162, 0.8)',
+            'Shipped': 'rgba(40, 53, 147, 0.8)',
+            'Delivered': 'rgba(27, 94, 32, 0.8)',
+            'Paid': 'rgba(76, 175, 80, 0.8)',
+            'Partially Rejected': 'rgba(198, 40, 40, 0.8)',
+            'Fully Rejected': 'rgba(198, 40, 40, 0.8)',
+            'Cancelled': 'rgba(97, 97, 97, 0.8)',
+            'Cancelled After Ship': 'rgba(97, 97, 97, 0.8)',
+            'Fulfillment Issue': 'rgba(230, 81, 0, 0.8)',
+            'Manifested': 'rgba(25, 118, 210, 0.8)',
+            'Issue After Shipped': 'rgba(211, 47, 47, 0.8)'
+        };
+        
+        const backgroundColors = statusLabels.map(status => statusColors[status] || 'rgba(156, 163, 175, 0.8)');
+        
+        new Chart(revenueCtx, {
+            type: 'bar',
+            data: {
+                labels: statusLabels,
+                datasets: [{
+                    label: 'Revenue ($)',
+                    data: revenueData,
+                    backgroundColor: backgroundColors,
+                    borderColor: backgroundColors.map(color => color.replace('0.8', '1')),
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        backgroundColor: theme.tooltipBg,
+                        titleColor: theme.tooltipText,
+                        bodyColor: theme.tooltipText,
+                        callbacks: {
+                            label: function(context) {
+                                return `Revenue: $${parseFloat(context.parsed.y).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            color: theme.gridColor
+                        },
+                        ticks: {
+                            color: theme.textColor
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Revenue ($)',
+                            color: theme.textColor
+                        },
+                        grid: {
+                            color: theme.gridColor
+                        },
+                        ticks: {
+                            color: theme.textColor,
+                            callback: function(value) {
+                                return '$' + parseFloat(value).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+                            }
+                        }
+                    }
+                },
+                animation: {
+                    duration: 1500,
+                    easing: 'easeOutQuart'
+                }
+            }
+        });
+    }
+    <% } %>
+});
+<% } %>
+</script>
+<% } else { %>
+<!-- Full Dashboard for Administrators -->
 <style>
 .sync-health-card {
     grid-column: 1 / -1;
-    background: #f8f9fa;
+    background: var(--card-bg, #f8f9fa);
     border-radius: 12px;
     padding: 1.5rem;
     margin-bottom: 2rem;
+    transition: background-color 0.3s ease;
 }
 .sync-health-header {
     display: flex;
@@ -31,10 +816,12 @@
     gap: 1rem;
 }
 .alert-item {
-    background: white;
+    background: var(--card-bg, white);
     padding: 1rem;
     border-radius: 8px;
     border-left: 4px solid;
+    color: var(--text-color);
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 .alert-item.warning { border-color: #f59e0b; }
 .alert-item.critical { border-color: #ef4444; }
@@ -45,7 +832,8 @@
     font-weight: 600;
     font-size: 1rem;
     margin-bottom: 0.75rem;
-    color: #374151;
+    color: var(--text-color);
+    transition: color 0.3s ease;
 }
 .sync-history-list {
     display: flex;
@@ -53,14 +841,15 @@
     gap: 0.5rem;
 }
 .sync-history-item {
-    background: white;
+    background: var(--card-bg, white);
     padding: 0.75rem 1rem;
     border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     border-left: 4px solid;
-    transition: transform 0.2s, box-shadow 0.2s;
+    transition: transform 0.2s, box-shadow 0.2s, background-color 0.3s ease;
+    color: var(--text-color);
 }
 .sync-history-item:hover {
     transform: translateX(4px);
@@ -80,15 +869,17 @@
 .sync-history-item-name {
     font-weight: 600;
     font-size: 0.95rem;
-    color: #111827;
+    color: var(--text-color);
     margin-bottom: 0.25rem;
+    transition: color 0.3s ease;
 }
 .sync-history-item-meta {
     font-size: 0.85rem;
-    color: #6b7280;
+    color: var(--text-light);
     display: flex;
     gap: 1rem;
     align-items: center;
+    transition: color 0.3s ease;
 }
 .sync-history-item-status {
     display: inline-flex;
@@ -114,13 +905,14 @@
     margin-top: 1.5rem;
 }
 .sync-status-item {
-    background: white;
+    background: var(--card-bg, white);
     padding: 1rem;
     border-radius: 8px;
     border-left: 4px solid;
     display: flex;
     align-items: center;
     justify-content: space-between;
+    transition: background-color 0.3s ease, color 0.3s ease;
 }
 .sync-status-item.success {
     border-left-color: #10b981;
@@ -144,12 +936,14 @@
 .sync-status-item-name {
     font-weight: 600;
     font-size: 0.95rem;
-    color: #111827;
+    color: var(--text-color);
     margin-bottom: 0.25rem;
+    transition: color 0.3s ease;
 }
 .sync-status-item-details {
     font-size: 0.85rem;
-    color: #6b7280;
+    color: var(--text-light);
+    transition: color 0.3s ease;
 }
 .sync-status-badge {
     display: inline-flex;
@@ -176,17 +970,197 @@
     background: #f3f4f6;
     color: #6b7280;
 }
+
+/* Charts Container */
+.charts-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.chart-card {
+    background: var(--card-bg, linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%));
+    border-radius: 16px;
+    padding: 1.5rem;
+    box-shadow: var(--card-shadow, 0 4px 20px rgba(0, 0, 0, 0.08));
+    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.05));
+    transition: transform 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease;
+    animation: fadeInUp 0.6s ease;
+    color: var(--text-color);
+}
+
+.chart-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+}
+
+.chart-card-wide {
+    grid-column: 1 / -1;
+}
+
+.chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid rgba(0, 0, 0, 0.05);
+}
+
+.chart-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.chart-header h3 i {
+    color: var(--primary-color);
+}
+
+.chart-wrapper {
+    position: relative;
+    height: 300px;
+    width: 100%;
+}
+
+.chart-card-wide .chart-wrapper {
+    height: 350px;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.chart-card:nth-child(1) {
+    animation-delay: 0.1s;
+}
+
+.chart-card:nth-child(2) {
+    animation-delay: 0.2s;
+}
+
+.chart-card:nth-child(3) {
+    animation-delay: 0.3s;
+}
 </style>
 
-<div class="sync-health-card">
-    <div class="sync-health-header">
-        <h3 style="margin: 0;"><i class="fas fa-heartbeat me-2"></i>Sync Health Status</h3>
+<!-- Charts Section -->
+<div class="charts-container">
+    <div class="chart-card">
+        <div class="chart-header">
+            <h3><i class="fas fa-chart-pie"></i> Sync Status Overview</h3>
         <div id="syncStatusBadge" class="sync-status healthy">
             <i class="fas fa-circle-notch fa-spin"></i> Loading...
         </div>
+        </div>
+        <div class="chart-wrapper">
+            <canvas id="syncStatusChart"></canvas>
+        </div>
+    </div>
+
+    <div class="chart-card">
+        <div class="chart-header">
+            <h3><i class="fas fa-chart-bar"></i> Sync Services Status</h3>
+        </div>
+        <div class="chart-wrapper">
+            <canvas id="syncServicesChart"></canvas>
+        </div>
+    </div>
+
+    <div class="chart-card chart-card-wide">
+        <div class="chart-header">
+            <h3><i class="fas fa-chart-line"></i> Sync History (Last 24 Hours)</h3>
+        </div>
+        <div class="chart-wrapper">
+            <canvas id="syncHistoryChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<div class="sync-health-card" id="syncAlertsCard" style="display: none;">
+    <div class="sync-health-header">
+        <h3 style="margin: 0;"><i class="fas fa-exclamation-triangle me-2"></i>Sync Alerts</h3>
     </div>
     <div id="syncAlertsContainer"></div>
 </div>
+
+<% if (invoiceStats) { %>
+<!-- Invoice & Sales Reports Section -->
+<div class="charts-container" style="margin-top: 2rem;">
+    <div class="chart-card">
+        <div class="chart-header">
+            <h3><i class="fas fa-chart-pie"></i> Invoice Status Breakdown</h3>
+        </div>
+        <div class="chart-wrapper">
+            <canvas id="invoiceStatusChart"></canvas>
+        </div>
+    </div>
+
+    <div class="chart-card">
+        <div class="chart-header">
+            <h3><i class="fas fa-chart-line"></i> Sales Over Time (Last 30 Days)</h3>
+        </div>
+        <div class="chart-wrapper">
+            <canvas id="salesOverTimeChart"></canvas>
+        </div>
+    </div>
+
+    <div class="chart-card">
+        <div class="chart-header">
+            <h3><i class="fas fa-chart-bar"></i> Revenue by Status</h3>
+        </div>
+        <div class="chart-wrapper">
+            <canvas id="revenueByStatusChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Invoice Statistics Cards -->
+<div class="invoice-stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-top: 2rem;">
+    <div class="stats-card success">
+        <div class="stats-icon"><i class="fas fa-file-invoice-dollar"></i></div>
+        <div class="stats-value"><%= invoiceStats.total_invoices || 0 %></div>
+        <div class="stats-label">Total Invoices</div>
+    </div>
+    <div class="stats-card info">
+        <div class="stats-icon"><i class="fas fa-dollar-sign"></i></div>
+        <div class="stats-value">$<%= parseFloat(invoiceStats.total_revenue || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) %></div>
+        <div class="stats-label">Total Revenue</div>
+    </div>
+    <div class="stats-card success">
+        <div class="stats-icon"><i class="fas fa-check-circle"></i></div>
+        <div class="stats-value"><%= invoiceStats.approved_count || 0 %></div>
+        <div class="stats-label">Approved</div>
+    </div>
+    <div class="stats-card info">
+        <div class="stats-icon"><i class="fas fa-dollar-sign"></i></div>
+        <div class="stats-value">$<%= parseFloat(invoiceStats.approved_revenue || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) %></div>
+        <div class="stats-label">Approved Revenue</div>
+    </div>
+    <div class="stats-card warning">
+        <div class="stats-icon"><i class="fas fa-clock"></i></div>
+        <div class="stats-value"><%= invoiceStats.pending_count || 0 %></div>
+        <div class="stats-label">Pending</div>
+    </div>
+    <div class="stats-card info">
+        <div class="stats-icon"><i class="fas fa-calculator"></i></div>
+        <div class="stats-value">$<%= parseFloat(invoiceStats.avg_invoice_value || 0).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) %></div>
+        <div class="stats-label">Avg Invoice Value</div>
+    </div>
+</div>
+<% } %>
 
 <div class="dashboard-grid">
     <a href="/admin/crm" class="card-link">
@@ -239,6 +1213,80 @@
 </div>
 
 <script>
+// Chart instances
+let statusChart = null;
+let servicesChart = null;
+let historyChart = null;
+let invoiceStatusChart = null;
+let salesOverTimeChart = null;
+let revenueByStatusChart = null;
+
+// Get current theme and chart colors
+function getChartTheme() {
+    const isDark = document.body.classList.contains('dark-theme');
+    return {
+        isDark: isDark,
+        textColor: isDark ? '#e4e6eb' : '#6b7280',
+        gridColor: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+        tooltipBg: isDark ? 'rgba(30, 30, 30, 0.95)' : 'rgba(0, 0, 0, 0.8)',
+        tooltipText: isDark ? '#e4e6eb' : '#ffffff'
+    };
+}
+
+// Chart.js default configuration - will be updated based on theme
+function updateChartDefaults() {
+    const theme = getChartTheme();
+    Chart.defaults.font.family = "'Inter', sans-serif";
+    Chart.defaults.font.size = 12;
+    Chart.defaults.color = theme.textColor;
+    Chart.defaults.animation.duration = 1500;
+    Chart.defaults.animation.easing = 'easeOutQuart';
+    Chart.defaults.plugins.tooltip.backgroundColor = theme.tooltipBg;
+    Chart.defaults.plugins.tooltip.titleColor = theme.tooltipText;
+    Chart.defaults.plugins.tooltip.bodyColor = theme.tooltipText;
+    Chart.defaults.plugins.legend.labels.color = theme.textColor;
+}
+
+// Initialize chart defaults
+updateChartDefaults();
+
+// Watch for theme changes
+const themeObserver = new MutationObserver(() => {
+    updateChartDefaults();
+    // Re-render all charts with new theme
+    // Store current data before destroying charts
+    let syncData = null;
+    if (statusChart || servicesChart || historyChart) {
+        // Try to preserve data from existing charts or reload
+        syncData = { allSyncStatuses: [], recentSyncs: [] };
+    }
+    
+    // Re-initialize sync charts if they exist
+    if (statusChart || servicesChart || historyChart) {
+        // Destroy existing charts
+        if (statusChart) statusChart.destroy();
+        if (servicesChart) servicesChart.destroy();
+        if (historyChart) historyChart.destroy();
+        // Reload data to re-render with new theme
+        loadSyncHealth();
+    }
+    
+    <% if (invoiceStats) { %>
+    // Re-initialize invoice charts
+    if (invoiceStatusChart || salesOverTimeChart || revenueByStatusChart) {
+        if (invoiceStatusChart) invoiceStatusChart.destroy();
+        if (salesOverTimeChart) salesOverTimeChart.destroy();
+        if (revenueByStatusChart) revenueByStatusChart.destroy();
+        initializeInvoiceCharts();
+    }
+    <% } %>
+});
+
+themeObserver.observe(document.body, {
+    attributes: true,
+    attributeFilter: ['class']
+});
+
 async function loadSyncHealth() {
     try {
         // Add cache-busting query parameter to ensure fresh data
@@ -253,6 +1301,7 @@ async function loadSyncHealth() {
         
         if (data.success) {
             updateSyncStatus(data);
+            updateCharts(data);
         } else {
             showError('Failed to load sync health');
         }
@@ -386,6 +1435,340 @@ function updateSyncStatus(data) {
     }
 
     container.innerHTML = allSyncsHTML + alertsHTML + historyHTML;
+    
+    // Show alerts card if there are alerts
+    const alertsCard = document.getElementById('syncAlertsCard');
+    if (data.alerts && data.alerts.length > 0) {
+        alertsCard.style.display = 'block';
+    } else {
+        alertsCard.style.display = 'none';
+    }
+}
+
+function updateCharts(data) {
+    const theme = getChartTheme();
+    
+    // Chart 1: Sync Status Overview (Pie Chart)
+    const statusCtx = document.getElementById('syncStatusChart');
+    if (!statusCtx) return;
+    
+    const statusCounts = {
+        success: 0,
+        failed: 0,
+        running: 0,
+        unknown: 0
+    };
+    
+    if (data.allSyncStatuses && data.allSyncStatuses.length > 0) {
+        data.allSyncStatuses.forEach(sync => {
+            const status = sync.status || 'unknown';
+            if (statusCounts.hasOwnProperty(status)) {
+                statusCounts[status]++;
+            } else {
+                statusCounts.unknown++;
+            }
+        });
+    }
+    
+    if (statusChart) {
+        statusChart.destroy();
+    }
+    
+    statusChart = new Chart(statusCtx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Success', 'Failed', 'Running', 'Unknown'],
+            datasets: [{
+                data: [statusCounts.success, statusCounts.failed, statusCounts.running, statusCounts.unknown],
+                backgroundColor: [
+                    'rgba(16, 185, 129, 0.8)',
+                    'rgba(239, 68, 68, 0.8)',
+                    'rgba(59, 130, 246, 0.8)',
+                    'rgba(156, 163, 175, 0.8)'
+                ],
+                borderColor: [
+                    'rgba(16, 185, 129, 1)',
+                    'rgba(239, 68, 68, 1)',
+                    'rgba(59, 130, 246, 1)',
+                    'rgba(156, 163, 175, 1)'
+                ],
+                borderWidth: 2,
+                hoverOffset: 8
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom',
+                    labels: {
+                        padding: 15,
+                        usePointStyle: true,
+                        font: {
+                            size: 11,
+                            weight: '500'
+                        },
+                        color: theme.textColor
+                    }
+                },
+                tooltip: {
+                    backgroundColor: theme.tooltipBg,
+                    titleColor: theme.tooltipText,
+                    bodyColor: theme.tooltipText,
+                    padding: 12,
+                    titleFont: { size: 13, weight: '600' },
+                    bodyFont: { size: 12 },
+                    cornerRadius: 8,
+                    displayColors: true
+                }
+            },
+            animation: {
+                animateRotate: true,
+                animateScale: true,
+                duration: 1500,
+                easing: 'easeOutQuart'
+            },
+            cutout: '60%'
+        }
+    });
+    
+    // Chart 2: Sync Services Status (Bar Chart)
+    const servicesCtx = document.getElementById('syncServicesChart');
+    if (!servicesCtx) return;
+    
+    const servicesData = [];
+    const servicesLabels = [];
+    const servicesColors = [];
+    
+    if (data.allSyncStatuses && data.allSyncStatuses.length > 0) {
+        data.allSyncStatuses.slice(0, 10).forEach(sync => {
+            servicesLabels.push(sync.syncName || 'Unknown');
+            const status = sync.status || 'unknown';
+            let color = 'rgba(156, 163, 175, 0.8)';
+            if (status === 'success') color = 'rgba(16, 185, 129, 0.8)';
+            else if (status === 'failed') color = 'rgba(239, 68, 68, 0.8)';
+            else if (status === 'running') color = 'rgba(59, 130, 246, 0.8)';
+            servicesColors.push(color);
+            servicesData.push(1);
+        });
+    }
+    
+    if (servicesChart) {
+        servicesChart.destroy();
+    }
+    
+    servicesChart = new Chart(servicesCtx, {
+        type: 'bar',
+        data: {
+            labels: servicesLabels,
+            datasets: [{
+                label: 'Services',
+                data: servicesData,
+                backgroundColor: servicesColors,
+                borderColor: servicesColors.map(c => c.replace('0.8', '1')),
+                borderWidth: 2,
+                borderRadius: 6,
+                borderSkipped: false
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: theme.tooltipBg,
+                    titleColor: theme.tooltipText,
+                    bodyColor: theme.tooltipText,
+                    padding: 12,
+                    titleFont: { size: 13, weight: '600' },
+                    bodyFont: { size: 12 },
+                    cornerRadius: 8,
+                    displayColors: false
+                }
+            },
+            scales: {
+                x: {
+                    display: false,
+                    grid: {
+                        display: false
+                    }
+                },
+                y: {
+                    grid: {
+                        display: false,
+                        color: theme.gridColor
+                    },
+                    ticks: {
+                        font: {
+                            size: 11
+                        },
+                        color: theme.textColor
+                    }
+                }
+            },
+            animation: {
+                duration: 1500,
+                easing: 'easeOutQuart'
+            }
+        }
+    });
+    
+    // Chart 3: Sync History (Line Chart)
+    const historyCtx = document.getElementById('syncHistoryChart');
+    if (!historyCtx) return;
+    
+    const historyData = [];
+    const historyLabels = [];
+    const successData = [];
+    const failedData = [];
+    
+    // Process recent syncs for last 24 hours
+    if (data.recentSyncs && data.recentSyncs.length > 0) {
+        const now = new Date();
+        const last24Hours = [];
+        
+        // Group by hour
+        for (let i = 23; i >= 0; i--) {
+            const hourTime = new Date(now.getTime() - i * 60 * 60 * 1000);
+            const hourKey = hourTime.toISOString().slice(0, 13); // YYYY-MM-DDTHH
+            last24Hours.push({
+                hour: hourKey,
+                time: hourTime,
+                success: 0,
+                failed: 0
+            });
+        }
+        
+        data.recentSyncs.forEach(sync => {
+            const syncTime = new Date(sync.startTime);
+            const hourKey = syncTime.toISOString().slice(0, 13);
+            const hourData = last24Hours.find(h => h.hour === hourKey);
+            if (hourData) {
+                if (sync.status === 'completed') {
+                    hourData.success++;
+                } else {
+                    hourData.failed++;
+                }
+            }
+        });
+        
+        last24Hours.forEach(hour => {
+            historyLabels.push(hour.time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
+            successData.push(hour.success);
+            failedData.push(hour.failed);
+        });
+    }
+    
+    if (historyChart) {
+        historyChart.destroy();
+    }
+    
+    historyChart = new Chart(historyCtx, {
+        type: 'line',
+        data: {
+            labels: historyLabels.length > 0 ? historyLabels : ['No Data'],
+            datasets: [
+                {
+                    label: 'Successful Syncs',
+                    data: successData.length > 0 ? successData : [0],
+                    borderColor: 'rgba(16, 185, 129, 1)',
+                    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    pointBackgroundColor: 'rgba(16, 185, 129, 1)',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2
+                },
+                {
+                    label: 'Failed Syncs',
+                    data: failedData.length > 0 ? failedData : [0],
+                    borderColor: 'rgba(239, 68, 68, 1)',
+                    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                    borderWidth: 3,
+                    fill: true,
+                    tension: 0.4,
+                    pointRadius: 4,
+                    pointHoverRadius: 6,
+                    pointBackgroundColor: 'rgba(239, 68, 68, 1)',
+                    pointBorderColor: '#fff',
+                    pointBorderWidth: 2
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false
+            },
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: {
+                        padding: 15,
+                        usePointStyle: true,
+                        font: {
+                            size: 11,
+                            weight: '500'
+                        },
+                        color: theme.textColor
+                    }
+                },
+                tooltip: {
+                    backgroundColor: theme.tooltipBg,
+                    titleColor: theme.tooltipText,
+                    bodyColor: theme.tooltipText,
+                    padding: 12,
+                    titleFont: { size: 13, weight: '600' },
+                    bodyFont: { size: 12 },
+                    cornerRadius: 8,
+                    displayColors: true
+                }
+            },
+            scales: {
+                x: {
+                    grid: {
+                        display: false,
+                        color: theme.gridColor
+                    },
+                    ticks: {
+                        font: {
+                            size: 10
+                        },
+                        maxRotation: 45,
+                        minRotation: 45,
+                        color: theme.textColor
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        stepSize: 1,
+                        font: {
+                            size: 11
+                        },
+                        color: theme.textColor
+                    },
+                    grid: {
+                        color: theme.gridColor
+                    }
+                }
+            },
+            animation: {
+                duration: 1500,
+                easing: 'easeOutQuart'
+            }
+        }
+    });
 }
 
 function showError(message) {
@@ -414,7 +1797,310 @@ function getTimeAgo(date) {
     return `${days} day${days !== 1 ? 's' : ''} ago`;
 }
 
-// Load on page load and refresh every 30 seconds for real-time updates
+// Initialize charts on page load
+document.addEventListener('DOMContentLoaded', () => {
 loadSyncHealth();
-setInterval(loadSyncHealth, 30000); // Refresh every 30 seconds for better real-time updates
+    setInterval(loadSyncHealth, 30000); // Refresh every 30 seconds
+    
+    <% if (invoiceStats) { %>
+    // Initialize invoice charts
+    initializeInvoiceCharts();
+    <% } %>
+});
+
+<% if (invoiceStats) { %>
+// Initialize Invoice Charts
+function initializeInvoiceCharts() {
+    const invoiceStatsData = <%- JSON.stringify(invoiceStats) %>;
+    const theme = getChartTheme();
+    
+    // Chart 1: Invoice Status Breakdown (Doughnut Chart)
+    const statusCtx = document.getElementById('invoiceStatusChart');
+    if (statusCtx && invoiceStatsData) {
+        const statusData = {
+            labels: ['Approved', 'Draft', 'Pending', 'Rejected (Partial/Full)', 'Fulfilled'],
+            datasets: [{
+                data: [
+                    parseInt(invoiceStatsData.approved_count || 0),
+                    parseInt(invoiceStatsData.draft_count || 0),
+                    parseInt(invoiceStatsData.pending_count || 0),
+                    parseInt(invoiceStatsData.rejected_count || 0),
+                    parseInt(invoiceStatsData.fulfilled_count || 0)
+                ],
+                backgroundColor: [
+                    'rgba(16, 185, 129, 0.8)',
+                    'rgba(156, 163, 175, 0.8)',
+                    'rgba(251, 191, 36, 0.8)',
+                    'rgba(239, 68, 68, 0.8)',
+                    'rgba(59, 130, 246, 0.8)'
+                ],
+                borderColor: [
+                    'rgba(16, 185, 129, 1)',
+                    'rgba(156, 163, 175, 1)',
+                    'rgba(251, 191, 36, 1)',
+                    'rgba(239, 68, 68, 1)',
+                    'rgba(59, 130, 246, 1)'
+                ],
+                borderWidth: 2
+            }]
+        };
+        
+        if (invoiceStatusChart) {
+            invoiceStatusChart.destroy();
+        }
+        
+        invoiceStatusChart = new Chart(statusCtx, {
+            type: 'doughnut',
+            data: statusData,
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: {
+                            padding: 15,
+                            usePointStyle: true,
+                            color: theme.textColor
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: theme.tooltipBg,
+                        titleColor: theme.tooltipText,
+                        bodyColor: theme.tooltipText,
+                        callbacks: {
+                            label: function(context) {
+                                const label = context.label || '';
+                                const value = context.parsed || 0;
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+                                return `${label}: ${value} (${percentage}%)`;
+                            }
+                        }
+                    }
+                },
+                animation: {
+                    animateRotate: true,
+                    animateScale: true
+                }
+            }
+        });
+    }
+    
+    // Chart 2: Sales Over Time (Line Chart)
+    const salesCtx = document.getElementById('salesOverTimeChart');
+    if (salesCtx && invoiceStatsData.salesOverTime) {
+        const salesData = invoiceStatsData.salesOverTime;
+        const labels = salesData.map(item => {
+            const date = new Date(item.date);
+            return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        });
+        const invoiceCounts = salesData.map(item => parseInt(item.invoice_count || 0));
+        const revenues = salesData.map(item => parseFloat(item.daily_revenue || 0));
+        
+        if (salesOverTimeChart) {
+            salesOverTimeChart.destroy();
+        }
+        
+        salesOverTimeChart = new Chart(salesCtx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'Invoice Count',
+                        data: invoiceCounts,
+                        borderColor: 'rgba(102, 126, 234, 1)',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        yAxisID: 'y',
+                        tension: 0.4,
+                        fill: true
+                    },
+                    {
+                        label: 'Revenue ($)',
+                        data: revenues,
+                        borderColor: 'rgba(16, 185, 129, 1)',
+                        backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                        yAxisID: 'y1',
+                        tension: 0.4,
+                        fill: true
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            color: theme.textColor
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: theme.tooltipBg,
+                        titleColor: theme.tooltipText,
+                        bodyColor: theme.tooltipText,
+                        callbacks: {
+                            label: function(context) {
+                                if (context.dataset.label === 'Revenue ($)') {
+                                    return `${context.dataset.label}: $${parseFloat(context.parsed.y).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                                }
+                                return `${context.dataset.label}: ${context.parsed.y}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            color: theme.gridColor
+                        },
+                        ticks: {
+                            color: theme.textColor
+                        }
+                    },
+                    y: {
+                        type: 'linear',
+                        display: true,
+                        position: 'left',
+                        title: {
+                            display: true,
+                            text: 'Invoice Count',
+                            color: theme.textColor
+                        },
+                        grid: {
+                            color: theme.gridColor
+                        },
+                        ticks: {
+                            color: theme.textColor
+                        }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        title: {
+                            display: true,
+                            text: 'Revenue ($)',
+                            color: theme.textColor
+                        },
+                        grid: {
+                            drawOnChartArea: false,
+                        },
+                        ticks: {
+                            color: theme.textColor
+                        }
+                    }
+                },
+                animation: {
+                    duration: 1500,
+                    easing: 'easeOutQuart'
+                }
+            }
+        });
+    }
+    
+    // Chart 3: Revenue by Status (Bar Chart)
+    const revenueCtx = document.getElementById('revenueByStatusChart');
+    if (revenueCtx && invoiceStatsData.statusBreakdown) {
+        const statusBreakdown = invoiceStatsData.statusBreakdown;
+        const statusLabels = statusBreakdown.map(item => item.status);
+        const revenueData = statusBreakdown.map(item => parseFloat(item.revenue || 0));
+        
+        // Color mapping for statuses
+        const statusColors = {
+            'Approved': 'rgba(16, 185, 129, 0.8)',
+            'Draft': 'rgba(156, 163, 175, 0.8)',
+            'Pending Approval': 'rgba(251, 191, 36, 0.8)',
+            'Partially Rejected': 'rgba(239, 68, 68, 0.8)',
+            'Fully Rejected': 'rgba(239, 68, 68, 0.8)',
+            'Fulfillment Accepted': 'rgba(59, 130, 246, 0.8)',
+            'Shipped': 'rgba(40, 53, 147, 0.8)',
+            'Delivered': 'rgba(27, 94, 32, 0.8)',
+            'Paid': 'rgba(76, 175, 80, 0.8)',
+            'Cancelled': 'rgba(97, 97, 97, 0.8)',
+            'Cancelled After Ship': 'rgba(97, 97, 97, 0.8)',
+            'Fulfillment Issue': 'rgba(230, 81, 0, 0.8)',
+            'Manifested': 'rgba(25, 118, 210, 0.8)',
+            'Issue After Shipped': 'rgba(211, 47, 47, 0.8)'
+        };
+        
+        const backgroundColors = statusLabels.map(status => statusColors[status] || 'rgba(156, 163, 175, 0.8)');
+        
+        if (revenueByStatusChart) {
+            revenueByStatusChart.destroy();
+        }
+        
+        revenueByStatusChart = new Chart(revenueCtx, {
+            type: 'bar',
+            data: {
+                labels: statusLabels,
+                datasets: [{
+                    label: 'Revenue ($)',
+                    data: revenueData,
+                    backgroundColor: backgroundColors,
+                    borderColor: backgroundColors.map(color => color.replace('0.8', '1')),
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        backgroundColor: theme.tooltipBg,
+                        titleColor: theme.tooltipText,
+                        bodyColor: theme.tooltipText,
+                        callbacks: {
+                            label: function(context) {
+                                return `Revenue: $${parseFloat(context.parsed.y).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        grid: {
+                            color: theme.gridColor
+                        },
+                        ticks: {
+                            color: theme.textColor
+                        }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'Revenue ($)',
+                            color: theme.textColor
+                        },
+                        grid: {
+                            color: theme.gridColor
+                        },
+                        ticks: {
+                            color: theme.textColor,
+                            callback: function(value) {
+                                return '$' + parseFloat(value).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0});
+                            }
+                        }
+                    }
+                },
+                animation: {
+                    duration: 1500,
+                    easing: 'easeOutQuart'
+                }
+            }
+        });
+    }
+}
+<% } %>
 </script>
+<% } %>

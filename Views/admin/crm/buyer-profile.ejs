@@ -184,9 +184,19 @@
     <div class="info-card">
         <div class="card-header">
             <h3>Sales Reps</h3>
-            <button class="btn btn-secondary btn-sm" id="assignRepBtn" data-buyer-id="<%= buyer.details.entry_id %>">
-                Assign Rep
-            </button>
+            <% 
+            // Only show Assign Rep button for Sales Admin or Administrator
+            const hasRole = (roleName) => {
+                return userRoles && userRoles.includes(roleName);
+            };
+            const isAdmin = isSuperuser || hasRole('Administrator');
+            const isSalesAdmin = hasRole('Sales Admin');
+            %>
+            <% if (isAdmin || isSalesAdmin) { %>
+                <button class="btn btn-secondary btn-sm" id="assignRepBtn" data-buyer-id="<%= buyer.details.entry_id %>">
+                    Assign Rep
+                </button>
+            <% } %>
         </div>
         <div class="card-body">
             <table class="info-table">
@@ -201,13 +211,17 @@
                 <tbody id="sales-reps-table-body">
                 <% if (buyer.salesReps.length > 0) { %>
                     <% buyer.salesReps.forEach(rep => { %>
-                        <tr data-assignment-id="<%= rep.assignment_id %>">
+                        <tr data-assignment-id="<%= rep.assignment_id %>" 
+                            data-assignment-type="<%= rep.assignment_type || 'buyer' %>"
+                            <% if (rep.location_id) { %>data-location-id="<%= rep.location_id %>"<% } %>>
                             <td><%= rep.name %></td>
                             <td><%= rep.email || 'N/A' %></td>
                             <td><%= rep.phone || 'N/A' %></td>
                             <td class="table-actions">
                                 <button class="action-btn" data-action="unassign-rep"
                                         data-assignment-id="<%= rep.assignment_id %>"
+                                        data-assignment-type="<%= rep.assignment_type || 'buyer' %>"
+                                        <% if (rep.location_id) { %>data-location-id="<%= rep.location_id %>"<% } %>
                                         data-rep-name="<%= rep.name %>">
                                     Delete
                                 </button>

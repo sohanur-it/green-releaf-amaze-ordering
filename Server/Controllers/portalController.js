@@ -890,18 +890,38 @@ class PortalController {
             const { uuid, invoiceId } = req.params;
             const portalAccess = req.session.portalAccess || {};
             
-            // Get invoice details with sales rep info
+            // Get invoice details with sales rep info from location assignment
+            // First verify the invoice belongs to this buyer (regardless of location)
+            const invoiceCheck = await query(`
+                SELECT 
+                    i.id,
+                    i.fk_buyer_id,
+                    i.fk_location_id
+                FROM "ORDERS-invoices" i
+                WHERE i.id = $1 AND i.fk_buyer_id = $2
+            `, [invoiceId, portalAccess.buyerId]);
+            
+            if (invoiceCheck.rows.length === 0) {
+                return res.status(404).render('external/error', {
+                    title: 'Order Not Found',
+                    layout: 'layouts/portal',
+                    error: 'Order Not Found',
+                    message: 'The requested order could not be found.'
+                });
+            }
+            
+            // Get full invoice details with sales rep info
             const invoiceDetails = await query(`
                 SELECT 
                     i.invoice_number,
                     i.total,
                     i.credit_applied,
-                    u.first_name,
-                    u.last_name
+                    COALESCE(u.first_name || ' ' || u.last_name, '') as sales_rep_full_name
                 FROM "ORDERS-invoices" i
-                LEFT JOIN users u ON i.assigned_sales_rep_id = u.id
-                WHERE i.id = $1 AND i.fk_location_id = $2
-            `, [invoiceId, portalAccess.locationId]);
+                LEFT JOIN "ORDERS-buyer_locations" l ON i.fk_location_id = l.entry_id
+                LEFT JOIN users u ON l.assigned_sales_rep_id = u.id
+                WHERE i.id = $1
+            `, [invoiceId]);
             
             if (invoiceDetails.rows.length === 0) {
                 return res.status(404).render('external/error', {
@@ -912,9 +932,15 @@ class PortalController {
                 });
             }
             
+            // Update session location to match invoice location (in case it changed)
+            const invoiceLocationId = invoiceCheck.rows[0].fk_location_id;
+            if (invoiceLocationId && invoiceLocationId !== portalAccess.locationId) {
+                req.session.portalAccess.locationId = invoiceLocationId;
+            }
+            
             const invoice = invoiceDetails.rows[0];
-            const salesRepName = invoice.first_name && invoice.last_name 
-                ? `${invoice.first_name} ${invoice.last_name}` 
+            const salesRepName = invoice.sales_rep_full_name && invoice.sales_rep_full_name.trim() 
+                ? invoice.sales_rep_full_name.trim() 
                 : null;
             
             res.render('external/order-confirmation', {
@@ -1040,16 +1066,132 @@ class PortalController {
      * Process checkout and submit cart for approval
      * Transitions external cart from Draft to Pending_Approval
      */
+    static async updateInvoiceLocation(req, res) {
+        try {
+            const portalAccess = req.session.portalAccess;
+            const { location_id } = req.body;
+            
+            if (!portalAccess) {
+                return res.status(401).json({ success: false, error: 'Not authenticated' });
+            }
+            
+            if (!location_id) {
+                return res.status(400).json({ success: false, error: 'location_id is required' });
+            }
+            
+            // Get cart data
+            const cartData = await PortalController.getCartData(portalAccess);
+            
+            if (!cartData.invoice_id) {
+                return res.status(400).json({ success: false, error: 'No active cart found' });
+            }
+            
+            // Verify location belongs to the buyer
+            const locationCheck = await query(`
+                SELECT entry_id, state_license 
+                FROM "ORDERS-buyer_locations"
+                WHERE entry_id = $1 AND orders_buyer_id = $2
+            `, [location_id, portalAccess.buyerId]);
+            
+            if (locationCheck.rows.length === 0) {
+                return res.status(404).json({ success: false, error: 'Location not found or not accessible' });
+            }
+            
+            const locationLicense = locationCheck.rows[0].state_license || 'UNKNOWN';
+            
+            // Update invoice location
+            await query(`
+                UPDATE "ORDERS-invoices"
+                SET fk_location_id = $1, 
+                    location_license_number = $2,
+                    updated_at = NOW()
+                WHERE id = $3 AND fk_buyer_id = $4 AND status = 'Draft'
+            `, [location_id, locationLicense, cartData.invoice_id, portalAccess.buyerId]);
+            
+            // Update session location for consistency
+            req.session.portalAccess.locationId = location_id;
+            
+            res.json({ 
+                success: true, 
+                message: 'Invoice location updated successfully' 
+            });
+        } catch (error) {
+            console.error('Error updating invoice location:', error);
+            res.status(500).json({ 
+                success: false,
+                error: 'Failed to update invoice location',
+                details: error.message 
+            });
+        }
+    }
+    
     static async processCheckout(req, res) {
         try {
             const portalAccess = req.session.portalAccess;
-            const { notes } = req.body;
+            const { notes, location_id } = req.body;
             
             if (!portalAccess) {
                 return res.status(401).json({ error: 'Not authenticated' });
             }
             
-            // Get cart data
+            // First, find the draft invoice for this buyer (regardless of current location)
+            // Then update location if provided, then get cart data
+            const draftInvoice = await query(`
+                SELECT id, fk_location_id 
+                FROM "ORDERS-invoices"
+                WHERE fk_buyer_id = $1
+                AND status = 'Draft'
+                AND source = 'External'
+                AND (cart_expires_at IS NULL OR cart_expires_at > NOW())
+                ORDER BY created_at DESC
+                LIMIT 1
+            `, [portalAccess.buyerId]);
+            
+            if (draftInvoice.rows.length === 0) {
+                return res.status(400).json({ error: 'No active cart found' });
+            }
+            
+            const invoiceId = draftInvoice.rows[0].id;
+            const currentLocationId = draftInvoice.rows[0].fk_location_id;
+            
+            // Update location if provided and different from current
+            if (location_id && location_id !== currentLocationId) {
+                // Verify location belongs to the buyer
+                const locationCheck = await query(`
+                    SELECT entry_id, state_license 
+                    FROM "ORDERS-buyer_locations"
+                    WHERE entry_id = $1 AND orders_buyer_id = $2
+                `, [location_id, portalAccess.buyerId]);
+                
+                if (locationCheck.rows.length > 0) {
+                    const locationLicense = locationCheck.rows[0].state_license || 'UNKNOWN';
+                    
+                    // Update invoice location
+                    await query(`
+                        UPDATE "ORDERS-invoices"
+                        SET fk_location_id = $1, 
+                            location_license_number = $2,
+                            updated_at = NOW()
+                        WHERE id = $3 AND fk_buyer_id = $4 AND status = 'Draft'
+                    `, [location_id, locationLicense, invoiceId, portalAccess.buyerId]);
+                    
+                    // Update session location for consistency
+                    req.session.portalAccess.locationId = location_id;
+                    
+                    console.log('Invoice location updated during checkout:', {
+                        invoiceId,
+                        oldLocation: currentLocationId,
+                        newLocation: location_id
+                    });
+                } else {
+                    console.warn('Location not found or not accessible:', location_id);
+                }
+            } else if (location_id) {
+                // Location is same as current, just update session
+                req.session.portalAccess.locationId = location_id;
+            }
+            
+            // Get cart data (now with correct location in session and invoice)
             const cartData = await PortalController.getCartData(portalAccess);
             
             if (!cartData.invoice_id) {

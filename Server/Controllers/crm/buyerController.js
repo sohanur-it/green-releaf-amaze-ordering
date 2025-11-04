@@ -2,6 +2,7 @@
 
 const Buyer = require('../../Models/crm/buyerModel');
 const SalesRep = require('../../Models/crm/salesRepModel');
+const UserModel = require('../../Models/userModel');
 
 //gets all buyers and sends em to the crm index page
 const getAllBuyers = async (req, res) => {
@@ -22,10 +23,20 @@ const getAllBuyers = async (req, res) => {
 const getBuyerById = async (req, res, next) => {
     try {
         const buyerId = req.params.id;
+        // Get users with Sales Rep role for assignment dropdown
+        const salesRepUsers = await UserModel.getUsersByRole('Sales Representative');
+        
+        // Format users for the dropdown (match the expected format)
+        const allSalesReps = salesRepUsers.map(user => ({
+            entry_id: user.id, // Use user ID as the identifier
+            name: `${user.firstname} ${user.lastname}`.trim(),
+            email: user.email || '',
+            phone: '' // Phone not stored in users table
+        }));
+        
         // we gotta get the buyer data AND all the reps for the dropdown at the same time
-        const [buyerData, allSalesReps] = await Promise.all([
-            Buyer.findById(buyerId),
-            SalesRep.getAll()
+        const [buyerData] = await Promise.all([
+            Buyer.findById(buyerId)
         ]);
 
 
@@ -41,7 +52,7 @@ const getBuyerById = async (req, res, next) => {
         res.render('admin/crm/buyer-profile', {
             title: `CRM - ${buyerData.details.name}`,
             buyer: buyerData, // the view will get an object with details, contacts, notes, etc.
-            allSalesReps: allSalesReps, // pass the list of all reps to the view
+            allSalesReps: allSalesReps, // pass the list of all users with Sales Rep role to the view
             layout: 'layouts/main'
         });
 

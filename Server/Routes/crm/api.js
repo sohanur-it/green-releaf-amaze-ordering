@@ -82,6 +82,14 @@ router.post('/buyers/:buyerId/sales-reps', salesRepController.assignRep);
 // @desc    Unassign a sales rep from a buyer
 router.delete('/sales-reps/assignments/:assignmentId', salesRepController.unassignRep);
 
+// @route   POST /api/crm/locations/assign-sales-rep
+// @desc    Assign a sales rep to a location
+router.post('/locations/assign-sales-rep', salesRepController.assignRepToLocation);
+
+// @route   DELETE /api/crm/locations/:locationId/unassign-sales-rep
+// @desc    Unassign a sales rep from a location
+router.delete('/locations/:locationId/unassign-sales-rep', salesRepController.unassignRepFromLocation);
+
 // --- SALES REP CRUD ROUTES (for the management page) ---
 router.post('/sales-reps', salesRepController.createRep);
 router.patch('/sales-reps/:repId', salesRepController.updateRep);

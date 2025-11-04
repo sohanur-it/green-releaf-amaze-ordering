@@ -132,10 +132,14 @@ const requireRole = (...roles) => {
 
             // Get user roles
             const userRoles = await UserModel.getUserRoles(req.session.userId);
-            const userRoleNames = userRoles.map(r => r.name);
+            const userRoleNames = userRoles.map(r => (r.name || r.role_name || '').trim()).filter(Boolean);
 
-            // Check if user has any of the required roles
-            const hasRole = roles.some(role => userRoleNames.includes(role));
+            // Check if user has any of the required roles (case-insensitive)
+            const hasRole = roles.some(role => 
+                userRoleNames.some(userRole => 
+                    userRole.toLowerCase() === role.toLowerCase()
+                )
+            );
             
             if (!hasRole) {
                 return res.status(403).json({ 

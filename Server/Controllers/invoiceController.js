@@ -336,30 +336,39 @@ class InvoiceController {
         try {
             const { status, source } = req.query;
             const userId = req.session.userId || req.user?.id;
+            const UserModel = require('../Models/userModel');
             
-            // Check if user is admin or sales rep
-            const userRole = await query(`
-                SELECT r.name as role_name
-                FROM users u
-                INNER JOIN user_roles ur ON u.id = ur.user_id
-                INNER JOIN roles r ON ur.role_id = r.id
-                WHERE u.id = $1
-                LIMIT 1
-            `, [userId]);
+            // Check if user is admin or sales admin
+            const isSuperuser = await UserModel.isSuperuser(userId);
+            const userRoles = await UserModel.getUserRoles(userId);
+            const userRoleNames = userRoles.map(r => r.name || r.role_name).filter(Boolean);
             
-            const isAdmin = userRole.rows.length > 0 && 
-                (userRole.rows[0].role_name === 'admin' || userRole.rows[0].role_name === 'sales_admin');
+            // Check role names (case-insensitive)
+            const isAdmin = isSuperuser || userRoleNames.some(r => r.toLowerCase() === 'administrator');
+            const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
             
+            // Use LEFT JOIN to show invoices even if buyer/location is missing
             let queryStr = `
                 SELECT 
-                    i.*,
-                    b.name as buyer_name,
-                    l.name as location_name,
+                    i.id,
+                    i.invoice_number,
+                    i.status,
+                    i.source,
+                    i.total,
+                    i.subtotal,
+                    i.discount_amount,
+                    i.credit_applied,
+                    i.created_at,
+                    i.updated_at,
+                    i.fk_buyer_id,
+                    i.fk_location_id,
+                    COALESCE(b.name, 'Unknown Buyer') as buyer_name,
+                    COALESCE(l.name, 'Unknown Location') as location_name,
                     u.username as created_by_username,
-                    sr.first_name || ' ' || sr.last_name as sales_rep_name
+                    COALESCE(sr.first_name || ' ' || sr.last_name, 'Unassigned') as sales_rep_name
                 FROM "ORDERS-invoices" i
-                INNER JOIN "ORDERS-buyers" b ON i.fk_buyer_id = b.entry_id
-                INNER JOIN "ORDERS-buyer_locations" l ON i.fk_location_id = l.entry_id
+                LEFT JOIN "ORDERS-buyers" b ON i.fk_buyer_id = b.entry_id
+                LEFT JOIN "ORDERS-buyer_locations" l ON i.fk_location_id = l.entry_id
                 LEFT JOIN users u ON i.created_by_user_id = u.id
                 LEFT JOIN users sr ON i.assigned_sales_rep_id = sr.id
                 WHERE 1=1
@@ -368,9 +377,36 @@ class InvoiceController {
             const params = [];
             let paramIndex = 1;
             
-            // Filter by sales rep assignment if not admin
-            if (!isAdmin) {
-                queryStr += ` AND i.assigned_sales_rep_id = $${paramIndex}`;
+            // Check if user is sales rep
+            const isSalesRep = !isAdmin && !isSalesAdmin && userRoleNames.some(r => r.toLowerCase() === 'sales representative');
+            
+            // Sales Admin can see all invoices (no filtering by assigned_sales_rep_id)
+            // Only filter by sales rep if they are a regular Sales Rep (not Sales Admin)
+            if (isSalesRep) {
+                // Check if assigned_sales_rep_id column exists on buyer_locations table
+                let hasLocationSalesRepColumn = false;
+                try {
+                    const columnCheck = await query(`
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'ORDERS-buyer_locations' 
+                        AND column_name = 'assigned_sales_rep_id'
+                    `);
+                    hasLocationSalesRepColumn = columnCheck.rows.length > 0;
+                } catch (err) {
+                    console.warn('Could not check for assigned_sales_rep_id column:', err);
+                }
+                
+                if (hasLocationSalesRepColumn) {
+                    // Filter by invoices assigned to this sales rep OR invoices from locations assigned to this sales rep
+                    queryStr += ` AND (
+                        i.assigned_sales_rep_id = $${paramIndex} 
+                        OR l.assigned_sales_rep_id = $${paramIndex}
+                    )`;
+                } else {
+                    // Fallback: filter only by invoice's assigned_sales_rep_id
+                    queryStr += ` AND i.assigned_sales_rep_id = $${paramIndex}`;
+                }
                 params.push(userId);
                 paramIndex++;
             }
@@ -387,17 +423,19 @@ class InvoiceController {
                 paramIndex++;
             }
             
-            queryStr += ` ORDER BY i.created_at DESC LIMIT 100`;
+            queryStr += ` ORDER BY i.created_at DESC LIMIT 500`;
             
             const invoices = await query(queryStr, params);
             
             res.render('admin/invoices/index', {
                 title: 'Invoices',
                 layout: 'layouts/main',
-                invoices: invoices.rows,
+                invoices: invoices.rows || [],
                 filters: { status, source },
                 user: req.session.user,
-                isAdmin: isAdmin
+                isAdmin: isAdmin,
+                isSalesAdmin: isSalesAdmin,
+                isSalesRep: isSalesRep
             });
         } catch (error) {
             console.error('Error loading invoice list:', error);
@@ -658,12 +696,25 @@ class InvoiceController {
     async showInvoiceDetails(req, res) {
         try {
             const { id } = req.params;
+            const userId = req.session.userId || req.user?.id;
+            const UserModel = require('../Models/userModel');
             
+            // Check user roles
+            const isSuperuser = await UserModel.isSuperuser(userId);
+            const userRoles = await UserModel.getUserRoles(userId);
+            const userRoleNames = userRoles.map(r => r.name || r.role_name).filter(Boolean);
+            
+            const isAdmin = isSuperuser || userRoleNames.some(r => r.toLowerCase() === 'administrator');
+            const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
+            const isSalesRep = !isAdmin && !isSalesAdmin && userRoleNames.some(r => r.toLowerCase() === 'sales representative');
+            
+            // Get invoice with location info
             const invoice = await query(`
                 SELECT 
                     i.*,
                     b.name as buyer_name,
                     l.name as location_name,
+                    l.assigned_sales_rep_id as location_assigned_sales_rep_id,
                     u.username as created_by_username
                 FROM "ORDERS-invoices" i
                 INNER JOIN "ORDERS-buyers" b ON i.fk_buyer_id = b.entry_id
@@ -674,6 +725,18 @@ class InvoiceController {
             
             if (invoice.rows.length === 0) {
                 return res.status(404).send('Invoice not found');
+            }
+            
+            const invoiceData = invoice.rows[0];
+            
+            // If user is a Sales Rep, check if they have access to this invoice
+            if (isSalesRep) {
+                const hasAccess = invoiceData.assigned_sales_rep_id === userId || 
+                                 invoiceData.location_assigned_sales_rep_id === userId;
+                
+                if (!hasAccess) {
+                    return res.status(403).send('You do not have permission to view this invoice');
+                }
             }
             
             // Get line items
@@ -701,10 +764,13 @@ class InvoiceController {
             res.render('admin/invoices/details', {
                 title: 'Invoice Details',
                 layout: 'layouts/main',
-                invoice: invoice.rows[0],
+                invoice: invoiceData,
                 lineItems: lineItems.rows,
                 history: history.rows,
-                user: req.session.user
+                user: req.session.user,
+                isAdmin: isAdmin,
+                isSalesAdmin: isSalesAdmin,
+                isSalesRep: isSalesRep
             });
         } catch (error) {
             console.error('Error loading invoice details:', error);

@@ -6,14 +6,48 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!modal) return;
         modal.classList.add('active');
         modal.setAttribute('aria-hidden', 'false');
+        modal.style.display = 'flex';
     };
 
     // === HELPER: Close any modal ===
-    const closeModal = (modal) => {
+    const closeModal = (modal, force = false) => {
         if (!modal) return;
+        // Check if this modal should not close on outside click
+        // Only allow closing if explicitly requested (not from outside click)
+        if (modal.dataset.noCloseOnOutsideClick === 'true' && force !== 'force') {
+            // Don't close if this is a protected modal unless explicitly forced
+            return;
+        }
         modal.classList.remove('active');
         modal.setAttribute('aria-hidden', 'true');
+        modal.style.display = 'none';
     };
+
+    // === GLOBAL: Handle modal overlay click (close on backdrop) ===
+    window.handleModalOverlayClick = function(event) {
+        if (event.target.classList.contains('modal-overlay')) {
+            const modal = event.target;
+            // Check if this modal should not close on outside click
+            if (modal.dataset.noCloseOnOutsideClick === 'true') {
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation();
+                return; // Don't close this modal
+            }
+            closeModal(modal);
+        }
+    };
+
+    // === Close modal on close button click ===
+    document.querySelectorAll('[data-close-modal]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const modal = btn.closest('.modal-overlay');
+            if (modal) {
+                // Force close when clicking close button (even for protected modals)
+                closeModal(modal, 'force');
+            }
+        });
+    });
 
     // ========================================================
     // ========== CONTACT CRUD FUNCTIONALITY ==================
@@ -561,6 +595,34 @@ document.addEventListener('DOMContentLoaded', () => {
     // === MODAL & FORM ELEMENTS (Sales Reps) ===
     const salesRepFormError = document.getElementById('salesRepFormError');
 
+    // === PREVENT OUTSIDE CLICK CLOSING FOR SALES REP MODAL ===
+    // Sales rep modal should only close on Cancel button click, not on outside click
+    if (salesRepModal) {
+        // Set attribute to prevent closing on outside click (handled by modal.js and handleModalOverlayClick)
+        salesRepModal.setAttribute('data-no-close-on-outside-click', 'true');
+        
+        // Multiple layers of protection: prevent any click events on the overlay from closing
+        // Use capture phase to catch event before other handlers
+        salesRepModal.addEventListener('click', (e) => {
+            if (e.target === salesRepModal) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false; // Prevent default behavior
+            }
+        }, true); // Capture phase - runs before bubbling phase
+        
+        // Also prevent in bubbling phase as backup
+        salesRepModal.addEventListener('click', (e) => {
+            if (e.target === salesRepModal) {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false;
+            }
+        }, false); // Bubbling phase
+    }
+
     // === RENDER FUNCTION (Sales Reps) ===
     const renderSalesRepRow = (rep) => {
         // this rep object is the result from the API after assigning
@@ -580,11 +642,162 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // === EVENT: Click "Assign Rep" button ===
     if (assignRepBtn) {
-        assignRepBtn.addEventListener('click', () => {
-            salesRepForm.reset();
-            salesRepForm.setAttribute('data-action', `/api/crm/buyers/${assignRepBtn.dataset.buyerId}/sales-reps`);
+        assignRepBtn.addEventListener('click', async () => {
             salesRepFormError.style.display = 'none';
+            salesRepFormError.textContent = '';
+            
+            const buyerId = assignRepBtn.dataset.buyerId;
+            
+            // Set form action first
+            salesRepForm.setAttribute('data-action', `/api/crm/locations/assign-sales-rep`);
+            
+            // Open modal first so the select element is accessible
             openModal(salesRepModal);
+            
+            // Wait a bit for modal to be fully rendered
+            await new Promise(resolve => setTimeout(resolve, 150));
+            
+            // Load locations using EXACT same pattern as portal-access page
+            // Get select element from WITHIN the sales rep modal (not the hidden input from location modal)
+            const locationSelect = salesRepModal.querySelector('select#locationId');
+            if (!locationSelect) {
+                console.error('Location select element not found in sales rep modal!');
+                if (salesRepFormError) {
+                    salesRepFormError.textContent = 'Error: Location dropdown not found';
+                    salesRepFormError.style.display = 'block';
+                }
+                return;
+            }
+            
+            // Reset sales rep select
+            const salesRepIdSelect = salesRepModal.querySelector('select#salesRepId');
+            if (salesRepIdSelect) {
+                salesRepIdSelect.value = '';
+            }
+            
+            // EXACT same code as portal-access loadLocations function
+            locationSelect.innerHTML = '<option value="">Loading locations...</option>';
+            locationSelect.disabled = true;
+            
+            if (!buyerId) {
+                locationSelect.innerHTML = '<option value="">Select a location...</option>';
+                locationSelect.disabled = true;
+                return;
+            }
+            
+            try {
+                console.log(`Fetching locations for buyer ${buyerId}...`);
+                const response = await fetch(`/admin/api/portal-access/buyers/${buyerId}/locations`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                console.log('Locations API response:', data);
+                
+                // Get fresh reference to select element from WITHIN the sales rep modal
+                const salesRepModal = document.getElementById('salesRepModal');
+                if (!salesRepModal) {
+                    console.error('Sales rep modal not found!');
+                    return;
+                }
+                
+                // Find the select element within the modal (not the hidden input from location modal)
+                const freshLocationSelect = salesRepModal.querySelector('select#locationId');
+                if (!freshLocationSelect) {
+                    console.error('Location select element not found in sales rep modal!');
+                    return;
+                }
+                
+                // Verify it's actually a select element
+                if (freshLocationSelect.tagName !== 'SELECT') {
+                    console.error('locationId element is not a SELECT element:', freshLocationSelect.tagName);
+                    return;
+                }
+                
+                // Use innerHTML approach exactly like portal-access.ejs
+                freshLocationSelect.innerHTML = '<option value="">Select a location...</option>';
+                
+                if (data.success && data.locations && Array.isArray(data.locations) && data.locations.length > 0) {
+                    console.log(`Loading ${data.locations.length} locations into dropdown`);
+                    
+                    // Build options HTML string
+                    let optionsHTML = '<option value="">Select a location...</option>';
+                    data.locations.forEach(location => {
+                        if (location && location.id) {
+                            let displayText = location.name || 'Unnamed Location';
+                            if (location.state_license) {
+                                displayText += ` | ${location.state_license}`;
+                            }
+                            optionsHTML += `<option value="${location.id}">${displayText}</option>`;
+                        }
+                    });
+                    
+                    // Set all options at once using innerHTML
+                    freshLocationSelect.innerHTML = optionsHTML;
+                    
+                    // Enable the select
+                    freshLocationSelect.disabled = false;
+                    freshLocationSelect.removeAttribute('disabled');
+                    
+                    // Verify options were added (use querySelectorAll as fallback)
+                    let optionsCount = 0;
+                    try {
+                        if (freshLocationSelect.options && freshLocationSelect.options.length) {
+                            optionsCount = freshLocationSelect.options.length;
+                        } else {
+                            const optionElements = freshLocationSelect.querySelectorAll('option');
+                            optionsCount = optionElements ? optionElements.length : 0;
+                        }
+                        console.log('Locations loaded successfully. Total options:', optionsCount);
+                        
+                        if (optionsCount > 0 && freshLocationSelect.options) {
+                            try {
+                                const optionsArray = Array.from(freshLocationSelect.options);
+                                console.log('Options array:', optionsArray.map(opt => ({value: opt.value, text: opt.textContent})));
+                            } catch (e) {
+                                console.warn('Could not log options array:', e);
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Error checking options:', e);
+                        // Just count the options we added
+                        optionsCount = data.locations.length + 1; // +1 for the default option
+                    }
+                    
+                    // Ensure the first option (placeholder) is selected
+                    if (optionsCount > 0) {
+                        try {
+                            freshLocationSelect.selectedIndex = 0;
+                        } catch (e) {
+                            console.warn('Could not set selectedIndex:', e);
+                        }
+                        // Force a repaint
+                        freshLocationSelect.style.display = 'none';
+                        freshLocationSelect.offsetHeight; // Trigger reflow
+                        freshLocationSelect.style.display = '';
+                    }
+                } else {
+                    console.warn('No locations found for buyer. Data:', data);
+                    freshLocationSelect.innerHTML = '<option value="">No locations found for this buyer</option>';
+                    freshLocationSelect.disabled = true;
+                }
+            } catch (error) {
+                console.error('Error loading locations:', error);
+                const errorModal = document.getElementById('salesRepModal');
+                if (errorModal) {
+                    const errorLocationSelect = errorModal.querySelector('select#locationId');
+                    if (errorLocationSelect) {
+                        errorLocationSelect.innerHTML = '<option value="">Error loading locations</option>';
+                        errorLocationSelect.disabled = true;
+                    }
+                }
+                if (salesRepFormError) {
+                    salesRepFormError.textContent = `Failed to load locations: ${error.message || 'Unknown error'}`;
+                    salesRepFormError.style.display = 'block';
+                }
+            }
         });
     }
 
@@ -595,6 +808,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!target) return;
 
             const assignmentId = target.dataset.assignmentId;
+            const assignmentType = target.dataset.assignmentType || 'buyer';
+            const locationId = target.dataset.locationId;
             const repName = target.dataset.repName;
 
             const confirmationModal = document.querySelector('#confirmationModal');
@@ -603,10 +818,18 @@ document.addEventListener('DOMContentLoaded', () => {
             const modalForm = confirmationModal.querySelector('#modalConfirmForm');
 
             modalTitle.textContent = 'Unassign Sales Rep?';
-            modalText.textContent = `Are you sure you want to unassign ${repName} from this buyer?`;
-            modalForm.action = `/api/crm/sales-reps/assignments/${assignmentId}`;
+            modalText.textContent = `Are you sure you want to unassign ${repName} from this ${assignmentType === 'location' ? 'location' : 'buyer'}?`;
+            
+            // For location assignments, we need to clear the assigned_sales_rep_id from the location
+            // For buyer assignments, we delete from the assignments table
+            if (assignmentType === 'location' && locationId) {
+                modalForm.action = `/api/crm/locations/${locationId}/unassign-sales-rep`;
+            } else {
+                modalForm.action = `/api/crm/sales-reps/assignments/${assignmentId}`;
+            }
             modalForm.setAttribute('data-method', 'DELETE');
             modalForm.setAttribute('data-target-row', `[data-assignment-id="${assignmentId}"]`);
+            modalForm.setAttribute('data-assignment-type', assignmentType);
             openModal(confirmationModal);
         });
     }
@@ -619,6 +842,19 @@ document.addEventListener('DOMContentLoaded', () => {
             const formData = new FormData(salesRepForm);
             const assignmentData = Object.fromEntries(formData.entries());
 
+            // Validate location and sales rep are selected
+            if (!assignmentData.locationId) {
+                salesRepFormError.textContent = 'Please select a location';
+                salesRepFormError.style.display = 'block';
+                return;
+            }
+
+            if (!assignmentData.salesRepId) {
+                salesRepFormError.textContent = 'Please select a sales representative';
+                salesRepFormError.style.display = 'block';
+                return;
+            }
+
             try {
                 const response = await fetch(action, {
                     method: 'POST',
@@ -628,19 +864,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 if (!response.ok) {
                     const errorData = await response.json();
-                    throw new Error(errorData.message || 'Failed to assign rep.');
+                    throw new Error(errorData.message || 'Failed to assign rep to location.');
                 }
 
-                const newAssignment = await response.json();
+                const result = await response.json();
 
-                const emptyMessage = document.getElementById('empty-reps-message');
-                if (emptyMessage) emptyMessage.remove();
-
-                const newRow = salesRepsTableBody.insertRow();
-                newRow.dataset.assignmentId = newAssignment.assignment_id;
-                newRow.innerHTML = renderSalesRepRow(newAssignment);
-
-                closeModal(salesRepModal);
+                // Show success message and reload page to see updated assignments
+                alert('Sales representative assigned to location successfully!');
+                closeModal(salesRepModal, 'force');
+                window.location.reload();
             } catch (error) {
                 salesRepFormError.textContent = `Error: ${error.message}`;
                 salesRepFormError.style.display = 'block';

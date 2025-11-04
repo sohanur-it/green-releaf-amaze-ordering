@@ -84,7 +84,18 @@ class UserModel {
      * @returns {Promise<Object|null>} User or null
      */
     static async findByEmail(email) {
-        const sql = 'SELECT * FROM users WHERE email = $1';
+        const sql = `
+            SELECT id, username, first_name as firstname, last_name as lastname, 
+                   email, password_hash, 
+                   CASE 
+                       WHEN is_active = true THEN 'active'
+                       WHEN is_active = false THEN 'pending'
+                       ELSE 'inactive'
+                   END as status,
+                   is_admin as is_superuser, 
+                   created_at, last_login, updated_at
+            FROM users WHERE email = $1
+        `;
         const result = await query(sql, [email]);
         return result.rows[0] || null;
     }
@@ -491,6 +502,42 @@ class UserModel {
         
         try {
             const result = await pool.query(query, [userId]);
+            return result.rows;
+        } catch (error) {
+            console.error('Database query error:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Get all users with a specific role
+     * @param {string} roleName - Role name (e.g., 'Sales Representative', 'Sales Admin')
+     * @returns {Promise<Array>} Array of users with that role
+     */
+    static async getUsersByRole(roleName) {
+        const sql = `
+            SELECT DISTINCT
+                u.id,
+                u.username,
+                u.first_name as firstname,
+                u.last_name as lastname,
+                u.email,
+                u.is_active,
+                CASE 
+                    WHEN u.is_active = true THEN 'active'
+                    WHEN u.is_active = false THEN 'pending'
+                    ELSE 'inactive'
+                END as status
+            FROM users u
+            INNER JOIN user_roles ur ON u.id = ur.user_id
+            INNER JOIN roles r ON ur.role_id = r.id
+            WHERE LOWER(r.name) = LOWER($1)
+            AND u.is_active = true
+            ORDER BY u.first_name, u.last_name
+        `;
+        
+        try {
+            const result = await query(sql, [roleName]);
             return result.rows;
         } catch (error) {
             console.error('Database query error:', error);

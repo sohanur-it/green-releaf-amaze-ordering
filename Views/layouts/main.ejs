@@ -14,12 +14,63 @@
     <link rel="stylesheet" href="/public/css/admin-style.css">
     <link rel="stylesheet" href="/public/css/notifications.css">
     <script src="https://unpkg.com/gridjs/dist/gridjs.umd.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0/dist/chartjs-plugin-datalabels.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <script>
-        try {
-            if (localStorage.getItem('sidebarState') === 'collapsed') {
-                document.documentElement.classList.add('sidebar-is-collapsed');
+        (function() {
+            try {
+                // Apply sidebar state
+                if (localStorage.getItem('sidebarState') === 'collapsed') {
+                    document.documentElement.classList.add('sidebar-is-collapsed');
+                }
+                
+                // Apply theme immediately on page load (before body renders to avoid flash)
+                function applyTheme(theme) {
+                    const html = document.documentElement;
+                    const body = document.body;
+                    
+                    if (theme === 'dark') {
+                        html.classList.add('dark-theme');
+                        if (body) {
+                            body.classList.add('dark-theme');
+                        }
+                    } else {
+                        html.classList.remove('dark-theme');
+                        if (body) {
+                            body.classList.remove('dark-theme');
+                        }
+                    }
+                }
+                
+                // Update theme icon (called after DOM is loaded)
+                function updateThemeIcon(theme) {
+                    const themeIcon = document.getElementById('themeIcon');
+                    if (themeIcon) {
+                        if (theme === 'dark') {
+                            themeIcon.className = 'fas fa-moon';
+                        } else {
+                            themeIcon.className = 'fas fa-lightbulb';
+                        }
+                    }
+                }
+                
+                // Get saved theme and apply it immediately to html element
+                const savedTheme = localStorage.getItem('theme') || 'light';
+                const html = document.documentElement;
+                if (savedTheme === 'dark') {
+                    html.classList.add('dark-theme');
+                } else {
+                    html.classList.remove('dark-theme');
+                }
+                
+                // Make functions available globally
+                window.applyTheme = applyTheme;
+                window.updateThemeIcon = updateThemeIcon;
+            } catch (e) {
+                console.error('Error initializing theme:', e);
             }
-        } catch (e) {}
+        })();
     </script>
 </head>
 <body>
@@ -30,54 +81,156 @@
             <span class="sidebar-title-full">Green Releaf</span>
         </div>
         <nav class="sidebar-nav">
-            <a href="/admin" class="nav-link <%= title === 'Dashboard' ? 'active' : '' %>" title="Dashboard">
-                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
-                <span class="nav-link-text">Dashboard</span>
-            </a>
-            <a href="/admin/crm" class="nav-link <%= title.startsWith('CRM') ? 'active' : '' %>" title="CRM">
-                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                <span class="nav-link-text">CRM</span>
-            </a>
-            <a href="/admin/products" class="nav-link <%= title.includes('Product') ? 'active' : '' %>" title="Products">
-                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-                <span class="nav-link-text">Products</span>
-            </a>
-            <a href="/admin/invoices" class="nav-link <%= title === 'Invoices' || title === 'Invoice Details' ? 'active' : '' %>" title="Invoices">
-                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="20" rx="2" ry="2"></rect><line x1="7" y1="12" x2="17" y2="12"></line><line x1="12" y1="7" x2="12" y2="17"></line></svg>
-                <span class="nav-link-text">Invoices</span>
-            </a>
-            <a href="/admin/users" class="nav-link <%= title === 'User Management' ? 'active' : '' %>" title="User Management">
-                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
-                <span class="nav-link-text">User Management</span>
-            </a>
-            <a href="/admin/audit-logs" class="nav-link <%= title === 'Audit Logs' ? 'active' : '' %>" title="Audit Logs">
-                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14,2 14,8 20,8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10,9 9,9 8,9"></polyline></svg>
-                <span class="nav-link-text">Audit Logs</span>
-            </a>
-            <a href="/admin/portal-access" class="nav-link <%= title === 'Portal Access Management' ? 'active' : '' %>" title="Portal Access">
-                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                <span class="nav-link-text">Portal Access</span>
-            </a>
-            <a href="/api-docs" class="nav-link" title="API Documentation" target="_blank">
-                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14,2 14,8 20,8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10,9 9,9 8,9"></polyline></svg>
-                <span class="nav-link-text">API Docs</span>
-            </a>
+            <% 
+            // Helper function to check if user has a role
+            const hasRole = (roleName) => {
+                return userRoles && userRoles.includes(roleName);
+            };
+            
+            // Helper function to check if user is administrator or superuser
+            const isAdmin = isSuperuser || hasRole('Administrator');
+            const isSalesAdmin = hasRole('Sales Admin');
+            const isSalesRep = hasRole('Sales Representative');
+            
+            // Determine primary role for display
+            let primaryRole = 'User';
+            if (isSuperuser) {
+                primaryRole = 'Superuser';
+            } else if (hasRole('Administrator')) {
+                primaryRole = 'Administrator';
+            } else if (isSalesAdmin) {
+                primaryRole = 'Sales Admin';
+            } else if (isSalesRep) {
+                primaryRole = 'Sales Representative';
+            } else if (hasRole('Inventory Manager')) {
+                primaryRole = 'Inventory Manager';
+            } else if (hasRole('Fulfillment Team')) {
+                primaryRole = 'Fulfillment Team';
+            } else if (hasRole('Accounting/Finance')) {
+                primaryRole = 'Accounting/Finance';
+            } else if (userRoles && userRoles.length > 0) {
+                primaryRole = userRoles[0];
+            }
+            %>
+            
+            <!-- Sales Admin: Only CRM and Invoices -->
+            <% if (isSalesAdmin && !isAdmin) { %>
+                <!-- CRM -->
+                <a href="/admin/crm" class="nav-link <%= title.startsWith('CRM') ? 'active' : '' %>" title="CRM">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    <span class="nav-link-text">CRM</span>
+                </a>
+                <!-- Invoices -->
+                <a href="/admin/invoices" class="nav-link <%= title === 'Invoices' || title === 'Invoice Details' ? 'active' : '' %>" title="Invoices">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14,2 14,8 20,8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10,9 9,9 8,9"></polyline></svg>
+                    <span class="nav-link-text">Invoices</span>
+                </a>
+            <% } else if (isSalesRep && !isAdmin && !isSalesAdmin) { %>
+                <!-- Sales Rep: Only Invoices -->
+                <a href="/admin/invoices" class="nav-link <%= title === 'Invoices' || title === 'Invoice Details' ? 'active' : '' %>" title="Invoices">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14,2 14,8 20,8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10,9 9,9 8,9"></polyline></svg>
+                    <span class="nav-link-text">Invoices</span>
+                </a>
+            <% } else { %>
+                <!-- Administrator/Superuser: Show all options -->
+                <a href="/admin" class="nav-link <%= title === 'Dashboard' ? 'active' : '' %>" title="Dashboard">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+                    <span class="nav-link-text">Dashboard</span>
+                </a>
+                
+                <a href="/admin/crm" class="nav-link <%= title.startsWith('CRM') ? 'active' : '' %>" title="CRM">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    <span class="nav-link-text">CRM</span>
+                </a>
+                
+                <% if (hasRole('Inventory Manager') || isAdmin) { %>
+                <a href="/admin/products" class="nav-link <%= title.includes('Product') ? 'active' : '' %>" title="Products">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
+                    <span class="nav-link-text">Products</span>
+                </a>
+                <% } %>
+                
+                <a href="/admin/invoices" class="nav-link <%= title === 'Invoices' || title === 'Invoice Details' ? 'active' : '' %>" title="Invoices">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14,2 14,8 20,8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10,9 9,9 8,9"></polyline></svg>
+                    <span class="nav-link-text">Invoices</span>
+                </a>
+                
+                <% if (isAdmin) { %>
+                <a href="/admin/users" class="nav-link <%= title === 'User Management' ? 'active' : '' %>" title="User Management">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    <span class="nav-link-text">User Management</span>
+                </a>
+                
+                <a href="/admin/audit-logs" class="nav-link <%= title === 'Audit Logs' ? 'active' : '' %>" title="Audit Logs">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14,2 14,8 20,8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10,9 9,9 8,9"></polyline></svg>
+                    <span class="nav-link-text">Audit Logs</span>
+                </a>
+                
+                <a href="/admin/portal-access" class="nav-link <%= title === 'Portal Access Management' ? 'active' : '' %>" title="Portal Access">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                    <span class="nav-link-text">Portal Access</span>
+                </a>
+                <% } %>
+                
+                <% if (isAdmin && !isSalesRep) { %>
+                <a href="/api-docs" class="nav-link" title="API Documentation" target="_blank">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14,2 14,8 20,8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10,9 9,9 8,9"></polyline></svg>
+                    <span class="nav-link-text">API Docs</span>
+                </a>
+                <% } %>
+            <% } %>
         </nav>
-        <div class="sidebar-footer">
-            <a href="/auth/logout" class="nav-link logout-link" title="Logout">
-                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16,17 21,12 16,7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
-                <span class="nav-link-text">Logout</span>
-            </a>
-            <button class="nav-link sidebar-toggle" id="sidebar-toggle" title="Toggle Sidebar">
-                <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg>
-            </button>
-        </div>
     </aside>
 
     <main class="main-content">
-        <header class="main-header">
-            <h1><%= title %></h1>
-        </header>
+        <!-- Top Bar -->
+        <div class="top-bar">
+            <div class="top-bar-left">
+                <h1 class="page-title"><%= title %></h1>
+            </div>
+            <div class="top-bar-right">
+                <!-- Theme Toggle -->
+                <button class="top-bar-icon theme-toggle-btn" id="themeToggleBtn" title="Toggle Theme">
+                    <i class="fas fa-lightbulb" id="themeIcon"></i>
+                </button>
+                <!-- Settings -->
+                <a href="/admin/settings" class="top-bar-icon settings-btn <%= title === 'Settings' ? 'active' : '' %>" title="Settings">
+                    <i class="fas fa-cog"></i>
+                </a>
+                <!-- Profile -->
+                <div class="top-bar-icon profile-dropdown" id="profileDropdown">
+                    <button class="profile-btn" title="Profile">
+                        <i class="fas fa-user-circle"></i>
+                    </button>
+                    <div class="profile-menu" id="profileMenu">
+                        <div class="profile-menu-header">
+                            <div class="profile-menu-avatar">
+                                <i class="fas fa-user"></i>
+                            </div>
+                            <div class="profile-menu-info">
+                                <div class="profile-menu-name"><%= username || 'User' %></div>
+                                <div class="profile-menu-email"><%= userEmail || 'No email' %></div>
+                                <div class="profile-menu-role">
+                                    <span class="role-badge-small role-<%= primaryRole.toLowerCase().replace(/\s+/g, '-') %>">
+                                        <%= primaryRole %>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="profile-menu-divider"></div>
+                        <a href="/admin/settings" class="profile-menu-item">
+                            <i class="fas fa-cog"></i>
+                            <span>Settings</span>
+                        </a>
+                        <a href="/auth/logout" class="profile-menu-item">
+                            <i class="fas fa-sign-out-alt"></i>
+                            <span>Logout</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
         <div class="content-body">
             <%- body %>
         </div>
@@ -89,5 +242,62 @@
 <script src="/public/js/shared/notifications.js"></script>
 <script src="/public/js/shared/modal.js"></script>
 <script src="/public/js/shared/main.js"></script>
+<script>
+// Theme toggle functionality - must run after DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    // Ensure theme is applied to body element (it may not exist when head script runs)
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    if (window.applyTheme) {
+        window.applyTheme(savedTheme);
+    }
+    
+    // Update theme icon on page load
+    if (window.updateThemeIcon) {
+        window.updateThemeIcon(savedTheme);
+    }
+    
+    // Theme toggle button
+    const themeToggleBtn = document.getElementById('themeToggleBtn');
+    if (themeToggleBtn) {
+        themeToggleBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
+            const currentTheme = document.body.classList.contains('dark-theme') ? 'dark' : 'light';
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            
+            // Save to localStorage
+            localStorage.setItem('theme', newTheme);
+            
+            // Apply theme immediately
+            if (window.applyTheme) {
+                window.applyTheme(newTheme);
+            }
+            
+            // Update icon
+            if (window.updateThemeIcon) {
+                window.updateThemeIcon(newTheme);
+            }
+        });
+    }
+    
+    // Profile dropdown toggle
+    const profileDropdown = document.getElementById('profileDropdown');
+    const profileMenu = document.getElementById('profileMenu');
+    if (profileDropdown && profileMenu) {
+        profileDropdown.addEventListener('click', function(e) {
+            e.stopPropagation();
+            profileMenu.classList.toggle('active');
+        });
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!profileDropdown.contains(e.target)) {
+                profileMenu.classList.remove('active');
+            }
+        });
+    }
+});
+</script>
 </body>
 </html>

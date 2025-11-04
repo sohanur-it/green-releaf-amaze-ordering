@@ -1,26 +1,118 @@
 <!-- Invoice List Page -->
 <style>
-.invoice-table {
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
+.page-header h1 {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-color);
+    transition: color 0.3s ease;
+}
+
+.filter-controls {
+    background: var(--bg-color, #f8f9fa);
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+    transition: background-color 0.3s ease;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.filter-group label {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text-color);
+    margin: 0;
+    white-space: nowrap;
+    transition: color 0.3s ease;
+}
+
+.filter-group select {
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    min-width: 150px;
+    background-color: var(--input-bg, #fff);
+    color: var(--text-color);
+    transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+}
+
+.btn-clear-filters {
+    padding: 0.5rem 1rem;
+    background: #6c757d;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: background-color 0.2s;
+}
+
+.btn-clear-filters:hover {
+    background: #545b62;
+}
+
+.dashboard-card {
+    background: var(--card-bg, white);
+    border-radius: 15px;
+    padding: 1.5rem;
+    box-shadow: var(--card-shadow, 0 5px 15px rgba(0,0,0,0.08));
+    margin-bottom: 1.5rem;
+    transition: background-color 0.3s ease, box-shadow 0.3s ease;
+    color: var(--text-color);
+}
+
+.modern-table {
     width: 100%;
     border-collapse: collapse;
-    background: white;
+    margin: 0;
 }
 
-.invoice-table th {
-    background: #f8f9fa;
-    padding: 12px;
-    text-align: left;
+.modern-table thead {
+    background: var(--bg-color, #f8f9fa);
+    transition: background-color 0.3s ease;
+}
+
+.modern-table th {
     font-weight: 600;
-    border-bottom: 2px solid #dee2e6;
+    color: var(--text-color);
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    padding: 1rem;
+    border: none;
+    text-align: left;
+    transition: color 0.3s ease;
 }
 
-.invoice-table td {
-    padding: 12px;
-    border-bottom: 1px solid #dee2e6;
+.modern-table td {
+    padding: 0.75rem 1rem;
+    vertical-align: middle;
+    border-bottom: 1px solid var(--border-color, #f3f4f6);
+    color: var(--text-color);
+    transition: color 0.3s ease, border-color 0.3s ease;
 }
 
-.invoice-table tr:hover {
-    background: #f8f9fa;
+.modern-table tbody tr:hover {
+    background: var(--bg-color, #f9fafb);
+    cursor: pointer;
+    transition: background-color 0.3s ease;
 }
 
 .status-badge {
@@ -29,13 +121,14 @@
     border-radius: 12px;
     font-size: 0.85rem;
     font-weight: 600;
+    text-transform: capitalize;
 }
 
 .status-draft { background: #e3f2fd; color: #1976d2; }
-.status-pending_approval { background: #fff3e0; color: #e65100; }
+.status-pending_approval, .status-pendingapproval { background: #fff3e0; color: #e65100; }
 .status-approved { background: #e8f5e9; color: #2e7d32; }
-.status-fulfillment_accepted { background: #f3e5f5; color: #7b1fa2; }
-.status-fulfillment_issue { background: #ffebee; color: #c62828; }
+.status-fulfillment_accepted, .status-fulfillmentaccepted { background: #f3e5f5; color: #7b1fa2; }
+.status-fulfillment_issue, .status-fulfillmentissue { background: #ffebee; color: #c62828; }
 .status-manifested { background: #e0f2f1; color: #00695c; }
 .status-shipped { background: #e8eaf6; color: #283593; }
 .status-delivered { background: #c8e6c9; color: #1b5e20; }
@@ -44,7 +137,7 @@
 
 .source-badge {
     display: inline-block;
-    padding: 2px 8px;
+    padding: 4px 10px;
     border-radius: 8px;
     font-size: 0.8rem;
     font-weight: 500;
@@ -53,40 +146,56 @@
 .source-internal { background: #e3f2fd; color: #1565c0; }
 .source-external { background: #f3e5f5; color: #7b1fa2; }
 
-.filter-controls {
-    background: #f8f9fa;
-    padding: 1rem;
-    border-radius: 8px;
-    margin-bottom: 1.5rem;
-    display: flex;
-    gap: 1rem;
-    flex-wrap: wrap;
-}
-
-.page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-}
-
 .empty-state {
     text-align: center;
     padding: 3rem;
-    color: #6c757d;
+    color: var(--text-light);
+    transition: color 0.3s ease;
+}
+
+.empty-state i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+.empty-state h3 {
+    margin: 0.5rem 0;
+    color: var(--text-color);
+}
+
+.table-action-link {
+    color: var(--primary-color);
+    text-decoration: none;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background-color 0.2s, color 0.2s;
+}
+
+.table-action-link:hover {
+    background-color: rgba(74, 144, 226, 0.1);
+    color: var(--primary-hover);
 }
 </style>
 
 <div class="page-header">
-    <h1>Invoices</h1>
-    <a href="/admin/invoices/create" class="btn btn-primary" style="background: #007bff; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; display: inline-block;">Create Invoice</a>
+    <div>
+        <h1>Invoices</h1>
+        <p style="margin: 0; color: var(--text-light);">Manage and track all invoices</p>
+    </div>
+    <div>
+        <a href="/admin/invoices/create" class="btn btn-primary">
+            <i class="fas fa-plus"></i> Create Invoice
+        </a>
+    </div>
 </div>
 
 <!-- Filters -->
 <div class="filter-controls">
     <div class="filter-group">
         <label>Status:</label>
-        <select onchange="applyFilters()" id="status-filter">
+        <select onchange="applyFilters()" id="status-filter" class="form-select-modern">
             <option value="">All Statuses</option>
             <option value="Draft" <%= filters.status === 'Draft' ? 'selected' : '' %>>Draft</option>
             <option value="Pending_Approval" <%= filters.status === 'Pending_Approval' ? 'selected' : '' %>>Pending Approval</option>
@@ -100,66 +209,91 @@
     </div>
     <div class="filter-group">
         <label>Source:</label>
-        <select onchange="applyFilters()" id="source-filter">
+        <select onchange="applyFilters()" id="source-filter" class="form-select-modern">
             <option value="">All Sources</option>
             <option value="Internal" <%= filters.source === 'Internal' ? 'selected' : '' %>>Internal</option>
             <option value="External" <%= filters.source === 'External' ? 'selected' : '' %>>External</option>
         </select>
     </div>
-    <button onclick="clearFilters()" class="btn-clear-filters">Clear Filters</button>
+    <button onclick="clearFilters()" class="btn-clear-filters">
+        <i class="fas fa-times"></i> Clear Filters
+    </button>
 </div>
 
 <!-- Invoice Table -->
-<% if (invoices && invoices.length > 0) { %>
-    <table class="invoice-table">
-        <thead>
-            <tr>
-                <th>Invoice #</th>
-                <th>Buyer</th>
-                <th>Location</th>
-                <th>Status</th>
-                <th>Source</th>
-                <th>Total</th>
-                <th>Created</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            <% invoices.forEach(invoice => { %>
-                <tr>
-                    <td><strong><%= invoice.invoice_number %></strong></td>
-                    <td><%= invoice.buyer_name %></td>
-                    <td><%= invoice.location_name %></td>
-                    <td>
-                        <span class="status-badge status-<%= invoice.status.toLowerCase() %>">
-                            <%= invoice.status %>
-                        </span>
-                    </td>
-                    <td>
-                        <span class="source-badge source-<%= invoice.source.toLowerCase() %>">
-                            <%= invoice.source %>
-                        </span>
-                    </td>
-                    <td><strong>$<%= parseFloat(invoice.total || 0).toFixed(2) %></strong></td>
-                    <td><%= new Date(invoice.created_at).toLocaleDateString() %></td>
-                    <td>
-                        <div style="display: flex; gap: 8px; align-items: center;">
-                            <a href="/admin/invoices/<%= invoice.id %>" class="btn btn-sm btn-primary">View</a>
-                            <% if (invoice.status === 'Pending_Approval') { %>
-                                <button data-invoice-id="<%= invoice.id %>" class="btn-approve btn btn-sm btn-success" style="background: #28a745; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer;">Approve</button>
-                                <button data-invoice-id="<%= invoice.id %>" class="btn-reject btn btn-sm btn-danger" style="background: #dc3545; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer;">Reject</button>
-                            <% } %>
-                        </div>
-                    </td>
-                </tr>
-            <% }); %>
-        </tbody>
-    </table>
-<% } else { %>
-    <div class="empty-state">
-        <p>No invoices found</p>
-    </div>
-<% } %>
+<div class="dashboard-card">
+    <% if (invoices && invoices.length > 0) { %>
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h5 class="mb-0">All Invoices (<span id="invoiceCount"><%= invoices.length %></span>)</h5>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover modern-table">
+                <thead>
+                    <tr>
+                        <th>Invoice #</th>
+                        <th>Buyer</th>
+                        <th>Location</th>
+                        <th>Status</th>
+                        <th>Source</th>
+                        <th>Total</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% invoices.forEach(invoice => { %>
+                        <tr>
+                            <td><strong style="color: var(--text-color);">#<%= invoice.invoice_number || invoice.id %></strong></td>
+                            <td style="color: var(--text-color);"><%= invoice.buyer_name || 'Unknown Buyer' %></td>
+                            <td style="color: var(--text-color);"><%= invoice.location_name || 'Unknown Location' %></td>
+                            <td>
+                                <% const statusClass = (invoice.status || '').toLowerCase().replace(/_/g, ''); %>
+                                <span class="status-badge status-<%= statusClass %>">
+                                    <%= (invoice.status || 'Unknown').replace(/_/g, ' ') %>
+                                </span>
+                            </td>
+                            <td>
+                                <span class="source-badge source-<%= (invoice.source || 'internal').toLowerCase() %>">
+                                    <%= invoice.source || 'Internal' %>
+                                </span>
+                            </td>
+                            <td><strong style="color: var(--text-color);">$<%= parseFloat(invoice.total || 0).toFixed(2) %></strong></td>
+                            <td style="color: var(--text-color);"><%= invoice.created_at ? new Date(invoice.created_at).toLocaleDateString() : 'N/A' %></td>
+                            <td>
+                                <div style="display: flex; gap: 8px; align-items: center;">
+                                    <a href="/admin/invoices/<%= invoice.id %>" class="table-action-link">
+                                        <i class="fas fa-eye"></i> View
+                                    </a>
+                                    <% if (invoice.status === 'Pending_Approval' && (isAdmin || isSalesAdmin)) { %>
+                                        <button data-invoice-id="<%= invoice.id %>" class="btn-approve btn btn-sm btn-success" style="background: #28a745; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 0.875rem;">
+                                            <i class="fas fa-check"></i> Approve
+                                        </button>
+                                        <button data-invoice-id="<%= invoice.id %>" class="btn-reject btn btn-sm btn-danger" style="background: #dc3545; color: white; border: none; padding: 4px 12px; border-radius: 4px; cursor: pointer; font-size: 0.875rem;">
+                                            <i class="fas fa-times"></i> Reject
+                                        </button>
+                                    <% } %>
+                                </div>
+                            </td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    <% } else { %>
+        <div class="empty-state">
+            <i class="fas fa-file-invoice"></i>
+            <h3>No Invoices Found</h3>
+            <% if (typeof isSalesRep !== 'undefined' && isSalesRep) { %>
+                <p>You don't have any invoices assigned to your locations yet. Invoices will appear here once they are created for locations you are assigned to.</p>
+            <% } else { %>
+                <p>There are no invoices matching your filters. Try adjusting your filters or create a new invoice.</p>
+                <a href="/admin/invoices/create" class="btn btn-primary" style="margin-top: 1rem;">
+                    <i class="fas fa-plus"></i> Create Invoice
+                </a>
+            <% } %>
+        </div>
+    <% } %>
+</div>
 
 <script>
 function applyFilters() {

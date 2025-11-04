@@ -18,21 +18,29 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // when you click the overlay (the dark background), close the modal
-    if (overlay) {
-        overlay.addEventListener('click', e => {
-            // only close if they clicked the overlay itself, not the dialog box
-            if (e.target === overlay) {
-                closeModal(overlay);
+    // Use event delegation to handle all modal overlays
+    // Use capture phase to catch events early
+    document.addEventListener('click', e => {
+        const overlay = e.target.closest('.modal-overlay');
+        if (overlay && e.target === overlay) {
+            // Check if this modal should not close on outside click
+            if (overlay.dataset.noCloseOnOutsideClick === 'true') {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false; // Don't close this modal
             }
-        });
-    }
+            closeModal(overlay);
+        }
+    }, true); // Use capture phase
 
     // when you click a close button (like the 'x' or 'cancel')...
     closeModalButtons.forEach(button => {
         button.addEventListener('click', () => {
             const modal = button.closest('.modal-overlay');
             if (modal) {
-                closeModal(modal);
+                // Force close when clicking close button (even for protected modals)
+                closeModal(modal, 'force');
             }
         });
     });
@@ -53,8 +61,13 @@ document.addEventListener('DOMContentLoaded', () => {
         modal.setAttribute('aria-hidden', 'false');
     }
 
-    function closeModal(modal) {
+    function closeModal(modal, force = false) {
         if (modal === null) return;
+        // Check if this modal should not close on outside click
+        if (modal.dataset.noCloseOnOutsideClick === 'true' && force !== 'force') {
+            // Don't close if this is a protected modal unless explicitly forced
+            return;
+        }
         modal.classList.remove('active');
         modal.setAttribute('aria-hidden', 'true');
     }

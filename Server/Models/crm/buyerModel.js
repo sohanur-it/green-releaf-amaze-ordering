@@ -59,17 +59,55 @@ const Buyer = {
             // WE GOTTA UPDATE THIS ONE to include the tag's id
             const tagsQuery = 'SELECT entry_id, name, color, background_color FROM "ORDERS-buyer_tags" WHERE orders_buyer_id = $1 ORDER BY name;';
 
-            // THIS IS THE ONE WE CHANGE. it now has to join through the assignment table.
+            // Get sales reps assigned to buyer OR to buyer's locations
+            // Combines both buyer-level and location-level assignments
             const salesRepsQuery = `
-                SELECT
-                    a.entry_id AS assignment_id,
-                    sr.name,
-                    sr.email,
-                    sr.phone
-                FROM "ORDERS-buyer_sales_rep_assignments" a
-                         JOIN "ORDERS-sales_reps" sr ON a.fk_sales_rep_id = sr.entry_id
-                WHERE a.fk_buyer_id = $1
-                ORDER BY sr.name;
+                WITH buyer_assigned_reps AS (
+                    SELECT
+                        a.entry_id AS assignment_id,
+                        COALESCE(
+                            u1.first_name || ' ' || u1.last_name,
+                            sr.name
+                        ) AS name,
+                        COALESCE(u1.email, sr.email) AS email,
+                        COALESCE(sr.phone, '') AS phone,
+                        'buyer' AS assignment_type,
+                        NULL::integer AS location_id
+                    FROM "ORDERS-buyer_sales_rep_assignments" a
+                        LEFT JOIN "ORDERS-sales_reps" sr ON a.fk_sales_rep_id = sr.entry_id
+                        LEFT JOIN users u1 ON sr.email = u1.email
+                    WHERE a.fk_buyer_id = $1
+                ),
+                location_assigned_reps AS (
+                    SELECT
+                        l.entry_id AS assignment_id,
+                        COALESCE(
+                            u2.first_name || ' ' || u2.last_name,
+                            'Unknown'
+                        ) AS name,
+                        COALESCE(u2.email, '') AS email,
+                        '' AS phone,
+                        'location' AS assignment_type,
+                        l.entry_id AS location_id
+                    FROM "ORDERS-buyer_locations" l
+                        LEFT JOIN users u2 ON l.assigned_sales_rep_id = u2.id
+                    WHERE l.orders_buyer_id = $1
+                        AND l.assigned_sales_rep_id IS NOT NULL
+                )
+                SELECT DISTINCT ON (COALESCE(email, ''), COALESCE(name, ''))
+                    assignment_id,
+                    name,
+                    email,
+                    phone,
+                    assignment_type,
+                    location_id
+                FROM (
+                    SELECT * FROM buyer_assigned_reps
+                    UNION ALL
+                    SELECT * FROM location_assigned_reps
+                ) combined
+                WHERE name IS NOT NULL AND name != 'Unknown'
+                ORDER BY COALESCE(email, ''), COALESCE(name, ''), assignment_id;
             `;
 
             // fire all the queries off at once!

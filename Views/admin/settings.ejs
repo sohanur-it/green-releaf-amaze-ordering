@@ -1,0 +1,263 @@
+<!-- Views/admin/settings.ejs -->
+<style>
+.settings-container {
+    max-width: 800px;
+    margin: 0 auto;
+}
+
+.settings-section {
+    background: white;
+    border-radius: 12px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+    transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+.settings-section h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0 0 1.5rem 0;
+    color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.settings-section h2 i {
+    color: var(--primary-color);
+}
+
+.form-group {
+    margin-bottom: 1.5rem;
+}
+
+.form-group label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: var(--text-color);
+    font-size: 0.95rem;
+}
+
+.form-input-modern {
+    width: 100%;
+    padding: 12px 16px;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 15px;
+    transition: all 0.2s ease;
+    font-family: inherit;
+}
+
+.form-input-modern:focus {
+    outline: none;
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+}
+
+.form-hint {
+    display: block;
+    font-size: 0.875rem;
+    color: var(--text-light);
+    margin-top: 0.5rem;
+}
+
+.btn-primary {
+    background: var(--primary-color);
+    color: white;
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 15px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-primary:hover {
+    background: var(--primary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3);
+}
+
+.alert {
+    padding: 1rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+}
+
+.alert-success {
+    background: #d1fae5;
+    color: #065f46;
+    border: 1px solid #a7f3d0;
+}
+
+.alert-error {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+}
+
+.password-strength {
+    margin-top: 0.5rem;
+    height: 4px;
+    background: var(--border-color);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.password-strength-bar {
+    height: 100%;
+    transition: width 0.3s ease, background-color 0.3s ease;
+    border-radius: 2px;
+}
+
+.password-strength-weak { width: 33%; background: #ef4444; }
+.password-strength-medium { width: 66%; background: #f59e0b; }
+.password-strength-strong { width: 100%; background: #10b981; }
+</style>
+
+<div class="settings-container">
+    <div class="page-header">
+        <div>
+            <h1>Settings</h1>
+            <p style="margin: 0; color: var(--text-light);">Manage your account settings and preferences</p>
+        </div>
+    </div>
+
+    <% if (success) { %>
+        <div class="alert alert-success">
+            <i class="fas fa-check-circle"></i> <%= success %>
+        </div>
+    <% } %>
+
+    <% if (error) { %>
+        <div class="alert alert-error">
+            <i class="fas fa-exclamation-circle"></i> <%= error %>
+        </div>
+    <% } %>
+
+    <div class="settings-section">
+        <h2>
+            <i class="fas fa-lock"></i>
+            Change Password
+        </h2>
+        <form method="POST" action="/admin/settings/change-password" id="changePasswordForm">
+            <div class="form-group">
+                <label for="currentPassword">Current Password <span class="required">*</span></label>
+                <input type="password" id="currentPassword" name="currentPassword" class="form-input-modern" required>
+            </div>
+            
+            <div class="form-group">
+                <label for="newPassword">New Password <span class="required">*</span></label>
+                <input type="password" id="newPassword" name="newPassword" class="form-input-modern" required minlength="8">
+                <small class="form-hint">Password must be at least 8 characters long</small>
+                <div class="password-strength" id="passwordStrength" style="display: none;">
+                    <div class="password-strength-bar" id="passwordStrengthBar"></div>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="confirmPassword">Confirm New Password <span class="required">*</span></label>
+                <input type="password" id="confirmPassword" name="confirmPassword" class="form-input-modern" required minlength="8">
+            </div>
+            
+            <button type="submit" class="btn btn-primary">
+                <i class="fas fa-save"></i> Update Password
+            </button>
+        </form>
+    </div>
+
+    <div class="settings-section">
+        <h2>
+            <i class="fas fa-user"></i>
+            Account Information
+        </h2>
+        <% if (user) { %>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem;">
+                <div>
+                    <label style="color: var(--text-light); font-size: 0.875rem;">Username</label>
+                    <div style="font-weight: 600; margin-top: 0.25rem;"><%= user.username || 'N/A' %></div>
+                </div>
+                <div>
+                    <label style="color: var(--text-light); font-size: 0.875rem;">Email</label>
+                    <div style="font-weight: 600; margin-top: 0.25rem;"><%= user.email || 'N/A' %></div>
+                </div>
+                <div>
+                    <label style="color: var(--text-light); font-size: 0.875rem;">Full Name</label>
+                    <div style="font-weight: 600; margin-top: 0.25rem;"><%= `${user.firstname || ''} ${user.lastname || ''}`.trim() || 'N/A' %></div>
+                </div>
+                <div>
+                    <label style="color: var(--text-light); font-size: 0.875rem;">Status</label>
+                    <div style="margin-top: 0.25rem;">
+                        <span style="padding: 4px 12px; border-radius: 12px; font-size: 0.875rem; font-weight: 600; background: #d1fae5; color: #065f46;">
+                            <%= user.status === 'active' ? 'Active' : 'Pending' %>
+                        </span>
+                    </div>
+                </div>
+            </div>
+        <% } %>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const newPasswordInput = document.getElementById('newPassword');
+    const confirmPasswordInput = document.getElementById('confirmPassword');
+    const passwordStrength = document.getElementById('passwordStrength');
+    const passwordStrengthBar = document.getElementById('passwordStrengthBar');
+    const form = document.getElementById('changePasswordForm');
+
+    // Password strength indicator
+    if (newPasswordInput) {
+        newPasswordInput.addEventListener('input', function() {
+            const password = this.value;
+            if (password.length > 0) {
+                passwordStrength.style.display = 'block';
+                let strength = 0;
+                
+                if (password.length >= 8) strength++;
+                if (password.length >= 12) strength++;
+                if (/[A-Z]/.test(password)) strength++;
+                if (/[a-z]/.test(password)) strength++;
+                if (/[0-9]/.test(password)) strength++;
+                if (/[^A-Za-z0-9]/.test(password)) strength++;
+                
+                passwordStrengthBar.className = 'password-strength-bar';
+                if (strength <= 2) {
+                    passwordStrengthBar.classList.add('password-strength-weak');
+                } else if (strength <= 4) {
+                    passwordStrengthBar.classList.add('password-strength-medium');
+                } else {
+                    passwordStrengthBar.classList.add('password-strength-strong');
+                }
+            } else {
+                passwordStrength.style.display = 'none';
+            }
+        });
+    }
+
+    // Form validation
+    if (form) {
+        form.addEventListener('submit', function(e) {
+            const newPassword = newPasswordInput.value;
+            const confirmPassword = confirmPasswordInput.value;
+            
+            if (newPassword !== confirmPassword) {
+                e.preventDefault();
+                alert('New passwords do not match!');
+                return false;
+            }
+            
+            if (newPassword.length < 8) {
+                e.preventDefault();
+                alert('Password must be at least 8 characters long!');
+                return false;
+            }
+        });
+    }
+
+});
+</script>
+

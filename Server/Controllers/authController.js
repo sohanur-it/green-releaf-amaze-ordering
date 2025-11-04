@@ -26,14 +26,19 @@ class AuthController {
 
             // Validate input
             if (!username || !password) {
-                return res.redirect('/auth/login?error=Username and password are required');
+                return res.redirect('/auth/login?error=Username/Email and password are required');
             }
 
-            // Find user by username
-            const user = await UserModel.findByUsername(username);
+            // Try to find user by username first, then by email if not found
+            let user = await UserModel.findByUsername(username);
+            
+            // If not found by username, try email
+            if (!user) {
+                user = await UserModel.findByEmail(username);
+            }
             
             if (!user) {
-                return res.redirect('/auth/login?error=Invalid username or password');
+                return res.redirect('/auth/login?error=Invalid username/email or password');
             }
 
             // Check if user is active
@@ -45,7 +50,7 @@ class AuthController {
             const isPasswordValid = await UserModel.verifyPassword(password, user.password_hash);
             
             if (!isPasswordValid) {
-                return res.redirect('/auth/login?error=Invalid username or password');
+                return res.redirect('/auth/login?error=Invalid username/email or password');
             }
 
             // Update last login
@@ -54,6 +59,7 @@ class AuthController {
             // Create session
             req.session.userId = user.id;
             req.session.username = user.username;
+            req.session.email = user.email;
             req.session.isSuperuser = user.is_superuser;
             
             // Set session duration based on remember me

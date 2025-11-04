@@ -1,7 +1,6 @@
 // Public/js/shared/main.js
 document.addEventListener('DOMContentLoaded', () => {
     const appContainer = document.getElementById('app-container');
-    const sidebarToggle = document.getElementById('sidebar-toggle');
     const htmlElement = document.documentElement;
 
     //the pre-loader script in the <head> adds this class to the <html> tag.
@@ -16,16 +15,4 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
         document.body.classList.add('transitions-enabled');
     }, 10);
-
-
-    //when the toggle button is clicked...
-    if (sidebarToggle) {
-        sidebarToggle.addEventListener('click', () => {
-            appContainer.classList.toggle('sidebar-collapsed');
-
-            //save the new state to localStorage so it persists across page loads
-            const isCollapsed = appContainer.classList.contains('sidebar-collapsed');
-            localStorage.setItem('sidebarState', isCollapsed ? 'collapsed' : 'expanded');
-        });
-    }
 });
