@@ -122,6 +122,8 @@ class PortalController {
                         LIMIT 1
                     ) as primary_image_path,
                     -- Get available batches for this product
+                    -- CRITICAL: External portal only shows batches with full_package_count > 0
+                    -- (per MODULE_4_REQUIREMENTS: "External Orders Cannot Use Partial Packages")
                     (
                         SELECT jsonb_agg(
                             jsonb_build_object(
@@ -138,25 +140,47 @@ class PortalController {
                         )
                         FROM "ORDERS-batches" b
                         WHERE b.fk_master_product_id = p.entry_id
-                        AND b.status = 'Sellable'
+                        AND b.status IN ('Sellable', 'On Hold')  -- Include both Sellable and On Hold batches
                         AND (b.quantity - b.allocated_quantity) > 0
+                        AND b.full_package_count > 0  -- External portal only shows full packages
                     ) as available_batches
                 FROM "ORDERS-products" p
                 WHERE p.is_archived = false
                 AND EXISTS (
                     SELECT 1 FROM "ORDERS-batches" b
                     WHERE b.fk_master_product_id = p.entry_id
-                    AND b.status = 'Sellable'
+                    AND b.status IN ('Sellable', 'On Hold')  -- Include both Sellable and On Hold batches
                     AND (b.quantity - b.allocated_quantity) > 0
+                    AND b.full_package_count > 0  -- External portal only shows full packages
                 )
                 ORDER BY p.brand_name, p.name
             `);
             
-            // Add image URLs to products
-            const productsWithImages = products.rows.map(product => ({
-                ...product,
-                primary_image_url: product.primary_image_path ? `/public/${product.primary_image_path}` : null
-            }));
+            // Add image URLs to products and parse available_batches if needed
+            const productsWithImages = products.rows.map(product => {
+                // Parse available_batches if it's a string (PostgreSQL JSONB sometimes returns as string)
+                let available_batches = product.available_batches;
+                if (typeof available_batches === 'string') {
+                    try {
+                        available_batches = JSON.parse(available_batches);
+                    } catch (e) {
+                        console.error('Error parsing available_batches:', e);
+                        available_batches = [];
+                    }
+                }
+                
+                // Debug: Log first batch's unit_price to diagnose the issue
+                if (available_batches && available_batches.length > 0 && available_batches[0]) {
+                    const firstBatch = available_batches[0];
+                    console.log(`[DEBUG] Product: ${product.name || product.product_name}, Batch unit_price: ${firstBatch.unit_price}, Product default_price: ${product.default_price}, Units per case: ${product.units_per_case}`);
+                }
+                
+                return {
+                    ...product,
+                    available_batches: available_batches || [],
+                    primary_image_url: product.primary_image_path ? `/public/${product.primary_image_path}` : null
+                };
+            });
             
             res.render('external/store', {
                 title: 'Product Catalog',

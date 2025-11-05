@@ -37,13 +37,15 @@
     </header>
 
     <div class="amaze-header-section">
-        <div class="amaze-branding">
-            <div class="amaze-logo">GR</div>
-            <div class="amaze-text">
-                <div class="amaze-title">AMAZE</div>
-                <div class="amaze-subtitle">CANNABIS</div>
+        <a href="#" class="amaze-branding-link" onclick="event.preventDefault(); const uuid = window.location.pathname.match(/\/external\/store\/([^\/]+)/)?.[1]; if (uuid) window.location.href = '/external/store/' + uuid; return false;">
+            <div class="amaze-branding">
+                <div class="amaze-logo">GR</div>
+                <div class="amaze-text">
+                    <div class="amaze-title">AMAZE</div>
+                    <div class="amaze-subtitle">CANNABIS</div>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
 
     <%- body %>

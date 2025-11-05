@@ -202,47 +202,75 @@
                             style="cursor: pointer;">
                             <div class="product-card-header">
                                 <div class="product-brand-badge"><%= product.brand_name || 'AMAZE' %></div>
-                                <% if (product.primary_image_url) { %>
-                                    <img src="<%= product.primary_image_url %>" 
-                                         alt="<%= product.product_name %>" 
-                                         class="product-image"
-                                         onerror="this.onerror=null; this.src='/public/images/placeholder.jpg';">
-                                <% } else { %>
-                                    <div class="product-image-placeholder">
-                                        <div class="placeholder-icon">🍃</div>
+                                <div class="product-image-container">
+                                    <% if (product.primary_image_url) { %>
+                                        <img src="<%= product.primary_image_url %>" 
+                                             alt="<%= product.product_name %>" 
+                                             class="product-image"
+                                             onerror="this.onerror=null; this.src='/public/images/placeholder.jpg';">
+                                    <% } else { %>
+                                        <div class="product-image-placeholder">
+                                            <div class="placeholder-icon">🍃</div>
+                                        </div>
+                                    <% } %>
+                                    <!-- Hover Details Overlay -->
+                                    <div class="product-hover-overlay">
+                                        <table class="product-details-table">
+                                            <tr>
+                                                <td class="detail-label">Preroll Type:</td>
+                                                <td class="detail-value"><%= product.product_type || 'N/A' %></td>
+                                            </tr>
+                                            <tr>
+                                                <td class="detail-label">Grams Per Preroll:</td>
+                                                <td class="detail-value"><%= product.unit_size || 'N/A' %></td>
+                                            </tr>
+                                            <tr>
+                                                <td class="detail-label">Grow Env:</td>
+                                                <td class="detail-value"><%= product.cultivar_type_name || 'N/A' %></td>
+                                            </tr>
+                                            <tr>
+                                                <td class="detail-label">Production Date:</td>
+                                                <td class="detail-value"><%= batch.production_date ? new Date(batch.production_date).toLocaleDateString() : 'N/A' %></td>
+                                            </tr>
+                                        </table>
                                     </div>
-                                <% } %>
+                                </div>
                             </div>
                             <div class="product-card-body">
-                                <h3 class="product-name"><%= (product.cultivar_name || product.product_name).toUpperCase() %></h3>
-                                
                                 <!-- THC Bar with text -->
                                 <div class="thc-bar <%= product.cultivar_type_name && product.cultivar_type_name.toLowerCase().includes('indica') ? 'indica' : (product.cultivar_type_name && product.cultivar_type_name.toLowerCase().includes('sativa') ? 'sativa' : 'hybrid') %>">
-                                    <%= product.cultivar_type_name || product.product_type || 'Hybrid' %> - <%= batch.thc_percentage ? batch.thc_percentage.toFixed(2) : '0.00' %>% THC
+                                    <%= product.cultivar_type_name || product.product_type || 'Hybrid' %><% if (batch.thc_percentage) { %> - <%= batch.thc_percentage.toFixed(2) %>% THC<% } %>
                                 </div>
                                 
-                                <div class="product-variant">
-                                    <%= product.product_name %> <%= product.unit_size ? product.unit_size : '' %>
-                                </div>
+                                <!-- Product Name and Type -->
+                                <h3 class="product-name"><%= product.product_name %><% if (product.unit_size) { %> (<%= product.unit_size %>)<% } %></h3>
                                 <div class="product-type"><%= product.category_name %> - <%= product.product_type %></div>
                                 
+                                <!-- Pricing Section -->
                                 <div class="price-section">
+                                    <% 
+                                        // Calculate prices once for this product card
+                                        const batchUnitPrice = batch.unit_price != null ? parseFloat(batch.unit_price) : 0;
+                                        const productUnitsPerCase = product.units_per_case != null ? parseFloat(product.units_per_case) : 24;
+                                        const casePrice = batchUnitPrice > 0 ? batchUnitPrice.toFixed(2) : '0.00';
+                                        const calculatedUnitPrice = (batchUnitPrice > 0 && productUnitsPerCase > 0) ? (batchUnitPrice / productUnitsPerCase).toFixed(2) : '0.00';
+                                    %>
                                     <div class="price-case">
-                                        <span class="price-amount">$<%= batch.unit_price ? batch.unit_price.toFixed(2) : '0.00' %></span><span class="price-rest"> / Cases<% if (product.unit_size) { %> - <%= product.unit_size %><% } %></span>
+                                        <span class="price-amount">$<%= casePrice %></span><span class="price-rest"> / Cases</span>
                                     </div>
                                     <div class="quantity-available">
                                         Quantity: <span class="quantity-bold"><%= batch.quantity_available %></span> Cases
                                     </div>
-                                </div>
-                                
-                                <div class="product-details">
-                                    <div class="detail-line">Package Size: <% if (product.unit_size) { %><%= product.unit_size %><% } else { %><%= batch.metrc_item_name || 'N/A' %><% } %></div>
+                                    <% if (product.unit_size) { %>
+                                        <div class="detail-line">Weight: <%= product.unit_size %></div>
+                                    <% } %>
                                     <div class="detail-line"><%= product.units_per_case || 24 %> units per case</div>
                                     <div class="unit-price-tag">
-                                        $<%= batch.unit_price && product.units_per_case ? (batch.unit_price / product.units_per_case).toFixed(2) : '0.00' %>/unit
+                                        $<%= calculatedUnitPrice %>/unit
                                     </div>
                                 </div>
                                 
+                                <!-- Add to Cart Section -->
                                 <div class="quantity-selector-container">
                                     <input type="number" 
                                            class="quantity-input" 
@@ -310,14 +338,21 @@
                                     data-image-url="<%= product.primary_image_url || '/public/images/placeholder.jpg' %>">
                                     <td>
                                         <div class="table-product-info">
-                                            <div class="table-product-image">
-                                                <% if (product.primary_image_url) { %>
-                                                    <img src="<%= product.primary_image_url %>" 
-                                                         alt="<%= product.product_name %>"
-                                                         onerror="this.onerror=null; this.innerHTML='<div class=\\'placeholder-icon\\'>🍃</div>';">
-                                                <% } else { %>
-                                                    <div class="placeholder-icon">🍃</div>
-                                                <% } %>
+                                            <div class="table-product-image-container">
+                                                <div class="table-product-image">
+                                                    <% if (product.primary_image_url) { %>
+                                                        <img src="<%= product.primary_image_url %>" 
+                                                             alt="<%= product.product_name %>"
+                                                             class="table-product-thumbnail"
+                                                             data-full-image="<%= product.primary_image_url %>"
+                                                             onerror="this.onerror=null; this.src='/public/images/placeholder.jpg';">
+                                                    <% } else { %>
+                                                        <img src="/public/images/placeholder.jpg" 
+                                                             alt="<%= product.product_name %>"
+                                                             class="table-product-thumbnail"
+                                                             data-full-image="/public/images/placeholder.jpg">
+                                                    <% } %>
+                                                </div>
                                             </div>
                                             <div class="table-product-details">
                                                 <h4><%= product.cultivar_name || product.product_name %></h4>
@@ -337,8 +372,14 @@
                                         </span>
                                     </td>
                                     <td>
-                                        <div class="table-price-main">$<%= batch.unit_price ? batch.unit_price.toFixed(2) : '0.00' %></div>
-                                        <div class="table-price-unit">$<%= batch.unit_price && product.units_per_case ? (batch.unit_price / product.units_per_case).toFixed(2) : '0.00' %>/unit</div>
+                                        <% 
+                                            const tableBatchUnitPrice = batch.unit_price != null ? parseFloat(batch.unit_price) : 0;
+                                            const tableCasePrice = tableBatchUnitPrice > 0 ? tableBatchUnitPrice.toFixed(2) : '0.00';
+                                            const tableProductUnitsPerCase = product.units_per_case != null ? parseFloat(product.units_per_case) : 24;
+                                            const tableUnitPrice = (tableBatchUnitPrice > 0 && tableProductUnitsPerCase > 0) ? (tableBatchUnitPrice / tableProductUnitsPerCase).toFixed(2) : '0.00';
+                                        %>
+                                        <div class="table-price-main">$<%= tableCasePrice %></div>
+                                        <div class="table-price-unit">$<%= tableUnitPrice %>/unit</div>
                                     </td>
                                     <td>
                                         <div class="table-actions">
@@ -367,6 +408,9 @@
                     <option value="24" selected>24</option>
                     <option value="36">36</option>
                     <option value="48">48</option>
+                    <option value="100">100</option>
+                    <option value="500">500</option>
+                    <option value="9999">All</option>
                 </select>
                 <div class="pagination-buttons">
                     <button class="pagination-btn" onclick="goToPage(1)" title="First Page">
@@ -614,8 +658,13 @@ document.addEventListener('DOMContentLoaded', function() {
         if (sidebar) sidebar.classList.add('collapsed');
     }
     
-    // Switch view after setting sidebar state
+    // Switch view first (before initializing products)
     switchView(savedView === 'table' ? 'table' : 'grid');
+    
+    // Then initialize products after a small delay to ensure DOM is ready
+    setTimeout(() => {
+        initProducts();
+    }, 200);
     
     // Populate brand filters dynamically
     const brands = new Set();
@@ -730,8 +779,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // Cart toggle is now handled by shared cart-toggle.js
     // No need to duplicate the logic here
     
-    // Initialize pagination and filters
-    initProducts();
+    // Note: initProducts() is called earlier, before switchView, to ensure all products are found
+    
+    // Add hover event listeners for table product images
+    setupTableImageHover();
     
     // Add event listeners to all filter checkboxes
     document.querySelectorAll('.filter-checkbox input').forEach(input => {
@@ -1494,6 +1545,7 @@ function switchView(viewType) {
     } else {
         gridView.style.display = 'none';
         tableView.classList.add('active');
+        tableView.style.display = 'block';
         if (sidebar) {
             sidebar.style.display = 'none';
         }
@@ -1501,6 +1553,12 @@ function switchView(viewType) {
     
     // Save preference
     localStorage.setItem('preferredView', viewType);
+    
+    // Reinitialize products after view switch to ensure we use the correct product list
+    // This is important because grid and table views have separate product elements
+    setTimeout(() => {
+        initProducts();
+    }, 150);
 }
 
 // Sidebar Toggle Functions
@@ -1525,16 +1583,139 @@ function togglePotencyUnit(btn, unit) {
 
 // Pagination and Filtering
 let currentPage = 1;
+// Load itemsPerPage from localStorage or default to 24
+// Don't use localStorage initially - start with default to show all products
 let itemsPerPage = 24;
+// After page loads, check localStorage
+if (typeof Storage !== 'undefined') {
+    const saved = localStorage.getItem('itemsPerPage');
+    if (saved && !isNaN(parseInt(saved))) {
+        itemsPerPage = parseInt(saved);
+    }
+}
 let filteredProducts = [];
 let totalPages = 1;
 
 // Initialize products and pagination
 function initProducts() {
-    filteredProducts = Array.from(document.querySelectorAll('.product-card-clickable, .product-row'));
-    totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
-    renderPagination();
-    applyFilters();
+    // Temporarily show both views to find all products (they might be hidden)
+    const gridView = document.getElementById('grid-view');
+    const tableView = document.getElementById('table-view');
+    const gridViewOriginalDisplay = gridView ? gridView.style.display : '';
+    const tableViewHasActive = tableView ? tableView.classList.contains('active') : false;
+    
+    // Temporarily show both to find all products
+    if (gridView) {
+        gridView.style.display = 'grid';
+    }
+    if (tableView) {
+        tableView.classList.add('active');
+        tableView.style.display = 'block';
+    }
+    
+    // Find all products (both grid and table views)
+    // Use a more specific selector to ensure we get all products
+    // Wait a bit for DOM to fully render
+    const gridProducts = Array.from(document.querySelectorAll('.product-card-clickable'));
+    const tableProducts = Array.from(document.querySelectorAll('tbody .product-row'));
+    
+    console.log('initProducts: Found', gridProducts.length, 'grid products');
+    console.log('initProducts: Found', tableProducts.length, 'table products');
+    
+    // For grid view, use grid products
+    // For table view, use table products
+    // Since they represent the same data, we should use the appropriate one based on current view
+    // But we need both to ensure pagination works in both views
+    const currentView = tableViewHasActive ? 'table' : 'grid';
+    
+    if (currentView === 'table') {
+        // In table view, use table products
+        filteredProducts = tableProducts;
+        console.log('initProducts: Using table products, count:', filteredProducts.length);
+    } else {
+        // In grid view, use grid products
+        filteredProducts = gridProducts;
+        console.log('initProducts: Using grid products, count:', filteredProducts.length);
+    }
+    
+    // If we have very few products, try to find them again after a longer delay
+    if (filteredProducts.length < 10) {
+        console.warn('initProducts: Found very few products, retrying...');
+        setTimeout(() => {
+            const retryGrid = Array.from(document.querySelectorAll('.product-card-clickable'));
+            const retryTable = Array.from(document.querySelectorAll('tbody .product-row'));
+            console.log('initProducts: Retry found', retryGrid.length, 'grid and', retryTable.length, 'table products');
+            
+            if (currentView === 'table' && retryTable.length > filteredProducts.length) {
+                filteredProducts = retryTable;
+                console.log('initProducts: Updated to', filteredProducts.length, 'table products');
+            } else if (currentView === 'grid' && retryGrid.length > filteredProducts.length) {
+                filteredProducts = retryGrid;
+                console.log('initProducts: Updated to', filteredProducts.length, 'grid products');
+            }
+            
+            // Re-initialize with updated products
+            if (filteredProducts.length > 0) {
+                initializeProductsData();
+            }
+        }, 500);
+    } else {
+        initializeProductsData();
+    }
+    
+    function initializeProductsData() {
+    
+    // Restore original view display
+    if (gridView) gridView.style.display = gridViewOriginalDisplay || 'grid';
+    if (tableView) {
+        if (!tableViewHasActive) {
+            tableView.classList.remove('active');
+            tableView.style.display = 'none';
+        } else {
+            tableView.style.display = 'block';
+        }
+    }
+    
+        // Set dropdown to match current itemsPerPage
+        const itemsPerPageSelect = document.getElementById('items-per-page');
+        if (itemsPerPageSelect) {
+            itemsPerPageSelect.value = itemsPerPage;
+        }
+        
+        // Set initial product count to total products (before filtering)
+        const totalProducts = filteredProducts.length;
+        updateProductCount(totalProducts);
+        console.log('initProducts: Total products count:', totalProducts);
+        
+        // Initially, mark all products as visible (no filters applied yet)
+        filteredProducts.forEach(item => {
+            item.dataset.filteredVisible = 'true';
+        });
+        
+        // Show all products initially (no filtering or pagination)
+        // This ensures all products are visible before pagination kicks in
+        filteredProducts.forEach(item => {
+            if (item.tagName === 'TR') {
+                item.style.display = 'table-row';
+            } else {
+                item.style.display = '';
+            }
+        });
+        
+        totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+        console.log('initProducts: Total pages:', totalPages, 'Items per page:', itemsPerPage);
+        renderPagination();
+        
+        // Apply pagination to show first page
+        const allVisibleProducts = filteredProducts.filter(item => item.dataset.filteredVisible !== 'false');
+        showPageFiltered(1, allVisibleProducts);
+        
+        // Then apply filters (which will re-paginate)
+        // Use setTimeout to ensure DOM is ready
+        setTimeout(() => {
+            applyFilters();
+        }, 100);
+    }
 }
 
 function applyFilters() {
@@ -1546,17 +1727,18 @@ function applyFilters() {
     const maxPotency = parseFloat(document.getElementById('max-potency')?.value || 100);
     const searchTerm = document.getElementById('portal-search-input')?.value.toLowerCase() || '';
     
-    // Filter products
+    // Filter products - mark which ones should be visible
+    const visibleProducts = [];
     filteredProducts.forEach(item => {
         let shouldShow = true;
         
         // Search filter (search in product name, cultivar name, brand name, batch name)
         if (searchTerm) {
             const searchableText = [
-                item.dataset.productName,
-                item.dataset.cultivarName,
-                item.dataset.brandName,
-                item.dataset.batchName
+                item.dataset.productName || '',
+                item.dataset.cultivarName || '',
+                item.dataset.brandName || '',
+                item.dataset.batchName || ''
             ].join(' ').toLowerCase();
             
             if (!searchableText.includes(searchTerm)) {
@@ -1565,7 +1747,7 @@ function applyFilters() {
         }
         
         // Category filter
-        if (selectedCategories.length > 0) {
+        if (selectedCategories.length > 0 && shouldShow) {
             const category = item.dataset.categoryName || '';
             if (!selectedCategories.some(cat => category.includes(cat))) {
                 shouldShow = false;
@@ -1596,18 +1778,71 @@ function applyFilters() {
             }
         }
         
-        item.style.display = shouldShow ? '' : 'none';
+        // Store visibility flag in data attribute instead of setting display immediately
+        item.dataset.filteredVisible = shouldShow ? 'true' : 'false';
+        if (shouldShow) {
+            visibleProducts.push(item);
+        }
     });
     
-    // Update pagination
-    const visibleProducts = filteredProducts.filter(item => item.style.display !== 'none');
+    // Update pagination based on visible products
     totalPages = Math.ceil(visibleProducts.length / itemsPerPage);
     currentPage = 1;
     renderPagination();
-    showPage(1);
     
-    // Update product count
+    // Show page 1 of filtered products
+    showPageFiltered(1, visibleProducts);
+    
+    // Update product count - show total filtered products, not just visible on current page
     updateProductCount(visibleProducts.length);
+    
+    // Re-setup hover previews after filtering (in case new products were shown)
+    if (document.getElementById('table-view')?.classList.contains('active')) {
+        setTimeout(() => {
+            setupTableImageHover();
+        }, 50);
+    }
+}
+
+// Show page with filtered products
+function showPageFiltered(page, visibleProducts) {
+    const start = (page - 1) * itemsPerPage;
+    const end = start + itemsPerPage;
+    
+    console.log('showPageFiltered: Page', page, 'showing', start, 'to', end, 'of', visibleProducts.length, 'visible products');
+    
+    // First, hide all products
+    filteredProducts.forEach(item => {
+        item.style.display = 'none';
+    });
+    
+    // Then show only visible products on current page
+    visibleProducts.forEach((item, index) => {
+        if (index >= start && index < end) {
+            if (item.tagName === 'TR') {
+                item.style.display = 'table-row';
+            } else {
+                item.style.display = '';
+            }
+        } else {
+            // Hide items not on current page
+            item.style.display = 'none';
+        }
+    });
+    
+    console.log('showPageFiltered: Showing', Math.min(end - start, visibleProducts.length - start), 'products on page', page);
+    
+    currentPage = page;
+    renderPagination(); // Re-render pagination to update active state
+    updatePaginationButtons();
+    
+    // Re-setup hover previews if in table view
+    const tableView = document.getElementById('table-view');
+    if (tableView && tableView.classList.contains('active')) {
+        setTimeout(() => {
+            setupTableImageHover();
+        }, 50);
+    }
 }
 
 function updateProductCount(count) {
@@ -1618,39 +1853,71 @@ function updateProductCount(count) {
 }
 
 function showPage(page) {
-    const visibleProducts = filteredProducts.filter(item => item.style.display !== 'none');
+    // Get all products (not filtered by display status, since we're controlling that here)
+    const allProducts = filteredProducts;
     const start = (page - 1) * itemsPerPage;
     const end = start + itemsPerPage;
     
-    visibleProducts.forEach((item, index) => {
+    console.log('showPage: Showing page', page, 'from', start, 'to', end, 'of', allProducts.length);
+    
+    allProducts.forEach((item, index) => {
         if (index >= start && index < end) {
-            item.style.display = '';
+            // Show item - handle both grid cards and table rows
+            if (item.tagName === 'TR') {
+                item.style.display = 'table-row';
+            } else {
+                item.style.display = '';
+            }
         } else {
+            // Hide item
             item.style.display = 'none';
         }
     });
     
     currentPage = page;
+    renderPagination(); // Re-render pagination to update active state
     updatePaginationButtons();
+    
+    // Re-setup hover previews if in table view
+    const tableView = document.getElementById('table-view');
+    if (tableView && tableView.classList.contains('active')) {
+        setTimeout(() => {
+            setupTableImageHover();
+        }, 50);
+    }
 }
 
 function goToPage(page) {
-    const visibleProducts = filteredProducts.filter(item => item.style.display !== 'none');
+    // Get visible products based on filter status
+    const visibleProducts = filteredProducts.filter(item => item.dataset.filteredVisible !== 'false');
     const maxPage = Math.ceil(visibleProducts.length / itemsPerPage);
     if (page >= 1 && page <= maxPage) {
-        showPage(page);
+        showPageFiltered(page, visibleProducts);
     }
 }
 
 function changeItemsPerPage() {
     itemsPerPage = parseInt(document.getElementById('items-per-page').value);
-    totalPages = Math.ceil(filteredProducts.filter(item => item.style.display !== 'none').length / itemsPerPage);
+    // Save to localStorage
+    localStorage.setItem('itemsPerPage', itemsPerPage);
+    
+    // Get visible products based on filter status
+    const visibleProducts = filteredProducts.filter(item => item.dataset.filteredVisible !== 'false');
+    totalPages = Math.ceil(visibleProducts.length / itemsPerPage);
     renderPagination();
-    showPage(1);
+    showPageFiltered(1, visibleProducts);
+    
+    // Re-setup hover previews after pagination change (in case we're in table view)
+    if (document.getElementById('table-view')?.classList.contains('active')) {
+        setTimeout(() => {
+            setupTableImageHover();
+        }, 50);
+    }
 }
 
 function renderPagination() {
-    const visibleProducts = filteredProducts.filter(item => item.style.display !== 'none');
+    // Get visible products based on filter status
+    const visibleProducts = filteredProducts.filter(item => item.dataset.filteredVisible !== 'false');
     const maxPage = Math.ceil(visibleProducts.length / itemsPerPage);
     const paginationNumbers = document.getElementById('pagination-numbers');
     if (!paginationNumbers) return;
@@ -1673,13 +1940,81 @@ function renderPagination() {
         pageBtn.onclick = () => goToPage(i);
         paginationNumbers.appendChild(pageBtn);
     }
+    
+    // Update pagination button states
+    updatePaginationButtons();
 }
 
 function updatePaginationButtons() {
-    const visibleProducts = filteredProducts.filter(item => item.style.display !== 'none');
+    // Get visible products based on filter status
+    const visibleProducts = filteredProducts.filter(item => item.dataset.filteredVisible !== 'false');
     const maxPage = Math.ceil(visibleProducts.length / itemsPerPage);
     const buttons = document.querySelectorAll('.pagination-btn');
+    
+    // Enable/disable first/previous buttons
+    const firstBtn = buttons[0];
+    const prevBtn = buttons[1];
+    const nextBtn = buttons[2];
+    const lastBtn = buttons[3];
+    
+    if (firstBtn) firstBtn.disabled = currentPage === 1;
+    if (prevBtn) prevBtn.disabled = currentPage === 1;
+    if (nextBtn) nextBtn.disabled = currentPage >= maxPage;
+    if (lastBtn) lastBtn.disabled = currentPage >= maxPage;
+    
     buttons.forEach(btn => btn.style.display = '');
+}
+
+// Setup hover preview for table product images
+function setupTableImageHover() {
+    // Remove old event listeners by cloning (clean slate)
+    const tableImages = document.querySelectorAll('.table-product-thumbnail');
+    
+    // Create or get global hover preview element
+    let previewEl = document.querySelector('.table-image-hover-preview-global');
+    if (!previewEl) {
+        previewEl = document.createElement('div');
+        previewEl.className = 'table-image-hover-preview table-image-hover-preview-global';
+        previewEl.style.display = 'none';
+        document.body.appendChild(previewEl);
+    }
+    
+    // Remove existing listeners by replacing elements (simpler approach)
+    tableImages.forEach(img => {
+        // Clone to remove old listeners
+        const newImg = img.cloneNode(true);
+        img.parentNode.replaceChild(newImg, img);
+        
+        // Add new event listeners
+        newImg.addEventListener('mouseenter', function(e) {
+            const fullImageUrl = this.dataset.fullImage || this.src || '/public/images/placeholder.jpg';
+            previewEl.innerHTML = `<img src="${fullImageUrl}" alt="${this.alt || 'Product'}" onerror="this.onerror=null; this.src='/public/images/placeholder.jpg';">`;
+            previewEl.style.display = 'block';
+            
+            // Position preview near mouse cursor
+            updatePreviewPosition(e, previewEl);
+        });
+        
+        newImg.addEventListener('mousemove', function(e) {
+            if (previewEl.style.display === 'block') {
+                updatePreviewPosition(e, previewEl);
+            }
+        });
+        
+        newImg.addEventListener('mouseleave', function() {
+            previewEl.style.display = 'none';
+        });
+    });
+}
+
+function updatePreviewPosition(e, previewEl) {
+    const x = e.clientX + 15;
+    const y = e.clientY + 15;
+    const maxX = window.innerWidth - previewEl.offsetWidth - 20;
+    const maxY = window.innerHeight - previewEl.offsetHeight - 20;
+    
+    previewEl.style.left = Math.min(x, maxX) + 'px';
+    previewEl.style.top = Math.min(y, maxY) + 'px';
 }
 
 
