@@ -314,13 +314,22 @@ router.get('/products', productController.getAllProducts);
 router.get('/products/new', productController.showCreateProductForm);
 
 // Create new product
-router.post('/products', productController.createProduct);
+const { uploadMultiple, handleUploadError } = require('../Middleware/upload');
+router.post('/products', 
+    requireRole('Sales Admin', 'Administrator'),
+    uploadMultiple,
+    handleUploadError,
+    productController.createProduct
+);
 
 // Show link items page
 router.get('/products/:id/link-items', productController.showLinkItemsPage);
 
 // Show product details
 router.get('/products/:id', productController.getProductById);
+
+// Product image management
+router.get('/products/:id/images/manage', requireRole('Sales Admin', 'Administrator'), productController.showImageManagement);
 
 // User management page
 router.get('/users', requirePermission('admin', 'user'), (req, res) => {

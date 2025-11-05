@@ -2177,5 +2177,37 @@ router.get('/batches/:batchId/partial-packages/available', auth, async (req, res
     }
 });
 
+// =============================================
+// PRODUCT IMAGE MANAGEMENT
+// =============================================
+const { uploadMultiple, handleUploadError } = require('../Middleware/upload');
+const productController = require('../Controllers/productController');
+
+// Upload product images
+router.post('/products/:id/images', 
+    auth, 
+    uploadMultiple, 
+    handleUploadError,
+    productController.uploadProductImages
+);
+
+// Get product images
+router.get('/products/:id/images', 
+    auth, 
+    productController.getProductImages
+);
+
+// Delete product image
+router.delete('/products/:id/images/:imageId', 
+    auth, 
+    productController.deleteProductImage
+);
+
+// Set featured image
+router.post('/products/:id/images/:imageId/featured', 
+    auth, 
+    productController.setFeaturedImage
+);
+
 module.exports = router;
 

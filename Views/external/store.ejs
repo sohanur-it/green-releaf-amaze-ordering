@@ -198,14 +198,15 @@
                             data-unit-price="<%= batch.unit_price || 0 %>"
                             data-quantity-available="<%= batch.quantity_available %>"
                             data-metrc-item-name="<%= batch.metrc_item_name || '' %>"
-                            data-image-url="<%= product.image_url || '/public/images/placeholder.jpg' %>"
+                            data-image-url="<%= product.primary_image_url || '/public/images/placeholder.jpg' %>"
                             style="cursor: pointer;">
                             <div class="product-card-header">
                                 <div class="product-brand-badge"><%= product.brand_name || 'AMAZE' %></div>
-                                <% if (product.image_url) { %>
-                                    <img src="<%= product.image_url %>" 
+                                <% if (product.primary_image_url) { %>
+                                    <img src="<%= product.primary_image_url %>" 
                                          alt="<%= product.product_name %>" 
-                                         class="product-image">
+                                         class="product-image"
+                                         onerror="this.onerror=null; this.src='/public/images/placeholder.jpg';">
                                 <% } else { %>
                                     <div class="product-image-placeholder">
                                         <div class="placeholder-icon">🍃</div>
@@ -306,11 +307,17 @@
                                     data-unit-price="<%= batch.unit_price || 0 %>"
                                     data-quantity-available="<%= batch.quantity_available %>"
                                     data-metrc-item-name="<%= batch.metrc_item_name || '' %>"
-                                    data-image-url="<%= product.image_url || '/public/images/placeholder.jpg' %>">
+                                    data-image-url="<%= product.primary_image_url || '/public/images/placeholder.jpg' %>">
                                     <td>
                                         <div class="table-product-info">
                                             <div class="table-product-image">
-                                                <div class="placeholder-icon">🍃</div>
+                                                <% if (product.primary_image_url) { %>
+                                                    <img src="<%= product.primary_image_url %>" 
+                                                         alt="<%= product.product_name %>"
+                                                         onerror="this.onerror=null; this.innerHTML='<div class=\\'placeholder-icon\\'>🍃</div>';">
+                                                <% } else { %>
+                                                    <div class="placeholder-icon">🍃</div>
+                                                <% } %>
                                             </div>
                                             <div class="table-product-details">
                                                 <h4><%= product.cultivar_name || product.product_name %></h4>

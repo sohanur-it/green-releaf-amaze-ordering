@@ -111,6 +111,16 @@ class PortalController {
                     p.unit_measurement_name,
                     p.sold_as,
                     p.units_per_case,
+                    -- Get featured image
+                    (
+                        SELECT file_path 
+                        FROM "ORDERS-product-images" pi
+                        WHERE pi.fk_product_id = p.entry_id
+                          AND pi.is_deleted = false
+                          AND pi.is_featured = true
+                        ORDER BY pi.uploaded_at ASC
+                        LIMIT 1
+                    ) as primary_image_path,
                     -- Get available batches for this product
                     (
                         SELECT jsonb_agg(
@@ -142,10 +152,16 @@ class PortalController {
                 ORDER BY p.brand_name, p.name
             `);
             
+            // Add image URLs to products
+            const productsWithImages = products.rows.map(product => ({
+                ...product,
+                primary_image_url: product.primary_image_path ? `/public/${product.primary_image_path}` : null
+            }));
+            
             res.render('external/store', {
                 title: 'Product Catalog',
                 layout: 'layouts/portal',
-                products: products.rows,
+                products: productsWithImages,
                 portalAccess: portalAccess,
                 uuid: uuid
             });
