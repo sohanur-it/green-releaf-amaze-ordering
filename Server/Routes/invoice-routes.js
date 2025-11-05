@@ -214,5 +214,59 @@ router.delete('/:invoiceId/line-items/:lineItemId/discount', auth, auditMiddlewa
     }
 });
 
+/**
+ * Add line item to existing draft invoice
+ * POST /api/v1/invoices/:id/line-items
+ */
+router.post('/:id/line-items', auth, auditMiddleware, invoiceController.addLineItem);
+
+/**
+ * Update line item quantity
+ * PATCH /api/v1/invoices/:id/line-items/:lineItemId
+ */
+router.patch('/:id/line-items/:lineItemId', auth, auditMiddleware, invoiceController.updateLineItem);
+
+/**
+ * Remove line item from invoice
+ * DELETE /api/v1/invoices/:id/line-items/:lineItemId
+ */
+router.delete('/:id/line-items/:lineItemId', auth, auditMiddleware, invoiceController.removeLineItem);
+
+/**
+ * Submit invoice for fulfillment
+ * POST /api/v1/invoices/:id/submit
+ */
+router.post('/:id/submit', auth, auditMiddleware, invoiceController.submitForFulfillment);
+
+/**
+ * Approve pending order
+ * POST /api/v1/invoices/:id/approve
+ */
+router.post('/:id/approve', auth, auditMiddleware, invoiceController.approveInvoice);
+
+/**
+ * Reject pending order
+ * POST /api/v1/invoices/:id/reject
+ */
+router.post('/:id/reject', auth, auditMiddleware, invoiceController.rejectInvoice);
+
+/**
+ * Get invoice history
+ * GET /api/v1/invoices/:id/history
+ */
+router.get('/:id/history', auth, invoiceController.getInvoiceHistory);
+
+/**
+ * Accept order for fulfillment
+ * POST /api/v1/invoices/:id/fulfillment/accept
+ */
+router.post('/:id/fulfillment/accept', auth, auditMiddleware, invoiceController.acceptFulfillment);
+
+/**
+ * Report fulfillment issue
+ * POST /api/v1/invoices/:id/fulfillment/issue
+ */
+router.post('/:id/fulfillment/issue', auth, auditMiddleware, invoiceController.reportFulfillmentIssue);
+
 module.exports = router;
 

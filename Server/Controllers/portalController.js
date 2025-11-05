@@ -448,7 +448,7 @@ class PortalController {
             
             // Check if line item already exists for this batch - OPTIMIZED: Single query
             const existingLineItem = await query(`
-                SELECT id, quantity_ordered
+                SELECT id, quantity_ordered, quantity_allocated
                 FROM "ORDERS-invoice-line-items"
                 WHERE fk_invoice_id = $1 AND fk_batch_id = $2
                 ORDER BY id ASC
@@ -458,14 +458,21 @@ class PortalController {
             const unitPrice = batch.override_price || batch.default_price || 0;
             const lineTotal = unitPrice * quantity;
             
+            let lineItemId;
+            let quantityToAllocate = parseInt(quantity, 10);
+            
             if (existingLineItem.rows.length > 0) {
                 // Update existing line item
                 const currentQty = parseInt(existingLineItem.rows[0].quantity_ordered, 10);
+                const currentAllocated = parseInt(existingLineItem.rows[0].quantity_allocated || 0, 10);
                 const addQty = parseInt(quantity, 10);
                 const newQuantity = currentQty + addQty;
-                console.log('addToCart - Updating existing item:', { currentQty, addQty, newQuantity });
+                console.log('addToCart - Updating existing item:', { currentQty, addQty, newQuantity, currentAllocated });
                 const newTotal = unitPrice * newQuantity;
                 
+                lineItemId = existingLineItem.rows[0].id;
+                
+                // Update line item (allocation will happen separately)
                 await query(`
                     UPDATE "ORDERS-invoice-line-items"
                     SET quantity_ordered = $1,
@@ -473,9 +480,12 @@ class PortalController {
                         line_total = $3,
                         updated_at = NOW()
                     WHERE id = $4
-                `, [newQuantity, unitPrice, newTotal, existingLineItem.rows[0].id]);
+                `, [newQuantity, unitPrice, newTotal, lineItemId]);
+                
+                // Calculate how much additional allocation is needed
+                quantityToAllocate = newQuantity - currentAllocated;
             } else {
-                // Create new line item
+                // Create new line item (without allocation initially)
                 const lineItemOrderResult = await query(`
                     SELECT COALESCE(MAX(line_item_order), 0) + 1 as next_order
                     FROM "ORDERS-invoice-line-items"
@@ -485,12 +495,61 @@ class PortalController {
                 
                 const insertQuantity = parseInt(quantity);
                 console.log('addToCart - Creating new line item:', { quantity: insertQuantity, unitPrice, lineTotal });
-                await query(`
+                const lineItemResult = await query(`
                     INSERT INTO "ORDERS-invoice-line-items" (
                         fk_invoice_id, fk_master_product_id, fk_batch_id,
-                        quantity_ordered, unit_price, line_total, line_item_order
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        quantity_ordered, quantity_allocated, unit_price, line_total, line_item_order
+                    ) VALUES ($1, $2, $3, $4, 0, $5, $6, $7)
+                    RETURNING id
                 `, [invoiceId, batch.fk_master_product_id, batch_id, insertQuantity, unitPrice, lineTotal, lineItemOrder]);
+                
+                lineItemId = lineItemResult.rows[0].id;
+            }
+            
+            // CRITICAL: Allocate inventory according to Module 4 requirements
+            // This prevents overselling and updates allocated_quantity immediately
+            if (quantityToAllocate > 0) {
+                const allocationService = require('../Services/allocationService');
+                const allocationResult = await allocationService.allocateBatchToInvoice(
+                    batch_id,
+                    quantityToAllocate,
+                    invoiceId,
+                    lineItemId
+                );
+                
+                if (!allocationResult.success) {
+                    // Allocation failed - rollback line item changes
+                    if (existingLineItem.rows.length > 0) {
+                        // Revert quantity_ordered
+                        const currentQty = parseInt(existingLineItem.rows[0].quantity_ordered, 10);
+                        const revertQty = currentQty - quantityToAllocate;
+                        await query(`
+                            UPDATE "ORDERS-invoice-line-items"
+                            SET quantity_ordered = $1,
+                                line_total = $1 * unit_price,
+                                updated_at = NOW()
+                            WHERE id = $2
+                        `, [revertQty, lineItemId]);
+                    } else {
+                        // Delete the line item we just created
+                        await query(`
+                            DELETE FROM "ORDERS-invoice-line-items"
+                            WHERE id = $1
+                        `, [lineItemId]);
+                    }
+                    
+                    return res.status(400).json({ 
+                        error: allocationResult.error || 'Failed to allocate inventory',
+                        available: allocationResult.available,
+                        requested: allocationResult.requested
+                    });
+                }
+                
+                console.log('✅ Inventory allocated successfully:', {
+                    batchId: batch_id,
+                    quantityAllocated: quantityToAllocate,
+                    remainingAvailable: allocationResult.remaining_available
+                });
             }
             
             // Recalculate invoice totals - OPTIMIZED: Single UPDATE with subquery instead of two queries
@@ -519,6 +578,7 @@ class PortalController {
                 invoiceNumber,
                 batchId: batch_id,
                 quantity,
+                quantityAllocated: quantityToAllocate,
                 subtotal,
                 total
             });
@@ -1256,6 +1316,86 @@ class PortalController {
             res.status(500).json({ 
                 success: false,
                 error: 'Failed to process checkout',
+                details: error.message 
+            });
+        }
+    }
+
+    /**
+     * Extend cart expiry (one-time only)
+     * POST /api/portal/:uuid/cart/extend
+     */
+    static async extendCart(req, res) {
+        try {
+            const portalAccess = req.session.portalAccess;
+            
+            if (!portalAccess) {
+                return res.status(401).json({ success: false, error: 'Not authenticated' });
+            }
+
+            // Get current cart (draft invoice)
+            const cartData = await PortalController.getCartData(portalAccess);
+            
+            if (!cartData.invoice_id) {
+                return res.status(400).json({ success: false, error: 'No active cart found' });
+            }
+
+            const invoiceId = cartData.invoice_id;
+
+            // Check if cart can be extended
+            const invoice = await query(`
+                SELECT cart_extended, cart_expires_at, status, source
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+                FOR UPDATE
+            `, [invoiceId]);
+
+            if (invoice.rows.length === 0) {
+                return res.status(404).json({ success: false, error: 'Cart not found' });
+            }
+
+            const invoiceData = invoice.rows[0];
+
+            // Verify it's a draft external cart
+            if (invoiceData.status !== 'Draft' || invoiceData.source !== 'External') {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'Only draft external carts can be extended' 
+                });
+            }
+
+            // Check if already extended
+            if (invoiceData.cart_extended) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'Cart can only be extended once' 
+                });
+            }
+
+            // Extend by 24 hours using server time
+            const result = await query(`
+                UPDATE "ORDERS-invoices"
+                SET cart_expires_at = cart_expires_at + INTERVAL '24 hours',
+                    cart_extended = TRUE,
+                    updated_at = NOW()
+                WHERE id = $1
+                RETURNING cart_expires_at
+            `, [invoiceId]);
+
+            const newExpiry = result.rows[0].cart_expires_at;
+
+            console.log(`✅ Cart ${invoiceId} extended. New expiry: ${newExpiry}`);
+
+            res.json({ 
+                success: true, 
+                message: 'Cart extended successfully',
+                cart_expires_at: newExpiry
+            });
+        } catch (error) {
+            console.error('Error extending cart:', error);
+            res.status(500).json({ 
+                success: false,
+                error: 'Failed to extend cart',
                 details: error.message 
             });
         }

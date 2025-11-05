@@ -98,7 +98,10 @@ router.delete('/sales-reps/:repId', salesRepController.deleteRep);
 // --- TAG ROUTES ---
 router.post('/buyers/:buyerId/tags', tagController.createTag);
 router.patch('/tags/:tagId', tagController.updateTag);
-router.delete('/tags/:tagId', tagController.deleteTag);
+
+// --- BUYER INVOICES ---
+const invoiceController = require('../../Controllers/invoiceController');
+router.get('/buyers/:buyerId/invoices', invoiceController.getBuyerInvoices);
 
 
 //just a placeholder so the app doesnt crash lol

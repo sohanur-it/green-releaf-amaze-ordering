@@ -9,6 +9,8 @@ const cron = require('node-cron');
 const { exec } = require('child_process');
 const { promisify } = require('util');
 const auditLogger = require('./auditLogger');
+const cartCleanupService = require('./cartCleanupService');
+const dealFlowAutomationService = require('./dealFlowAutomationService');
 
 const execAsync = promisify(exec);
 
@@ -128,6 +130,50 @@ class MasterScheduler {
                 scheduledCount++;
             }
         }
+
+        // Schedule cart cleanup job (every 10 minutes, 24/7)
+        const cartCleanupJob = cron.schedule('*/10 * * * *', async () => {
+            try {
+                console.log('🧹 Running cart cleanup job...');
+                const result = await cartCleanupService.cleanupExpiredCarts();
+                if (result.success) {
+                    console.log(`✅ Cart cleanup completed: ${result.cleaned} cleaned, ${result.failed} failed`);
+                } else {
+                    console.error('❌ Cart cleanup job failed:', result.error);
+                }
+            } catch (error) {
+                console.error('❌ Cart cleanup job error:', error.message);
+            }
+        }, {
+            scheduled: true,
+            timezone: process.env.SYNC_TIMEZONE || 'America/Chicago'
+        });
+
+        this.jobs.set('cartCleanup', cartCleanupJob);
+        scheduledCount++;
+        console.log('📅 Scheduled cart cleanup job (every 10 minutes)');
+
+        // Schedule deal flow automation job (daily at 2 AM)
+        const dealFlowJob = cron.schedule('0 2 * * *', async () => {
+            try {
+                console.log('🔄 Running deal flow automation job...');
+                const result = await dealFlowAutomationService.batchUpdateAllBuyers();
+                if (result.success) {
+                    console.log(`✅ Deal flow automation completed: ${result.updated} updated, ${result.unchanged} unchanged`);
+                } else {
+                    console.error('❌ Deal flow automation job failed:', result.error);
+                }
+            } catch (error) {
+                console.error('❌ Deal flow automation job error:', error.message);
+            }
+        }, {
+            scheduled: true,
+            timezone: process.env.SYNC_TIMEZONE || 'America/Chicago'
+        });
+
+        this.jobs.set('dealFlowAutomation', dealFlowJob);
+        scheduledCount++;
+        console.log('📅 Scheduled deal flow automation job (daily at 2 AM)');
 
         this.isRunning = true;
         console.log(`✅ Master Scheduler started successfully (${scheduledCount} jobs scheduled)`);

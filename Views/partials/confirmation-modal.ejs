@@ -1,18 +1,23 @@
 <!-- Views/partials/confirmation-modal.ejs -->
 <div class="modal-overlay" id="confirmationModal" aria-hidden="true">
-    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-        <div class="modal-header">
-            <h3 class="modal-title" id="modalTitle">Confirm Action</h3>
-            <button class="modal-close-btn" data-close-modal>&times;</button>
+    <div class="modal-dialog confirmation-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <div class="modal-header confirmation-modal-header">
+            <div class="modal-title-wrapper">
+                <i class="fas fa-exclamation-triangle confirmation-icon" id="modalIcon"></i>
+                <h3 class="modal-title" id="modalTitle">Confirm Action</h3>
+            </div>
+            <button class="modal-close-btn" data-close-modal aria-label="Close">&times;</button>
         </div>
-        <div class="modal-body">
+        <div class="modal-body confirmation-modal-body">
             <p id="modalText">Are you sure you want to proceed with this action?</p>
         </div>
-        <div class="modal-footer">
+        <div class="modal-footer confirmation-modal-footer">
             <!-- The form that will handle the actual delete POST request -->
             <form id="modalConfirmForm" method="POST">
                 <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
-                <button type="submit" class="btn btn-danger">Confirm</button>
+                <button type="submit" class="btn btn-danger btn-confirm">
+                    <i class="fas fa-check"></i> Confirm
+                </button>
             </form>
         </div>
     </div>

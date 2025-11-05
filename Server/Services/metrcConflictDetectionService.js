@@ -158,8 +158,14 @@ class MetrcConflictDetectionService {
                 
                 await client.query('COMMIT');
                 
-                // TODO: Send notification to sales rep
-                // await this.notifySalesRep(invoiceId, packageLabel);
+                // Send notification to sales rep
+                try {
+                    const notificationService = require('./notificationService');
+                    await notificationService.notifySalesRep(invoiceId);
+                } catch (notifError) {
+                    console.error('Failed to send METRC conflict notification:', notifError);
+                    // Don't fail the flagging if notification fails
+                }
                 
                 return { success: true };
             }

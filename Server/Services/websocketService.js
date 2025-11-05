@@ -277,6 +277,26 @@ class WebSocketService {
     }
 
     /**
+     * Broadcast notification to all fulfillment team members
+     * @param {Object} notification - Notification object
+     */
+    async broadcastToFulfillmentTeam(notification) {
+        if (!this.wss) return;
+        
+        const message = JSON.stringify({
+            type: 'fulfillment_notification',
+            notification: notification,
+            timestamp: new Date().toISOString()
+        });
+
+        this.wss.clients.forEach(client => {
+            if (client.userType === 'fulfillment' && client.readyState === WebSocket.OPEN) {
+                client.send(message);
+            }
+        });
+    }
+
+    /**
      * Send persistent notification to specific user
      */
     async sendPersistentNotification(userId, notification) {

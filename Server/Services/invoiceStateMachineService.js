@@ -304,7 +304,8 @@ class InvoiceStateMachineService {
                     [invoiceId]
                 );
                 if (invoice.rows.length > 0 && invoice.rows[0].source === 'External') {
-                    console.log(`📧 Customer notified of cancellation for invoice ${invoiceId}`);
+                    const notificationService = require('./notificationService');
+                    await notificationService.notifyCustomerCancellation(invoiceId);
                 }
             }
         } catch (error) {
@@ -459,22 +460,16 @@ class InvoiceStateMachineService {
             }
             
             const buyerId = invoice.rows[0].fk_buyer_id;
-            const total = parseFloat(invoice.rows[0].total || 0);
             
-            // Check if this is a significant first order
-            const orderCount = await client.query(`
-                SELECT COUNT(*) as count
-                FROM "ORDERS-invoices"
-                WHERE fk_buyer_id = $1 AND status = 'Paid'
-            `, [buyerId]);
+            // Use deal flow automation service
+            const dealFlowService = require('./dealFlowAutomationService');
+            const result = await dealFlowService.updateAfterPayment(buyerId, client);
             
-            const paidOrderCount = parseInt(orderCount.rows[0].count || 0);
+            if (result.success && result.changed) {
+                console.log(`✅ Deal flow updated: Buyer ${buyerId} → ${result.new_stage}`);
+            }
             
-            // If this is the first paid order, consider updating to "First Sale" stage
-            // TODO: Implement deal flow stage logic based on business rules
-            console.log(`Deal flow check: Buyer ${buyerId} has ${paidOrderCount} paid order(s)`);
-            
-            return { success: true };
+            return result;
         } catch (error) {
             console.error('Error updating deal flow stage:', error);
             return { success: false, error: error.message };
@@ -486,22 +481,11 @@ class InvoiceStateMachineService {
      */
     async notifySalesRep(invoiceId) {
         try {
-            const { query } = require('../config/database');
-            const invoice = await query(`
-                SELECT assigned_sales_rep_id
-                FROM "ORDERS-invoices"
-                WHERE id = $1
-            `, [invoiceId]);
-            
-            const salesRepId = invoice.rows[0]?.assigned_sales_rep_id;
-            
-            if (salesRepId) {
-                console.log(`📧 Sales rep ${salesRepId} notified of pending approval for invoice ${invoiceId}`);
-            }
-            
-            // TODO: Implement actual notification system (email, WebSocket, etc.)
+            const notificationService = require('./notificationService');
+            return await notificationService.notifySalesRep(invoiceId);
         } catch (error) {
             console.error('Error notifying sales rep:', error);
+            return { success: false, error: error.message };
         }
     }
 
@@ -510,10 +494,11 @@ class InvoiceStateMachineService {
      */
     async notifyFulfillment(invoiceId) {
         try {
-            console.log(`📧 Fulfillment team notified of approved invoice ${invoiceId}`);
-            // TODO: Implement actual notification system (email, WebSocket, etc.)
+            const notificationService = require('./notificationService');
+            return await notificationService.notifyFulfillment(invoiceId);
         } catch (error) {
             console.error('Error notifying fulfillment:', error);
+            return { success: false, error: error.message };
         }
     }
 
@@ -522,10 +507,11 @@ class InvoiceStateMachineService {
      */
     async notifyCustomerShipment(invoiceId) {
         try {
-            console.log(`📧 Customer notified of shipment for invoice ${invoiceId}`);
-            // TODO: Implement actual notification system (email, WebSocket, etc.)
+            const notificationService = require('./notificationService');
+            return await notificationService.notifyCustomerShipment(invoiceId);
         } catch (error) {
             console.error('Error notifying customer:', error);
+            return { success: false, error: error.message };
         }
     }
 

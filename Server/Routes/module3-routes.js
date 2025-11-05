@@ -81,6 +81,8 @@ const router = express.Router();
 const BatchSyncService = require('../Services/BatchSyncService');
 const auditLogger = require('../Services/auditLogger');
 const { Pool } = require('pg');
+const { query } = require('../config/database');
+const { requireAuth: auth } = require('../Middleware/auth');
 
 // Database configuration
 const DB_CONFIG = {
@@ -2089,6 +2091,91 @@ function generateWarnings(impact, conflicts) {
 
     return warnings;
 }
+
+/**
+ * Get real-time available partial packages for a batch
+ * GET /api/v1/batches/:batchId/partial-packages/available
+ * Permissions: sales_rep, sales_admin
+ */
+router.get('/batches/:batchId/partial-packages/available', auth, async (req, res) => {
+    try {
+        const { batchId } = req.params;
+
+        // Get batch with partial package details
+        const batch = await query(`
+            SELECT 
+                id,
+                batch_name,
+                partial_package_count,
+                partial_package_details
+            FROM "ORDERS-batches"
+            WHERE id = $1
+        `, [batchId]);
+
+        if (batch.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Batch not found'
+            });
+        }
+
+        const batchData = batch.rows[0];
+
+        if (!batchData.partial_package_details || batchData.partial_package_count === 0) {
+            return res.json({
+                success: true,
+                batch_id: parseInt(batchId),
+                batch_name: batchData.batch_name,
+                partial_packages: []
+            });
+        }
+
+        // Parse partial package details
+        const partialPackageDetails = batchData.partial_package_details.partial_packages || [];
+        
+        // Check which packages are allocated to active invoices
+        const partialPackages = await Promise.all(
+            partialPackageDetails.map(async (pkg) => {
+                // Check if this package is allocated to any active invoice
+                const allocationCheck = await query(`
+                    SELECT 
+                        i.id as invoice_id,
+                        i.invoice_number,
+                        i.status
+                    FROM "ORDERS-invoice-line-items" li
+                    INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
+                    WHERE li.fk_batch_id = $1
+                      AND li.specific_package_labels @> $2::jsonb
+                      AND i.status NOT IN ('Cancelled', 'Paid', 'Fully_Rejected')
+                `, [batchId, JSON.stringify([pkg.label])]);
+
+                const isAllocated = allocationCheck.rows.length > 0;
+                const allocatedTo = isAllocated ? allocationCheck.rows[0].invoice_number : null;
+
+                return {
+                    label: pkg.label,
+                    quantity: parseFloat(pkg.quantity || 0),
+                    available: !isAllocated,
+                    allocated_to: allocatedTo
+                };
+            })
+        );
+
+        res.json({
+            success: true,
+            batch_id: parseInt(batchId),
+            batch_name: batchData.batch_name,
+            partial_packages: partialPackages
+        });
+    } catch (error) {
+        console.error('Error getting partial packages:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get partial packages',
+            details: error.message
+        });
+    }
+});
 
 module.exports = router;
 

@@ -14,6 +14,7 @@ router.get('/api/portal/:uuid/inventory', authenticatePortalAccess, PortalContro
 router.post('/api/portal/:uuid/cart/add', authenticatePortalAccess, PortalController.addToCart);
 router.post('/api/portal/:uuid/cart/remove', authenticatePortalAccess, PortalController.removeFromCart);
 router.post('/api/portal/:uuid/cart/update', authenticatePortalAccess, PortalController.updateCartItem);
+router.post('/api/portal/:uuid/cart/extend', authenticatePortalAccess, requirePortalAccess, PortalController.extendCart);
 
 // Update invoice location
 router.post('/api/portal/:uuid/update-location', authenticatePortalAccess, requirePortalAccess, PortalController.updateInvoiceLocation);

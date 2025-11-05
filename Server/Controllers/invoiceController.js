@@ -927,6 +927,773 @@ class InvoiceController {
             });
         }
     }
+
+    /**
+     * Add line item to existing draft invoice
+     * POST /api/v1/invoices/:id/line-items
+     */
+    async addLineItem(req, res) {
+        try {
+            const { id } = req.params;
+            const { fk_batch_id, quantity, partial_packages_selected } = req.body;
+            const userId = req.session.userId || req.user?.id;
+
+            if (!fk_batch_id || !quantity) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'fk_batch_id and quantity are required'
+                });
+            }
+
+            // Verify invoice exists and is in Draft status
+            const invoice = await query(`
+                SELECT id, status, fk_buyer_id, fk_location_id
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [id]);
+
+            if (invoice.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Invoice not found'
+                });
+            }
+
+            if (invoice.rows[0].status !== 'Draft') {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Line items can only be added to draft invoices'
+                });
+            }
+
+            const internalInvoiceService = require('../Services/internalInvoiceService');
+            const client = await internalInvoiceService.pool.connect();
+
+            try {
+                await client.query('BEGIN');
+
+                const lineItemId = await internalInvoiceService.addLineItem(
+                    parseInt(id),
+                    {
+                        fk_batch_id: parseInt(fk_batch_id),
+                        quantity: parseInt(quantity),
+                        partial_packages_selected: partial_packages_selected || null
+                    },
+                    userId,
+                    client
+                );
+
+                // Recalculate totals
+                await internalInvoiceService.recalculateTotals(parseInt(id), client);
+
+                await client.query('COMMIT');
+
+                // Get updated invoice totals
+                const updatedInvoice = await query(`
+                    SELECT subtotal, total, discount_amount, credit_applied
+                    FROM "ORDERS-invoices"
+                    WHERE id = $1
+                `, [id]);
+
+                res.json({
+                    success: true,
+                    message: 'Line item added successfully',
+                    line_item_id: lineItemId,
+                    invoice: updatedInvoice.rows[0]
+                });
+            } catch (error) {
+                await client.query('ROLLBACK');
+                throw error;
+            } finally {
+                client.release();
+            }
+        } catch (error) {
+            console.error('Error adding line item:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to add line item',
+                details: error.message
+            });
+        }
+    }
+
+    /**
+     * Update line item quantity
+     * PATCH /api/v1/invoices/:id/line-items/:lineItemId
+     */
+    async updateLineItem(req, res) {
+        try {
+            const { id, lineItemId } = req.params;
+            const { quantity } = req.body;
+            const userId = req.session.userId || req.user?.id;
+
+            if (!quantity || quantity <= 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Valid quantity is required'
+                });
+            }
+
+            const internalInvoiceService = require('../Services/internalInvoiceService');
+            const allocationService = require('../Services/allocationService');
+            const client = await internalInvoiceService.pool.connect();
+
+            try {
+                await client.query('BEGIN');
+
+                // Get current line item
+                const lineItem = await client.query(`
+                    SELECT 
+                        li.*,
+                        i.status,
+                        i.fk_location_id
+                    FROM "ORDERS-invoice-line-items" li
+                    INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
+                    WHERE li.id = $1 AND li.fk_invoice_id = $2
+                    FOR UPDATE
+                `, [lineItemId, id]);
+
+                if (lineItem.rows.length === 0) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({
+                        success: false,
+                        error: 'Line item not found'
+                    });
+                }
+
+                const item = lineItem.rows[0];
+
+                if (item.status !== 'Draft') {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({
+                        success: false,
+                        error: 'Line items can only be updated in draft invoices'
+                    });
+                }
+
+                const currentQuantity = parseInt(item.quantity_ordered);
+                const currentAllocated = parseInt(item.quantity_allocated || 0);
+                const newQuantity = parseInt(quantity);
+                const quantityDelta = newQuantity - currentQuantity;
+
+                // Check batch availability if increasing quantity
+                if (quantityDelta > 0) {
+                    const batch = await client.query(`
+                        SELECT quantity, allocated_quantity
+                        FROM "ORDERS-batches"
+                        WHERE id = $1
+                        FOR UPDATE
+                    `, [item.fk_batch_id]);
+
+                    if (batch.rows.length === 0) {
+                        await client.query('ROLLBACK');
+                        return res.status(404).json({
+                            success: false,
+                            error: 'Batch not found'
+                        });
+                    }
+
+                    const available = batch.rows[0].quantity - batch.rows[0].allocated_quantity;
+                    
+                    if (available < quantityDelta) {
+                        await client.query('ROLLBACK');
+                        return res.status(400).json({
+                            success: false,
+                            error: `Insufficient inventory. Available: ${available}, Requested: ${quantityDelta}`
+                        });
+                    }
+
+                    // Allocate additional quantity
+                    await client.query(`
+                        UPDATE "ORDERS-batches"
+                        SET allocated_quantity = allocated_quantity + $1
+                        WHERE id = $2
+                    `, [quantityDelta, item.fk_batch_id]);
+
+                    // Log batch history
+                    await client.query(`
+                        INSERT INTO "ORDERS-batch-history" (
+                            batch_id, change_type, field_name,
+                            old_value, new_value, reason,
+                            related_invoice_id, changed_by_system
+                        ) VALUES ($1, 'allocation_increased', 'allocated_quantity',
+                                  $2, $3, 'Line item quantity increased', $4, true)
+                    `, [
+                        item.fk_batch_id,
+                        batch.rows[0].allocated_quantity,
+                        batch.rows[0].allocated_quantity + quantityDelta,
+                        id
+                    ]);
+                } else if (quantityDelta < 0) {
+                    // Release allocation if decreasing quantity
+                    const releaseQty = Math.abs(quantityDelta);
+                    await client.query(`
+                        UPDATE "ORDERS-batches"
+                        SET allocated_quantity = allocated_quantity - $1
+                        WHERE id = $2
+                    `, [releaseQty, item.fk_batch_id]);
+
+                    // Log batch history
+                    await client.query(`
+                        INSERT INTO "ORDERS-batch-history" (
+                            batch_id, change_type, field_name,
+                            old_value, new_value, reason,
+                            related_invoice_id, changed_by_system
+                        ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
+                                  $2, $3, 'Line item quantity decreased', $4, true)
+                    `, [
+                        item.fk_batch_id,
+                        currentAllocated,
+                        currentAllocated - releaseQty,
+                        id
+                    ]);
+                }
+
+                // Update line item
+                const unitPrice = parseFloat(item.unit_price);
+                const newLineTotal = unitPrice * newQuantity - parseFloat(item.line_discount_amount || 0);
+
+                await client.query(`
+                    UPDATE "ORDERS-invoice-line-items"
+                    SET 
+                        quantity_ordered = $1,
+                        quantity_allocated = $1,
+                        line_total = $2,
+                        updated_at = NOW()
+                    WHERE id = $3
+                `, [newQuantity, newLineTotal, lineItemId]);
+
+                // Recalculate invoice totals
+                await internalInvoiceService.recalculateTotals(parseInt(id), client);
+
+                // Log to invoice history
+                await client.query(`
+                    INSERT INTO "ORDERS-invoice-history" (
+                        fk_invoice_id, modification_type, field_name,
+                        old_value, new_value, reason, changed_by_user_id
+                    ) VALUES ($1, 'line_item_quantity_changed', $2, $3, $4, 'Quantity updated', $5)
+                `, [id, `line_item_${lineItemId}`, currentQuantity.toString(), newQuantity.toString(), userId]);
+
+                await client.query('COMMIT');
+
+                // Broadcast inventory update
+                if (quantityDelta !== 0) {
+                    try {
+                        const batch = await client.query(`
+                            SELECT quantity, allocated_quantity
+                            FROM "ORDERS-batches"
+                            WHERE id = $1
+                        `, [item.fk_batch_id]);
+
+                        if (batch.rows.length > 0) {
+                            const newAvailable = batch.rows[0].quantity - batch.rows[0].allocated_quantity;
+                            await allocationService.broadcastInventoryUpdate(item.fk_batch_id, newAvailable);
+                        }
+                    } catch (wsError) {
+                        console.error('WebSocket broadcast error (non-critical):', wsError.message);
+                    }
+                }
+
+                // Get updated invoice
+                const updatedInvoice = await query(`
+                    SELECT subtotal, total, discount_amount, credit_applied
+                    FROM "ORDERS-invoices"
+                    WHERE id = $1
+                `, [id]);
+
+                res.json({
+                    success: true,
+                    message: 'Line item updated successfully',
+                    invoice: updatedInvoice.rows[0]
+                });
+            } catch (error) {
+                await client.query('ROLLBACK');
+                throw error;
+            } finally {
+                client.release();
+            }
+        } catch (error) {
+            console.error('Error updating line item:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to update line item',
+                details: error.message
+            });
+        }
+    }
+
+    /**
+     * Remove line item from invoice
+     * DELETE /api/v1/invoices/:id/line-items/:lineItemId
+     */
+    async removeLineItem(req, res) {
+        try {
+            const { id, lineItemId } = req.params;
+            const userId = req.session.userId || req.user?.id;
+
+            const internalInvoiceService = require('../Services/internalInvoiceService');
+            const allocationService = require('../Services/allocationService');
+            const client = await internalInvoiceService.pool.connect();
+
+            try {
+                await client.query('BEGIN');
+
+                // Get line item details
+                const lineItem = await client.query(`
+                    SELECT 
+                        li.*,
+                        i.status
+                    FROM "ORDERS-invoice-line-items" li
+                    INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
+                    WHERE li.id = $1 AND li.fk_invoice_id = $2
+                    FOR UPDATE
+                `, [lineItemId, id]);
+
+                if (lineItem.rows.length === 0) {
+                    await client.query('ROLLBACK');
+                    return res.status(404).json({
+                        success: false,
+                        error: 'Line item not found'
+                    });
+                }
+
+                const item = lineItem.rows[0];
+
+                if (item.status !== 'Draft') {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({
+                        success: false,
+                        error: 'Line items can only be removed from draft invoices'
+                    });
+                }
+
+                const allocatedQty = parseInt(item.quantity_allocated || 0);
+
+                // Release allocation
+                if (allocatedQty > 0) {
+                    await client.query(`
+                        UPDATE "ORDERS-batches"
+                        SET allocated_quantity = allocated_quantity - $1
+                        WHERE id = $2
+                    `, [allocatedQty, item.fk_batch_id]);
+
+                    // Log batch history
+                    await client.query(`
+                        INSERT INTO "ORDERS-batch-history" (
+                            batch_id, change_type, field_name,
+                            old_value, new_value, reason,
+                            related_invoice_id, changed_by_system
+                        ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
+                                  $2, $3, 'Line item removed', $4, true)
+                    `, [
+                        item.fk_batch_id,
+                        allocatedQty.toString(),
+                        '0',
+                        id
+                    ]);
+                }
+
+                // Delete line item
+                await client.query(`
+                    DELETE FROM "ORDERS-invoice-line-items"
+                    WHERE id = $1
+                `, [lineItemId]);
+
+                // Recalculate invoice totals
+                await internalInvoiceService.recalculateTotals(parseInt(id), client);
+
+                // Log to invoice history
+                await client.query(`
+                    INSERT INTO "ORDERS-invoice-history" (
+                        fk_invoice_id, modification_type, field_name,
+                        old_value, new_value, reason, changed_by_user_id
+                    ) VALUES ($1, 'line_item_removed', $2, $3, NULL, 'Line item removed', $4)
+                `, [id, `line_item_${lineItemId}`, item.quantity_ordered.toString(), userId]);
+
+                await client.query('COMMIT');
+
+                // Broadcast inventory update
+                if (allocatedQty > 0) {
+                    try {
+                        const batch = await client.query(`
+                            SELECT quantity, allocated_quantity
+                            FROM "ORDERS-batches"
+                            WHERE id = $1
+                        `, [item.fk_batch_id]);
+
+                        if (batch.rows.length > 0) {
+                            const newAvailable = batch.rows[0].quantity - batch.rows[0].allocated_quantity;
+                            await allocationService.broadcastInventoryUpdate(item.fk_batch_id, newAvailable);
+                        }
+                    } catch (wsError) {
+                        console.error('WebSocket broadcast error (non-critical):', wsError.message);
+                    }
+                }
+
+                // Get updated invoice
+                const updatedInvoice = await query(`
+                    SELECT subtotal, total, discount_amount, credit_applied
+                    FROM "ORDERS-invoices"
+                    WHERE id = $1
+                `, [id]);
+
+                res.json({
+                    success: true,
+                    message: 'Line item removed successfully',
+                    invoice: updatedInvoice.rows[0]
+                });
+            } catch (error) {
+                await client.query('ROLLBACK');
+                throw error;
+            } finally {
+                client.release();
+            }
+        } catch (error) {
+            console.error('Error removing line item:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to remove line item',
+                details: error.message
+            });
+        }
+    }
+
+    /**
+     * Submit invoice for fulfillment
+     * POST /api/v1/invoices/:id/submit
+     */
+    async submitForFulfillment(req, res) {
+        try {
+            const { id } = req.params;
+            const userId = req.session.userId || req.user?.id;
+
+            // Transition to Approved (internal orders go straight to Approved)
+            const result = await invoiceStateMachine.transitionTo(
+                id,
+                'Approved',
+                userId,
+                'Invoice submitted for fulfillment'
+            );
+
+            if (!result.success) {
+                return res.status(400).json({
+                    success: false,
+                    error: result.error || 'Failed to submit invoice',
+                    validTransitions: result.validTransitions
+                });
+            }
+
+            res.json({
+                success: true,
+                message: 'Invoice submitted for fulfillment',
+                status: result.newStatus
+            });
+        } catch (error) {
+            console.error('Error submitting invoice:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to submit invoice',
+                details: error.message
+            });
+        }
+    }
+
+    /**
+     * Approve pending order
+     * POST /api/v1/invoices/:id/approve
+     */
+    async approveInvoice(req, res) {
+        try {
+            const { id } = req.params;
+            const { reason } = req.body;
+            const userId = req.session.userId || req.user?.id;
+
+            // Transition from Pending_Approval to Approved
+            const result = await invoiceStateMachine.transitionTo(
+                id,
+                'Approved',
+                userId,
+                reason || 'Order approved by sales rep'
+            );
+
+            if (!result.success) {
+                return res.status(400).json({
+                    success: false,
+                    error: result.error || 'Failed to approve invoice',
+                    validTransitions: result.validTransitions
+                });
+            }
+
+            res.json({
+                success: true,
+                message: 'Invoice approved successfully',
+                status: result.newStatus
+            });
+        } catch (error) {
+            console.error('Error approving invoice:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to approve invoice',
+                details: error.message
+            });
+        }
+    }
+
+    /**
+     * Reject pending order
+     * POST /api/v1/invoices/:id/reject
+     */
+    async rejectInvoice(req, res) {
+        try {
+            const { id } = req.params;
+            const { reason } = req.body;
+            const userId = req.session.userId || req.user?.id;
+
+            if (!reason) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Rejection reason is required'
+                });
+            }
+
+            // Transition to Cancelled
+            const result = await invoiceStateMachine.transitionTo(
+                id,
+                'Cancelled',
+                userId,
+                `Order rejected: ${reason}`
+            );
+
+            if (!result.success) {
+                return res.status(400).json({
+                    success: false,
+                    error: result.error || 'Failed to reject invoice',
+                    validTransitions: result.validTransitions
+                });
+            }
+
+            res.json({
+                success: true,
+                message: 'Invoice rejected and cancelled',
+                status: result.newStatus
+            });
+        } catch (error) {
+            console.error('Error rejecting invoice:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to reject invoice',
+                details: error.message
+            });
+        }
+    }
+
+    /**
+     * Get invoice history
+     * GET /api/v1/invoices/:id/history
+     */
+    async getInvoiceHistory(req, res) {
+        try {
+            const { id } = req.params;
+
+            // Verify invoice exists and user has access
+            const invoice = await query(`
+                SELECT id, fk_buyer_id, assigned_sales_rep_id
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [id]);
+
+            if (invoice.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Invoice not found'
+                });
+            }
+
+            // Get history
+            const history = await query(`
+                SELECT 
+                    h.*,
+                    u.first_name || ' ' || u.last_name as changed_by_name,
+                    u.email as changed_by_email
+                FROM "ORDERS-invoice-history" h
+                LEFT JOIN users u ON h.changed_by_user_id = u.id
+                WHERE h.fk_invoice_id = $1
+                ORDER BY h.changed_at DESC
+            `, [id]);
+
+            res.json({
+                success: true,
+                history: history.rows
+            });
+        } catch (error) {
+            console.error('Error getting invoice history:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to get invoice history',
+                details: error.message
+            });
+        }
+    }
+
+    /**
+     * Accept order for fulfillment
+     * POST /api/v1/invoices/:id/fulfillment/accept
+     */
+    async acceptFulfillment(req, res) {
+        try {
+            const { id } = req.params;
+            const userId = req.session.userId || req.user?.id;
+
+            // Transition to Fulfillment_Accepted
+            const result = await invoiceStateMachine.transitionTo(
+                id,
+                'Fulfillment_Accepted',
+                userId,
+                'Order accepted by fulfillment team'
+            );
+
+            if (!result.success) {
+                return res.status(400).json({
+                    success: false,
+                    error: result.error || 'Failed to accept order',
+                    validTransitions: result.validTransitions
+                });
+            }
+
+            res.json({
+                success: true,
+                message: 'Order accepted for fulfillment',
+                status: result.newStatus
+            });
+        } catch (error) {
+            console.error('Error accepting fulfillment:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to accept order',
+                details: error.message
+            });
+        }
+    }
+
+    /**
+     * Report fulfillment issue
+     * POST /api/v1/invoices/:id/fulfillment/issue
+     */
+    async reportFulfillmentIssue(req, res) {
+        try {
+            const { id } = req.params;
+            const { issues, note } = req.body;
+            const userId = req.session.userId || req.user?.id;
+
+            if (!issues || !Array.isArray(issues) || issues.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'issues array is required and must not be empty'
+                });
+            }
+
+            // Build issue note from issues array
+            const issueDescriptions = issues.map(issue => {
+                return `${issue.type}: ${issue.batch_name || issue.batch_id} - ${issue.description || 'No description'}`;
+            }).join('\n');
+
+            const fullNote = note 
+                ? `${note}\n\nIssues:\n${issueDescriptions}`
+                : `Fulfillment issues reported:\n${issueDescriptions}`;
+
+            // Transition to Fulfillment_Issue
+            const result = await invoiceStateMachine.transitionTo(
+                id,
+                'Fulfillment_Issue',
+                userId,
+                fullNote
+            );
+
+            if (!result.success) {
+                return res.status(400).json({
+                    success: false,
+                    error: result.error || 'Failed to report issue',
+                    validTransitions: result.validTransitions
+                });
+            }
+
+            // Update fulfillment issue note
+            await query(`
+                UPDATE "ORDERS-invoices"
+                SET fulfillment_issue_note = $1
+                WHERE id = $2
+            `, [fullNote, id]);
+
+            // Log detailed issue information
+            await query(`
+                INSERT INTO "ORDERS-invoice-history" (
+                    fk_invoice_id, modification_type, field_name,
+                    old_value, new_value, reason, change_details,
+                    changed_by_user_id, triggered_by_fulfillment_issue
+                ) VALUES ($1, 'fulfillment_issue_reported', 'fulfillment_issues',
+                          NULL, $2, 'Fulfillment issues reported', $3, $4, true)
+            `, [id, JSON.stringify(issues), JSON.stringify({ issues }), userId]);
+
+            res.json({
+                success: true,
+                message: 'Fulfillment issues reported',
+                status: result.newStatus
+            });
+        } catch (error) {
+            console.error('Error reporting fulfillment issue:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to report issue',
+                details: error.message
+            });
+        }
+    }
+
+    /**
+     * Get buyer's invoices
+     * GET /api/v1/buyers/:buyerId/invoices?location_id=456
+     */
+    async getBuyerInvoices(req, res) {
+        try {
+            const { buyerId } = req.params;
+            const { location_id } = req.query;
+
+            let queryStr = `
+                SELECT 
+                    i.*,
+                    l.name as location_name,
+                    u.first_name || ' ' || u.last_name as sales_rep_name
+                FROM "ORDERS-invoices" i
+                LEFT JOIN "ORDERS-buyer_locations" l ON i.fk_location_id = l.entry_id
+                LEFT JOIN users u ON i.assigned_sales_rep_id = u.id
+                WHERE i.fk_buyer_id = $1
+            `;
+
+            const params = [buyerId];
+            let paramIndex = 2;
+
+            if (location_id) {
+                queryStr += ` AND i.fk_location_id = $${paramIndex}`;
+                params.push(location_id);
+            }
+
+            queryStr += ` ORDER BY i.created_at DESC`;
+
+            const invoices = await query(queryStr, params);
+
+            res.json({
+                success: true,
+                invoices: invoices.rows
+            });
+        } catch (error) {
+            console.error('Error getting buyer invoices:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to get buyer invoices',
+                details: error.message
+            });
+        }
+    }
 }
 
 module.exports = new InvoiceController();

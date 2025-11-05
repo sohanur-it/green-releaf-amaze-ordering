@@ -222,7 +222,18 @@ class InternalInvoiceService {
             specificLabels ? JSON.stringify(specificLabels) : null
         ]);
         
-        // Allocate from batch
+        // Allocate from batch (using allocation service for proper WebSocket broadcasts)
+        const allocationService = require('./allocationService');
+        
+        // Update quantity_allocated on line item first
+        await client.query(`
+            UPDATE "ORDERS-invoice-line-items"
+            SET quantity_allocated = $1
+            WHERE id = $2
+        `, [itemData.quantity, lineItem.rows[0].id]);
+        
+        // Allocate from batch and broadcast via WebSocket
+        const oldAllocated = b.allocated_quantity;
         await client.query(`
             UPDATE "ORDERS-batches"
             SET allocated_quantity = allocated_quantity + $1
@@ -230,7 +241,6 @@ class InternalInvoiceService {
         `, [itemData.quantity, itemData.fk_batch_id]);
         
         // Log batch history
-        const oldAllocated = b.allocated_quantity;
         await client.query(`
             INSERT INTO "ORDERS-batch-history" (
                 batch_id, change_type, field_name,
@@ -244,6 +254,17 @@ class InternalInvoiceService {
             oldAllocated + itemData.quantity, 
             invoiceId
         ]);
+        
+        // Broadcast inventory update via WebSocket (after transaction commits)
+        // Note: We do this outside the transaction to avoid issues
+        const newAvailable = available - itemData.quantity;
+        try {
+            // Use allocation service's broadcast method which handles WebSocket
+            await allocationService.broadcastInventoryUpdate(itemData.fk_batch_id, newAvailable);
+        } catch (wsError) {
+            console.error('WebSocket broadcast error (non-critical):', wsError.message);
+            // Don't fail the allocation if WebSocket broadcast fails
+        }
         
         return lineItem.rows[0].id;
     }
