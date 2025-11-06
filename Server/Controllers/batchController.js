@@ -96,7 +96,7 @@ class BatchController {
             
             console.log(`🔄 Promoting batches for product ${productId} (triggered by user ${userId})`);
             
-            const result = await batchStatusService.promoteBatchesToSellable(parseInt(productId));
+            const result = await batchStatusService.promoteBatchesToSellable(parseInt(productId), userId);
             
             if (result.success) {
                 res.json({

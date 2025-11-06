@@ -90,9 +90,10 @@ class BatchStatusService {
     /**
      * Promote On Deck batches to Sellable status
      * @param {number} productId - Product ID
+     * @param {number|null} userId - User ID if manually triggered (null for system/auto-promotion)
      * @returns {Promise<Object>} - Promotion result
      */
-    async promoteBatchesToSellable(productId) {
+    async promoteBatchesToSellable(productId, userId = null) {
         const client = await this.pool.connect();
         
         try {
@@ -116,10 +117,15 @@ class BatchStatusService {
                 UPDATE "ORDERS-batches" 
                 SET status = 'Sellable', updated_at = NOW()
                 WHERE id = ANY($1)
-                RETURNING id, batch_name, quantity, allocated_quantity
+                RETURNING id, batch_name, quantity, allocated_quantity, fk_master_product_id
             `;
             
             const updateResult = await client.query(updateQuery, [batchIds]);
+            
+            const isManualPromotion = userId !== null;
+            const reason = isManualPromotion 
+                ? 'Manually promoted by user' 
+                : 'Auto-promoted: Sellable inventory depleted';
             
             // Log to batch history for each promoted batch
             for (const batch of updateResult.rows) {
@@ -127,27 +133,57 @@ class BatchStatusService {
                     INSERT INTO "ORDERS-batch-history" (
                         batch_id, change_type, field_name,
                         old_value, new_value, reason,
-                        changed_by_system
-                    ) VALUES ($1, 'status_changed', 'status', 'On Deck', 'Sellable', 
-                              'Auto-promoted: Sellable inventory depleted', true)
-                `, [batch.id]);
+                        changed_by_user_id, changed_by_system
+                    ) VALUES ($1, 'status_changed', 'status', 'On Deck', 'Sellable', $2, $3, $4)
+                `, [batch.id, reason, userId, !isManualPromotion]);
             }
             
             await client.query('COMMIT');
             
-            // Log the promotion action
+            // Log individual batch updates to audit trail (for manual promotions)
+            if (isManualPromotion) {
+                for (const batch of updateResult.rows) {
+                    await auditLogger.logAction({
+                        userId: userId,
+                        action: 'batch_status_update',
+                        resourceType: 'Batch',
+                        resourceId: batch.id.toString(),
+                        details: {
+                            message: `User ID ${userId} manually promoted Batch "${batch.batch_name}" from "On Deck" to "Sellable" (Quantity: ${batch.quantity})`,
+                            batch_id: batch.id,
+                            batch_name: batch.batch_name,
+                            old_status: 'On Deck',
+                            new_status: 'Sellable',
+                            quantity: batch.quantity,
+                            allocated_quantity: batch.allocated_quantity,
+                            product_id: batch.fk_master_product_id,
+                            reason: reason,
+                            update_type: 'manual_promotion',
+                            changed: true
+                        },
+                        status: 'success',
+                        sourceIp: null
+                    });
+                }
+            }
+            
+            // Log the promotion action (summary for auto-promotion, or additional summary for manual)
             await auditLogger.logAction({
-                userId: null, // SYSTEM action
-                action: 'batch_status_update',
-                resourceType: 'Batch',
+                userId: userId, // null for SYSTEM action, userId for manual
+                action: isManualPromotion ? 'batch_promotion_manual' : 'batch_promotion_auto',
+                resourceType: 'Product',
                 resourceId: productId.toString(),
                 details: {
-                    message: `System automatically promoted ${updateResult.rows.length} batch(es) to Sellable for Product ID ${productId} due to inventory depletion`,
+                    message: isManualPromotion
+                        ? `User ID ${userId} manually promoted ${updateResult.rows.length} batch(es) to Sellable for Product ID ${productId}`
+                        : `System automatically promoted ${updateResult.rows.length} batch(es) to Sellable for Product ID ${productId} due to inventory depletion`,
                     batch_count: updateResult.rows.length,
                     batch_names: updateResult.rows.map(row => row.batch_name).join(', '),
+                    batch_ids: updateResult.rows.map(row => row.id),
                     new_status: 'Sellable',
                     product_id: productId,
-                    promotion_reason: 'Inventory depletion'
+                    promotion_reason: reason,
+                    promotion_type: isManualPromotion ? 'manual' : 'automatic'
                 },
                 status: 'success',
                 sourceIp: null

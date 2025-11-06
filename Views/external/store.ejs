@@ -397,10 +397,6 @@
         
         <!-- Pagination -->
         <div class="pagination-container">
-            <div class="pagination-left">
-                <span class="pagination-label">Powered by</span>
-                <div class="apex-logo">APEX<br>TRADING</div>
-            </div>
             <div class="pagination-controls">
                 <span class="pagination-label">Show Per Page</span>
                 <select class="pagination-dropdown" id="items-per-page" onchange="changeItemsPerPage()">
@@ -429,10 +425,10 @@
                 </div>
             </div>
             <div class="pagination-right">
-                <a href="#" class="social-link">
+                <a href="https://www.instagram.com/amaze.missouri/#" target="_blank" rel="noopener noreferrer" class="social-link">
                     <i class="fab fa-instagram"></i> Instagram
                 </a>
-                <a href="#" class="social-link">
+                <a href="https://www.amazecannabis.com/" target="_blank" rel="noopener noreferrer" class="social-link">
                     <i class="fas fa-globe"></i> Website
                 </a>
             </div>
@@ -644,6 +640,18 @@ document.addEventListener('DOMContentLoaded', function() {
     const cart = getCartManager();
     if (cart) {
         renderCart();
+    }
+    
+    // Add click handler for cart dropdown arrow to close cart
+    const cartDropdown = document.querySelector('.cart-dropdown');
+    if (cartDropdown) {
+        cartDropdown.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (typeof window.toggleCart === 'function') {
+                window.toggleCart(false); // Close the cart
+            }
+        });
     }
     
     // Load saved view preference (URL param overrides localStorage)
@@ -924,6 +932,30 @@ async function addToCart(event, batchId) {
     // Add to cart instantly (frontend only)
     cart.addItem(batchId, quantity, productData);
     
+    // Sync to backend in real-time
+    fetch(`/api/portal/${cart.uuid}/cart/add`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+            batch_id: batchId,
+            quantity: quantity
+        })
+    }).then(response => response.json())
+    .then(data => {
+        if (data.success && data.line_item_id) {
+            // Update the cart item with the real line_item_id from backend
+            const cartItem = cart.cart.items.find(item => item.batch_id === batchId);
+            if (cartItem) {
+                cartItem.line_item_id = data.line_item_id;
+                cart.saveCart();
+            }
+        }
+    }).catch(err => {
+        console.error('Error syncing item to backend:', err);
+    });
+    
     // Show success notification
     const itemText = quantity === 1 ? '1 item' : `${quantity} items`;
     if (typeof showNotification !== 'undefined') {
@@ -1065,6 +1097,23 @@ function updateQuantity(lineItemId, delta) {
     const updated = cart.updateQuantity(item.batch_id, newQuantity);
     if (updated) {
         renderCart();
+        
+        // Sync to backend in real-time
+        if (item.line_item_id && !item.line_item_id.startsWith('temp_')) {
+            // Only sync if we have a real line_item_id (not a temp one)
+            fetch(`/api/portal/${cart.uuid}/cart/update`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    line_item_id: item.line_item_id,
+                    quantity: newQuantity
+                })
+            }).catch(err => {
+                console.error('Error syncing quantity update:', err);
+            });
+        }
     } else {
         console.error('Failed to update quantity for batch:', item.batch_id);
     }
@@ -1138,6 +1187,23 @@ function removeItem(lineItemId, batchId) {
     // Remove instantly (frontend only) - use batch_id as that's what the cart manager uses
     cart.removeItem(batchId || item.batch_id);
     renderCart();
+    
+    // Sync to backend in real-time
+    if (lineItemId && !lineItemId.startsWith('temp_')) {
+        // Only sync if we have a real line_item_id (not a temp one)
+        fetch(`/api/portal/${cart.uuid}/cart/remove`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                line_item_id: lineItemId,
+                batch_id: batchId || item.batch_id
+            })
+        }).catch(err => {
+            console.error('Error syncing item removal:', err);
+        });
+    }
     
     if (typeof showNotification !== 'undefined') {
         showNotification('Item removed from cart', 'success');

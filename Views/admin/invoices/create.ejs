@@ -7,11 +7,18 @@
 }
 
 .form-section {
-    background: white;
+    background: var(--card-bg, white);
     border-radius: 8px;
     padding: 20px;
     margin-bottom: 20px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    box-shadow: var(--card-shadow, 0 2px 4px rgba(0,0,0,0.1));
+    border: 1px solid var(--border-color, #e1e4e8);
+}
+
+.form-section h3 {
+    color: var(--text-color, #24292e);
+    margin-top: 0;
+    margin-bottom: 16px;
 }
 
 .form-group {
@@ -22,16 +29,27 @@
     display: block;
     margin-bottom: 8px;
     font-weight: 600;
-    color: #333;
+    color: var(--text-color, #24292e);
 }
 
 .form-group select,
-.form-group input {
+.form-group input,
+.form-group textarea {
     width: 100%;
     padding: 10px;
-    border: 1px solid #ddd;
+    border: 1px solid var(--border-color, #ddd);
     border-radius: 4px;
     font-size: 14px;
+    background: var(--input-bg, white);
+    color: var(--text-color, #24292e);
+}
+
+.form-group select:focus,
+.form-group input:focus,
+.form-group textarea:focus {
+    outline: none;
+    border-color: var(--primary-color, #4a90e2);
+    box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
 }
 
 .product-search-section {
@@ -41,20 +59,26 @@
 .product-search-results {
     max-height: 300px;
     overflow-y: auto;
-    border: 1px solid #ddd;
+    border: 1px solid var(--border-color, #ddd);
     border-radius: 4px;
     margin-top: 10px;
     display: none;
+    background: var(--card-bg, white);
 }
 
 .product-result-item {
     padding: 12px;
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid var(--border-color, #eee);
     cursor: pointer;
+    color: var(--text-color, #24292e);
 }
 
 .product-result-item:hover {
-    background: #f5f5f5;
+    background: var(--hover-bg, #f5f5f5);
+}
+
+.product-result-item:last-child {
+    border-bottom: none;
 }
 
 .line-items-list {
@@ -65,14 +89,16 @@
     display: flex;
     align-items: center;
     padding: 12px;
-    background: #f9f9f9;
+    background: var(--hover-bg, #f9f9f9);
     border-radius: 4px;
     margin-bottom: 10px;
     gap: 12px;
+    border: 1px solid var(--border-color, #e1e4e8);
 }
 
 .line-item-info {
     flex: 1;
+    color: var(--text-color, #24292e);
 }
 
 .line-item-actions {
@@ -86,11 +112,16 @@
     border: none;
     cursor: pointer;
     font-weight: 500;
+    transition: all 0.2s;
 }
 
 .btn-primary {
-    background: #007bff;
+    background: var(--primary-color, #007bff);
     color: white;
+}
+
+.btn-primary:hover {
+    background: var(--primary-hover, #0056b3);
 }
 
 .btn-danger {
@@ -98,22 +129,68 @@
     color: white;
 }
 
+.btn-danger:hover {
+    background: #c82333;
+}
+
 .btn-secondary {
     background: #6c757d;
     color: white;
+}
+
+.btn-secondary:hover {
+    background: #5a6268;
 }
 
 .totals-section {
     text-align: right;
     margin-top: 20px;
     padding-top: 20px;
-    border-top: 2px solid #ddd;
+    border-top: 2px solid var(--border-color, #ddd);
+    color: var(--text-color, #24292e);
 }
 
 .empty-state {
     text-align: center;
     padding: 40px;
-    color: #999;
+    color: var(--text-light, #999);
+}
+
+.page-header h1 {
+    color: var(--text-color, #24292e);
+}
+
+#location-dropdown {
+    background: var(--card-bg, white) !important;
+    border: 1px solid var(--border-color, #ddd) !important;
+    color: var(--text-color, #24292e) !important;
+}
+
+#location-dropdown .location-option {
+    padding: 10px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border-color, #eee);
+    color: var(--text-color, #24292e);
+}
+
+#location-dropdown .location-option:hover {
+    background: var(--hover-bg, #f5f5f5);
+}
+
+#location-dropdown .location-option:last-child {
+    border-bottom: none;
+}
+
+.batch-option:hover {
+    background: var(--hover-bg, #f5f5f5);
+}
+
+.batch-option:last-child {
+    border-bottom: none;
+}
+
+#batch-modal .form-section {
+    margin-bottom: 0;
 }
 </style>
 
@@ -129,26 +206,30 @@
             <h3>Location Selection</h3>
             <div class="form-group">
                 <label for="location-select">Buyer Location *</label>
-                <select id="location-select" required>
-                    <option value="">-- Select Location --</option>
-                    <% 
-                    // Group buyers by name
-                    const buyerGroups = {};
-                    buyers.forEach(item => {
-                        if (!buyerGroups[item.buyer_name]) {
-                            buyerGroups[item.buyer_name] = [];
-                        }
-                        buyerGroups[item.buyer_name].push(item);
-                    });
-                    
-                    Object.keys(buyerGroups).sort().forEach(buyerName => {
-                        buyerGroups[buyerName].forEach(loc => {
-                    %>
-                    <option value="<%= loc.location_id %>" data-buyer-id="<%= loc.buyer_id %>">
-                        <%= buyerName %> - <%= loc.location_name %>
-                    </option>
-                    <% }); }); %>
-                </select>
+                <div style="position: relative;">
+                    <input type="text" id="location-search" placeholder="Search for buyer or location..." autocomplete="off" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;">
+                    <select id="location-select" required style="display: none;">
+                        <option value="">-- Select Location --</option>
+                        <% 
+                        // Group buyers by name
+                        const buyerGroups = {};
+                        buyers.forEach(item => {
+                            if (!buyerGroups[item.buyer_name]) {
+                                buyerGroups[item.buyer_name] = [];
+                            }
+                            buyerGroups[item.buyer_name].push(item);
+                        });
+                        
+                        Object.keys(buyerGroups).sort().forEach(buyerName => {
+                            buyerGroups[buyerName].forEach(loc => {
+                        %>
+                        <option value="<%= loc.location_id %>" data-buyer-id="<%= loc.buyer_id %>" data-buyer-name="<%= buyerName %>" data-location-name="<%= loc.location_name %>">
+                            <%= buyerName %> - <%= loc.location_name %>
+                        </option>
+                        <% }); }); %>
+                    </select>
+                    <div id="location-dropdown" style="display: none; position: absolute; top: 100%; left: 0; right: 0; border-top: none; border-radius: 0 0 4px 4px; max-height: 300px; overflow-y: auto; z-index: 1000;"></div>
+                </div>
             </div>
         </div>
 
@@ -180,11 +261,11 @@
             <h3>Notes</h3>
             <div class="form-group">
                 <label for="customer-notes">Customer Notes</label>
-                <textarea id="customer-notes" rows="3" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"></textarea>
+                <textarea id="customer-notes" rows="3"></textarea>
             </div>
             <div class="form-group">
                 <label for="internal-notes">Internal Notes</label>
-                <textarea id="internal-notes" rows="3" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;"></textarea>
+                <textarea id="internal-notes" rows="3"></textarea>
             </div>
         </div>
 
@@ -204,11 +285,95 @@ let productCache = [];
 
 // Initialize
 document.addEventListener('DOMContentLoaded', function() {
-    // Location selection
-    document.getElementById('location-select').addEventListener('change', function() {
-        selectedLocationId = this.value;
-        selectedBuyerId = this.options[this.selectedIndex].getAttribute('data-buyer-id');
+    // Location search functionality
+    const locationSearch = document.getElementById('location-search');
+    const locationSelect = document.getElementById('location-select');
+    const locationDropdown = document.getElementById('location-dropdown');
+    let allLocationOptions = Array.from(locationSelect.options).slice(1); // Skip first empty option
+    
+    function renderLocationDropdown(filteredOptions) {
+        if (filteredOptions.length === 0) {
+            locationDropdown.innerHTML = '<div class="location-option" style="padding: 12px;">No locations found</div>';
+            locationDropdown.style.display = 'block';
+            return;
+        }
+        
+        locationDropdown.innerHTML = filteredOptions.map(option => {
+            const buyerName = option.getAttribute('data-buyer-name') || '';
+            const locationName = option.getAttribute('data-location-name') || '';
+            return `
+                <div class="location-option" 
+                     data-location-id="${option.value}" 
+                     data-buyer-id="${option.getAttribute('data-buyer-id')}"
+                     onclick="selectLocation('${option.value}', '${option.getAttribute('data-buyer-id')}', '${buyerName} - ${locationName}')">
+                    <strong>${buyerName}</strong> - ${locationName}
+                </div>
+            `;
+        }).join('');
+        locationDropdown.style.display = 'block';
+    }
+    
+    locationSearch.addEventListener('input', function() {
+        const query = this.value.toLowerCase().trim();
+        
+        if (query.length === 0) {
+            locationDropdown.style.display = 'none';
+            locationSearch.value = '';
+            selectedLocationId = null;
+            selectedBuyerId = null;
+            return;
+        }
+        
+        const filtered = allLocationOptions.filter(option => {
+            const buyerName = (option.getAttribute('data-buyer-name') || '').toLowerCase();
+            const locationName = (option.getAttribute('data-location-name') || '').toLowerCase();
+            const fullText = `${buyerName} ${locationName}`;
+            return fullText.includes(query);
+        });
+        
+        renderLocationDropdown(filtered);
+    });
+    
+    locationSearch.addEventListener('focus', function() {
+        if (this.value.trim().length > 0) {
+            const query = this.value.toLowerCase().trim();
+            const filtered = allLocationOptions.filter(option => {
+                const buyerName = (option.getAttribute('data-buyer-name') || '').toLowerCase();
+                const locationName = (option.getAttribute('data-location-name') || '').toLowerCase();
+                const fullText = `${buyerName} ${locationName}`;
+                return fullText.includes(query);
+            });
+            renderLocationDropdown(filtered);
+        }
+    });
+    
+    // Close dropdown when clicking outside
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('#location-search') && !e.target.closest('#location-dropdown')) {
+            locationDropdown.style.display = 'none';
+        }
+    });
+    
+    // Location selection handler
+    window.selectLocation = function(locationId, buyerId, displayText) {
+        selectedLocationId = locationId;
+        selectedBuyerId = buyerId;
+        locationSearch.value = displayText;
+        locationSelect.value = locationId;
+        locationDropdown.style.display = 'none';
         loadProductsForLocation(selectedLocationId);
+    };
+    
+    // Also handle direct select change (if someone uses the hidden select)
+    locationSelect.addEventListener('change', function() {
+        if (this.value) {
+            selectedLocationId = this.value;
+            selectedBuyerId = this.options[this.selectedIndex].getAttribute('data-buyer-id');
+            const buyerName = this.options[this.selectedIndex].getAttribute('data-buyer-name') || '';
+            const locationName = this.options[this.selectedIndex].getAttribute('data-location-name') || '';
+            locationSearch.value = `${buyerName} - ${locationName}`;
+            loadProductsForLocation(selectedLocationId);
+        }
     });
 
     // Product search
@@ -217,7 +382,7 @@ document.addEventListener('DOMContentLoaded', function() {
         clearTimeout(searchTimeout);
         const query = this.value.trim();
         
-        if (query.length < 2) {
+        if (query.length === 0) {
             document.getElementById('product-search-results').style.display = 'none';
             return;
         }
@@ -258,12 +423,18 @@ async function loadProductsForLocation(locationId) {
 
 async function searchProducts(query) {
     if (!selectedLocationId) {
-        alert('Please select a location first');
+        if (typeof showNotification === 'function') {
+            showNotification('Please select a location first', 'warning');
+        } else {
+            alert('Please select a location first');
+        }
+        document.getElementById('product-search-results').style.display = 'none';
         return;
     }
 
     try {
-        const response = await fetch(`/api/v1/invoices/products?location_id=${selectedLocationId}&search=${encodeURIComponent(query)}`);
+        const searchParam = query.trim().length > 0 ? `&search=${encodeURIComponent(query)}` : '';
+        const response = await fetch(`/api/v1/invoices/products?location_id=${selectedLocationId}${searchParam}`);
         const data = await response.json();
         
         const resultsDiv = document.getElementById('product-search-results');
@@ -279,11 +450,14 @@ async function searchProducts(query) {
             `).join('');
             resultsDiv.style.display = 'block';
         } else {
-            resultsDiv.innerHTML = '<div class="product-result-item">No products found</div>';
+            resultsDiv.innerHTML = '<div class="product-result-item">No products found. Try a different search term.</div>';
             resultsDiv.style.display = 'block';
         }
     } catch (error) {
         console.error('Error searching products:', error);
+        const resultsDiv = document.getElementById('product-search-results');
+        resultsDiv.innerHTML = '<div class="product-result-item" style="color: #dc3545;">Error loading products. Please try again.</div>';
+        resultsDiv.style.display = 'block';
     }
 }
 
@@ -308,19 +482,27 @@ async function selectProduct(productId) {
                 showBatchSelectionModal(productId, data.batches);
             }
         } else {
-            alert('No available batches found for this product');
+            if (typeof showNotification === 'function') {
+                showNotification('No available batches found for this product', 'warning');
+            } else {
+                alert('No available batches found for this product');
+            }
         }
     } catch (error) {
         console.error('Error loading batches:', error);
-        alert('Error loading batches. Please try again.');
+        if (typeof showNotification === 'function') {
+            showNotification('Error loading batches. Please try again.', 'error');
+        } else {
+            alert('Error loading batches. Please try again.');
+        }
     }
 }
 
 function showBatchSelectionModal(productId, batches) {
     const batchList = batches.map(batch => `
-        <div style="padding: 12px; border-bottom: 1px solid #eee; cursor: pointer;" onclick="selectBatch(${productId}, ${batch.id}, ${batch.available_quantity}, ${batch.unit_price}, '${batch.batch_name}'); closeBatchModal();">
-            <strong>${batch.batch_name}</strong>
-            <div style="font-size: 0.9rem; color: #666;">
+        <div class="batch-option" style="padding: 12px; border-bottom: 1px solid var(--border-color, #eee); cursor: pointer;" onclick="selectBatch(${productId}, ${batch.id}, ${batch.available_quantity}, ${batch.unit_price}, '${batch.batch_name}'); closeBatchModal();">
+            <strong style="color: var(--text-color, #24292e);">${batch.batch_name}</strong>
+            <div style="font-size: 0.9rem; color: var(--text-light, #666); margin-top: 4px;">
                 Available: ${batch.available_quantity} | Unit Price: $${parseFloat(batch.unit_price || 0).toFixed(2)}
             </div>
         </div>
@@ -330,8 +512,8 @@ function showBatchSelectionModal(productId, batches) {
     modal.id = 'batch-modal';
     modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;';
     modal.innerHTML = `
-        <div style="background: white; border-radius: 8px; padding: 20px; max-width: 500px; max-height: 400px; overflow-y: auto; width: 90%;">
-            <h3>Select Batch</h3>
+        <div class="form-section" style="border-radius: 8px; padding: 20px; max-width: 500px; max-height: 400px; overflow-y: auto; width: 90%;">
+            <h3 style="color: var(--text-color, #24292e); margin-top: 0;">Select Batch</h3>
             <div>${batchList}</div>
             <button onclick="closeBatchModal()" class="btn btn-secondary" style="margin-top: 20px;">Cancel</button>
         </div>
@@ -350,7 +532,11 @@ function selectBatch(productId, batchId, availableQuantity, unitPrice, batchName
     
     const qty = parseInt(quantity);
     if (qty > availableQuantity) {
-        alert(`Only ${availableQuantity} units available`);
+        if (typeof showNotification === 'function') {
+            showNotification(`Only ${availableQuantity} units available`, 'warning');
+        } else {
+            alert(`Only ${availableQuantity} units available`);
+        }
         return;
     }
     
@@ -397,7 +583,11 @@ async function addLineItem(productId, batchId, quantity, unitPrice, batchName) {
         });
         renderLineItems();
     } else {
-        alert('Error: Could not find product details. Please try again.');
+        if (typeof showNotification === 'function') {
+            showNotification('Error: Could not find product details. Please try again.', 'error');
+        } else {
+            alert('Error: Could not find product details. Please try again.');
+        }
     }
 }
 
@@ -443,12 +633,20 @@ function renderLineItems() {
 
 async function createInvoice() {
     if (!selectedLocationId || !selectedBuyerId) {
-        alert('Please select a location');
+        if (typeof showNotification === 'function') {
+            showNotification('Please select a location', 'warning');
+        } else {
+            alert('Please select a location');
+        }
         return;
     }
 
     if (lineItems.length === 0) {
-        alert('Please add at least one product');
+        if (typeof showNotification === 'function') {
+            showNotification('Please add at least one product', 'warning');
+        } else {
+            alert('Please add at least one product');
+        }
         return;
     }
 
@@ -477,19 +675,44 @@ async function createInvoice() {
 
         const data = await response.json();
         if (data.success) {
-            alert('Invoice created successfully!');
-            window.location.href = `/admin/invoices/${data.invoice_id}`;
+            if (typeof showNotification === 'function') {
+                showNotification('Invoice created successfully!', 'success');
+            } else {
+                alert('Invoice created successfully!');
+            }
+            setTimeout(() => {
+                window.location.href = `/admin/invoices/${data.invoice_id}`;
+            }, 1500);
         } else {
-            alert('Error: ' + (data.error || 'Failed to create invoice'));
+            if (typeof showNotification === 'function') {
+                showNotification('Error: ' + (data.error || 'Failed to create invoice'), 'error');
+            } else {
+                alert('Error: ' + (data.error || 'Failed to create invoice'));
+            }
             btn.disabled = false;
             btn.textContent = 'Create Invoice';
         }
     } catch (error) {
         console.error('Error:', error);
-        alert('Failed to create invoice. Please try again.');
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to create invoice. Please try again.', 'error');
+        } else {
+            alert('Failed to create invoice. Please try again.');
+        }
         btn.disabled = false;
         btn.textContent = 'Create Invoice';
     }
+}
+</script>
+
+<!-- Include notification system -->
+<script src="/public/js/shared/notifications.js"></script>
+<script>
+// Ensure showNotification is available globally
+if (typeof showNotification === 'undefined' && typeof NotificationSystem !== 'undefined') {
+    window.showNotification = function(message, type = 'info', duration = 3000) {
+        NotificationSystem.show(message, type, duration);
+    };
 }
 </script>
 

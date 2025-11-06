@@ -16,35 +16,106 @@
     <header class="portal-header">
         <div class="portal-header-left"></div>
         <div class="portal-header-right">
-            <button class="header-icon" title="Help">
-                <i class="fas fa-lightbulb"></i>
-            </button>
-            <button class="header-icon" title="Support">
-                <i class="fas fa-comments"></i>
-            </button>
-            <button class="header-icon" title="Location">
+            <button class="header-icon" id="location-toggle-btn" title="Locations">
                 <i class="fas fa-map-marker-alt"></i>
             </button>
-            <span class="header-text">Green Releaf:</span>
-            <div class="header-dropdown">
-                Open Cart ▼
-            </div>
+            <span class="header-text"><%= typeof buyerName !== 'undefined' ? buyerName : 'Buyer' %>:</span>
             <button id="cart-toggle" class="header-icon" title="Cart">
                 <i class="fas fa-shopping-cart"></i>
                 <span id="cart-count-badge" style="display:inline-block;min-width:18px;height:18px;border-radius:9px;background:#4ade80;color:#fff;font-size:11px;line-height:18px;text-align:center;margin-left:6px;">0</span>
             </button>
         </div>
     </header>
+    
+    <!-- Locations Dropdown -->
+    <% if (typeof buyerLocations !== 'undefined' && buyerLocations && buyerLocations.length > 0) { %>
+    <div id="locations-dropdown" style="display: none; position: fixed; top: 60px; right: 20px; width: 300px; max-width: calc(100vw - 40px); background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000; max-height: 400px; overflow-y: auto; font-family: 'Inter', sans-serif;">
+        <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
+            <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: #1f2937;">Locations</h3>
+        </div>
+        <div style="padding: 8px;">
+            <% buyerLocations.forEach(location => { %>
+            <div style="padding: 12px; border-bottom: 1px solid #f3f4f6; cursor: pointer; transition: background-color 0.2s;" 
+                 onmouseover="this.style.backgroundColor='#f9fafb'" 
+                 onmouseout="this.style.backgroundColor='white'">
+                <div style="font-weight: 600; color: #1f2937; margin-bottom: 4px;"><%= location.name %></div>
+                <div style="font-size: 0.875rem; color: #6b7280;">
+                    <% 
+                    const addressLine = location.line_one || '';
+                    const addressLine2 = location.line_two || '';
+                    const fullAddress = [addressLine, addressLine2].filter(Boolean).join(', ');
+                    const cityStateZip = [location.city, location.state, location.zip].filter(Boolean).join(', ');
+                    const fullLocation = [fullAddress, cityStateZip].filter(Boolean).join(', ');
+                    %>
+                    <%= fullLocation %>
+                </div>
+                <% if (location.state_license) { %>
+                <div style="font-size: 0.75rem; color: #9ca3af; margin-top: 4px;">License: <%= location.state_license %></div>
+                <% } %>
+            </div>
+            <% }); %>
+        </div>
+    </div>
+    <% } %>
+    
+    <!-- Buyer Info Modal (for Contact Sales) -->
+    <% if (typeof buyerInfo !== 'undefined' && buyerInfo) { %>
+    <div id="buyer-info-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 2000; align-items: center; justify-content: center; font-family: 'Inter', sans-serif;">
+        <div style="background: white; border-radius: 12px; padding: 24px; max-width: 500px; width: 90%; max-height: 80vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                <h2 style="margin: 0; font-size: 20px; font-weight: 600; color: #1f2937;">Buyer Information</h2>
+                <button id="close-buyer-info" style="background: none; border: none; font-size: 24px; color: #6b7280; cursor: pointer; padding: 0; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;">&times;</button>
+            </div>
+            <div style="color: #1f2937;">
+                <div style="margin-bottom: 16px;">
+                    <div style="font-weight: 600; color: #6b7280; font-size: 0.875rem; margin-bottom: 4px;">Company Name</div>
+                    <div style="font-size: 1.125rem;"><%= buyerInfo.name %></div>
+                </div>
+                <% if (buyerInfo.buyer_type) { %>
+                <div style="margin-bottom: 16px;">
+                    <div style="font-weight: 600; color: #6b7280; font-size: 0.875rem; margin-bottom: 4px;">Type</div>
+                    <div><%= buyerInfo.buyer_type %></div>
+                </div>
+                <% } %>
+                <% if (buyerInfo.website_url) { %>
+                <div style="margin-bottom: 16px;">
+                    <div style="font-weight: 600; color: #6b7280; font-size: 0.875rem; margin-bottom: 4px;">Website</div>
+                    <div><a href="<%= buyerInfo.website_url %>" target="_blank" style="color: #3b82f6; text-decoration: none;"><%= buyerInfo.website_url %></a></div>
+                </div>
+                <% } %>
+                <% if (typeof buyerLocations !== 'undefined' && buyerLocations && buyerLocations.length > 0) { %>
+                <div style="margin-bottom: 16px;">
+                    <div style="font-weight: 600; color: #6b7280; font-size: 0.875rem; margin-bottom: 8px;">Locations</div>
+                    <div>
+                        <% buyerLocations.forEach((location, index) => { %>
+                        <div style="padding: 8px; background: #f9fafb; border-radius: 6px; margin-bottom: 8px;">
+                            <div style="font-weight: 600; margin-bottom: 4px;"><%= location.name %></div>
+                            <div style="font-size: 0.875rem; color: #6b7280;">
+                                <% 
+                                const addressLine = location.line_one || '';
+                                const addressLine2 = location.line_two || '';
+                                const fullAddress = [addressLine, addressLine2].filter(Boolean).join(', ');
+                                const cityStateZip = [location.city, location.state, location.zip].filter(Boolean).join(', ');
+                                const fullLocation = [fullAddress, cityStateZip].filter(Boolean).join(', ');
+                                %>
+                                <%= fullLocation %>
+                            </div>
+                            <% if (location.state_license) { %>
+                            <div style="font-size: 0.75rem; color: #9ca3af; margin-top: 4px;">License: <%= location.state_license %></div>
+                            <% } %>
+                        </div>
+                        <% }); %>
+                    </div>
+                </div>
+                <% } %>
+            </div>
+        </div>
+    </div>
+    <% } %>
 
     <div class="amaze-header-section">
         <a href="#" class="amaze-branding-link" onclick="event.preventDefault(); const uuid = window.location.pathname.match(/\/external\/store\/([^\/]+)/)?.[1]; if (uuid) window.location.href = '/external/store/' + uuid; return false;">
-            <div class="amaze-branding">
-                <div class="amaze-logo">GR</div>
-                <div class="amaze-text">
-                    <div class="amaze-title">AMAZE</div>
-                    <div class="amaze-subtitle">CANNABIS</div>
-                </div>
-            </div>
+            <img src="/public/images/amaze-logo.png" alt="AMAZE" class="amaze-logo-image">
         </a>
     </div>
 
@@ -56,6 +127,61 @@
     <script src="/public/js/shared/cart-toggle.js"></script>
     <script src="/public/js/shared/checkout-validator.js"></script>
     <script src="/public/js/portal.js"></script>
+    <script>
+    // Location Dropdown and Buyer Info Modal Functionality
+    document.addEventListener('DOMContentLoaded', function() {
+        const locationToggleBtn = document.getElementById('location-toggle-btn');
+        const locationsDropdown = document.getElementById('locations-dropdown');
+        const buyerInfoModal = document.getElementById('buyer-info-modal');
+        const closeBuyerInfo = document.getElementById('close-buyer-info');
+        const contactSalesBtn = document.querySelector('.contact-sales-catalog-btn');
+        
+        let isLocationsOpen = false;
+        
+        // Toggle locations dropdown
+        if (locationToggleBtn && locationsDropdown) {
+            locationToggleBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                isLocationsOpen = !isLocationsOpen;
+                locationsDropdown.style.display = isLocationsOpen ? 'block' : 'none';
+            });
+            
+            // Close dropdown when clicking outside
+            document.addEventListener('click', function(e) {
+                if (isLocationsOpen && 
+                    !locationsDropdown.contains(e.target) && 
+                    !locationToggleBtn.contains(e.target)) {
+                    isLocationsOpen = false;
+                    locationsDropdown.style.display = 'none';
+                }
+            });
+        }
+        
+        // Contact Sales - Show buyer info modal
+        if (contactSalesBtn && buyerInfoModal) {
+            contactSalesBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                buyerInfoModal.style.display = 'flex';
+            });
+        }
+        
+        // Close buyer info modal
+        if (closeBuyerInfo && buyerInfoModal) {
+            closeBuyerInfo.addEventListener('click', function(e) {
+                e.preventDefault();
+                buyerInfoModal.style.display = 'none';
+            });
+            
+            // Close modal when clicking outside
+            buyerInfoModal.addEventListener('click', function(e) {
+                if (e.target === buyerInfoModal) {
+                    buyerInfoModal.style.display = 'none';
+                }
+            });
+        }
+    });
+    </script>
 </body>
 </html>
 

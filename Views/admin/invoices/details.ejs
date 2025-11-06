@@ -88,7 +88,14 @@
 </style>
 
 <div class="page-header">
-    <h1>Invoice <%= invoice.invoice_number %></h1>
+    <div>
+        <div style="display: flex; align-items: center; gap: 1rem;">
+            <a href="/admin" class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 0.5rem; text-decoration: none;">
+                <i class="fas fa-arrow-left"></i> Back to Dashboard
+            </a>
+            <h1 style="margin: 0;">Invoice <%= invoice.invoice_number %></h1>
+        </div>
+    </div>
     <div style="display: flex; gap: 8px;">
         <% if (typeof isSalesRep === 'undefined' || !isSalesRep) { %>
             <button onclick="cloneInvoice()" class="btn btn-secondary" style="background: #6c757d; color: white; padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer;">Clone Invoice</button>
@@ -118,6 +125,26 @@
             <span class="status-badge status-<%= invoice.status.toLowerCase() %>">
                 <%= invoice.status %>
             </span>
+            <% if (invoice.status === 'Pending_Approval' && (isSalesAdmin || isSalesRep || isAdmin)) { %>
+                <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                    <button onclick="approveInvoice()" class="btn btn-success" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer;">
+                        <i class="fas fa-check"></i> Approve
+                    </button>
+                    <button onclick="rejectInvoice()" class="btn btn-danger" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer;">
+                        <i class="fas fa-times"></i> Reject
+                    </button>
+                </div>
+            <% } %>
+            <% if (invoice.status === 'Draft' && (isSalesAdmin || isSalesRep || isAdmin)) { %>
+                <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                    <button onclick="submitForFulfillment()" class="btn btn-success" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer;">
+                        <i class="fas fa-paper-plane"></i> Submit for Fulfillment
+                    </button>
+                    <button onclick="cancelInvoice()" class="btn btn-danger" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer;">
+                        <i class="fas fa-times"></i> Cancel Invoice
+                    </button>
+                </div>
+            <% } %>
         </div>
     </div>
     <div class="detail-row">
@@ -128,42 +155,144 @@
         <div class="detail-label">Created:</div>
         <div class="detail-value"><%= new Date(invoice.created_at).toLocaleString() %></div>
     </div>
-    <% if (invoice.customer_notes) { %>
     <div class="detail-row">
         <div class="detail-label">Customer Notes:</div>
-        <div class="detail-value"><%= invoice.customer_notes %></div>
+        <div class="detail-value">
+            <div id="customer-notes-display" style="display: block;">
+                <p style="margin: 0; color: var(--text-color);"><%= invoice.customer_notes || 'No customer notes' %></p>
+                <% if (isSalesAdmin || isSalesRep || isAdmin) { %>
+                    <button onclick="editCustomerNotes()" class="btn btn-sm btn-secondary" style="margin-top: 0.5rem; padding: 0.25rem 0.75rem; font-size: 0.875rem;">
+                        <i class="fas fa-edit"></i> Edit
+                    </button>
+                <% } %>
+            </div>
+            <div id="customer-notes-edit" style="display: none;">
+                <textarea id="customer-notes-textarea" class="form-control" rows="3" style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border-color); color: var(--text-color); background: var(--input-bg, white);"><%= invoice.customer_notes || '' %></textarea>
+                <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem;">
+                    <button onclick="saveCustomerNotes()" class="btn btn-sm btn-primary">
+                        <i class="fas fa-save"></i> Save
+                    </button>
+                    <button onclick="cancelEditCustomerNotes()" class="btn btn-sm btn-secondary">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
     </div>
-    <% } %>
+    <div class="detail-row">
+        <div class="detail-label">Internal Notes:</div>
+        <div class="detail-value">
+            <div id="internal-notes-display" style="display: block;">
+                <p style="margin: 0; color: var(--text-color);"><%= invoice.internal_notes || 'No internal notes' %></p>
+                <% if (isSalesAdmin || isSalesRep || isAdmin) { %>
+                    <button onclick="editInternalNotes()" class="btn btn-sm btn-secondary" style="margin-top: 0.5rem; padding: 0.25rem 0.75rem; font-size: 0.875rem;">
+                        <i class="fas fa-edit"></i> Edit
+                    </button>
+                <% } %>
+            </div>
+            <div id="internal-notes-edit" style="display: none;">
+                <textarea id="internal-notes-textarea" class="form-control" rows="3" style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border-color); color: var(--text-color); background: var(--input-bg, white);"><%= invoice.internal_notes || '' %></textarea>
+                <div style="margin-top: 0.5rem; display: flex; gap: 0.5rem;">
+                    <button onclick="saveInternalNotes()" class="btn btn-sm btn-primary">
+                        <i class="fas fa-save"></i> Save
+                    </button>
+                    <button onclick="cancelEditInternalNotes()" class="btn btn-sm btn-secondary">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Line Items -->
 <div class="invoice-details-card">
-    <h3 style="color: var(--text-color);">Line Items</h3>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="color: var(--text-color); margin: 0;">Line Items</h3>
+        <% 
+        // Allow editing if invoice is in Draft, Pending_Approval, or Fulfillment_Issue status
+        const canEdit = invoice.status === 'Draft' || invoice.status === 'Pending_Approval' || invoice.status === 'Fulfillment_Issue';
+        %>
+        <% if (canEdit && (isSalesAdmin || isSalesRep || isAdmin)) { %>
+            <button onclick="toggleEditMode()" id="edit-line-items-btn" class="btn btn-primary" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer;">
+                <i class="fas fa-edit"></i> Edit Line Items
+            </button>
+        <% } %>
+    </div>
     <% if (lineItems && lineItems.length > 0) { %>
-        <table class="line-items-table">
-            <thead>
-                <tr>
-                    <th>Product</th>
-                    <th>Batch</th>
-                    <th>Quantity</th>
-                    <th>Unit Price</th>
-                    <th>Total</th>
-                </tr>
-            </thead>
-            <tbody>
-                <% lineItems.forEach(item => { %>
+        <div id="line-items-view">
+            <table class="line-items-table">
+                <thead>
                     <tr>
-                        <td>
-                            <strong style="color: var(--text-color);"><%= item.brand_name || 'AMAZE' %> <%= item.product_name %></strong>
-                        </td>
-                        <td style="color: var(--text-color);"><%= item.batch_name %></td>
-                        <td style="color: var(--text-color);"><%= item.quantity_ordered %> Case</td>
-                        <td style="color: var(--text-color);">$<%= parseFloat(item.unit_price || 0).toFixed(2) %></td>
-                        <td><strong style="color: var(--text-color);">$<%= parseFloat(item.line_total || 0).toFixed(2) %></strong></td>
+                        <th>Product</th>
+                        <th>Batch</th>
+                        <th>Quantity</th>
+                        <th>Unit Price</th>
+                        <th>Total</th>
                     </tr>
-                <% }); %>
-            </tbody>
-        </table>
+                </thead>
+                <tbody>
+                    <% lineItems.forEach((item, index) => { %>
+                        <tr data-line-item-id="<%= item.id %>">
+                            <td>
+                                <strong style="color: var(--text-color);"><%= item.brand_name || 'AMAZE' %> <%= item.product_name %></strong>
+                            </td>
+                            <td style="color: var(--text-color);"><%= item.batch_name %></td>
+                            <td style="color: var(--text-color);"><%= item.quantity_ordered %> Case</td>
+                            <td style="color: var(--text-color);">$<%= parseFloat(item.unit_price || 0).toFixed(2) %></td>
+                            <td><strong style="color: var(--text-color);">$<%= parseFloat(item.line_total || 0).toFixed(2) %></strong></td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+        <div id="line-items-edit" style="display: none;">
+            <table class="line-items-table">
+                <thead>
+                    <tr>
+                        <th>Product</th>
+                        <th>Batch</th>
+                        <th>Quantity</th>
+                        <th>Unit Price</th>
+                        <th>Total</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="editable-line-items-tbody">
+                    <% lineItems.forEach((item, index) => { %>
+                        <tr data-line-item-id="<%= item.id %>">
+                            <td>
+                                <strong style="color: var(--text-color);"><%= item.brand_name || 'AMAZE' %> <%= item.product_name %></strong>
+                            </td>
+                            <td style="color: var(--text-color);"><%= item.batch_name %></td>
+                            <td>
+                                <input type="number" 
+                                       class="line-item-quantity" 
+                                       value="<%= item.quantity_ordered %>" 
+                                       min="1" 
+                                       data-line-item-id="<%= item.id %>"
+                                       style="width: 80px; padding: 0.25rem; border-radius: 4px; border: 1px solid var(--border-color);">
+                            </td>
+                            <td style="color: var(--text-color);">$<%= parseFloat(item.unit_price || 0).toFixed(2) %></td>
+                            <td><strong style="color: var(--text-color);" class="line-item-total" data-unit-price="<%= item.unit_price || 0 %>">$<%= parseFloat(item.line_total || 0).toFixed(2) %></strong></td>
+                            <td>
+                                <button onclick="removeLineItem(<%= item.id %>)" class="btn btn-sm btn-danger" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">
+                                    <i class="fas fa-trash"></i> Remove
+                                </button>
+                            </td>
+                        </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+            <div style="margin-top: 1rem; display: flex; gap: 0.5rem; justify-content: flex-end;">
+                <button onclick="saveLineItemChanges()" class="btn btn-primary">
+                    <i class="fas fa-save"></i> Save Changes
+                </button>
+                <button onclick="cancelEditLineItems()" class="btn btn-secondary">
+                    Cancel
+                </button>
+            </div>
+        </div>
         <div style="text-align: right; margin-top: 1rem; font-size: 1.2rem; color: var(--text-color);">
             <strong>Total: $<%= parseFloat(invoice.total || 0).toFixed(2) %></strong>
         </div>
@@ -190,13 +319,16 @@
 <% } %>
 
 <script>
+const invoiceId = <%= invoice.id %>;
+let isEditMode = false;
+
 async function cloneInvoice() {
     if (!confirm('Create a duplicate of this invoice? This will copy all products and amounts.')) {
         return;
     }
     
     try {
-        const response = await fetch(`/admin/invoices/<%= invoice.id %>/clone`, {
+        const response = await fetch(`/admin/invoices/${invoiceId}/clone`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -205,19 +337,439 @@ async function cloneInvoice() {
         
         const data = await response.json();
         if (data.success) {
-            let message = `Invoice cloned successfully!\n\nNew Invoice: ${data.invoice_number}`;
+            let message = `Invoice cloned successfully! New Invoice: ${data.invoice_number}`;
             if (data.errors && data.errors.length > 0) {
-                message += '\n\nWarnings:\n' + data.errors.join('\n');
+                message += ' (Warnings: ' + data.errors.join(', ') + ')';
             }
-            alert(message);
-            window.location.href = `/admin/invoices/${data.invoice_id}`;
+            if (typeof showNotification === 'function') {
+                showNotification(message, 'success');
+            } else {
+                alert(message);
+            }
+            setTimeout(() => {
+                window.location.href = `/admin/invoices/${data.invoice_id}`;
+            }, 1500);
         } else {
-            alert('Error: ' + (data.error || 'Failed to clone invoice'));
+            if (typeof showNotification === 'function') {
+                showNotification('Error: ' + (data.error || 'Failed to clone invoice'), 'error');
+            } else {
+                alert('Error: ' + (data.error || 'Failed to clone invoice'));
+            }
         }
     } catch (error) {
         console.error('Error:', error);
-        alert('Failed to clone invoice. Please try again.');
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to clone invoice. Please try again.', 'error');
+        } else {
+            alert('Failed to clone invoice. Please try again.');
+        }
     }
+}
+
+async function approveInvoice() {
+    if (!confirm('Are you sure you want to approve this invoice?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/admin/invoices/${invoiceId}/approve`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            if (typeof showNotification === 'function') {
+                showNotification('Invoice approved successfully!', 'success');
+            } else {
+                alert('Invoice approved successfully!');
+            }
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            if (typeof showNotification === 'function') {
+                showNotification('Error: ' + (data.error || 'Failed to approve invoice'), 'error');
+            } else {
+                alert('Error: ' + (data.error || 'Failed to approve invoice'));
+            }
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to approve invoice. Please try again.', 'error');
+        } else {
+            alert('Failed to approve invoice. Please try again.');
+        }
+    }
+}
+
+async function rejectInvoice() {
+    const reason = prompt('Please provide a reason for rejection:');
+    if (!reason) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/admin/invoices/${invoiceId}/reject`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ reason })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            if (typeof showNotification === 'function') {
+                showNotification('Invoice rejected successfully!', 'success');
+            } else {
+                alert('Invoice rejected successfully!');
+            }
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            if (typeof showNotification === 'function') {
+                showNotification('Error: ' + (data.error || 'Failed to reject invoice'), 'error');
+            } else {
+                alert('Error: ' + (data.error || 'Failed to reject invoice'));
+            }
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to reject invoice. Please try again.', 'error');
+        } else {
+            alert('Failed to reject invoice. Please try again.');
+        }
+    }
+}
+
+async function submitForFulfillment() {
+    if (!confirm('Are you sure you want to submit this invoice for fulfillment? This will move it to Approved status.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/v1/invoices/${invoiceId}/submit`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            if (typeof showNotification === 'function') {
+                showNotification('Invoice submitted for fulfillment successfully!', 'success');
+            } else {
+                alert('Invoice submitted for fulfillment successfully!');
+            }
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            if (typeof showNotification === 'function') {
+                showNotification('Error: ' + (data.error || 'Failed to submit invoice'), 'error');
+            } else {
+                alert('Error: ' + (data.error || 'Failed to submit invoice'));
+            }
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to submit invoice. Please try again.', 'error');
+        } else {
+            alert('Failed to submit invoice. Please try again.');
+        }
+    }
+}
+
+async function cancelInvoice() {
+    const reason = prompt('Please provide a reason for cancellation:');
+    if (!reason) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/v1/invoices/${invoiceId}/transition`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ 
+                status: 'Cancelled',
+                reason: reason 
+            })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            if (typeof showNotification === 'function') {
+                showNotification('Invoice cancelled successfully!', 'success');
+            } else {
+                alert('Invoice cancelled successfully!');
+            }
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            if (typeof showNotification === 'function') {
+                showNotification('Error: ' + (data.error || 'Failed to cancel invoice'), 'error');
+            } else {
+                alert('Error: ' + (data.error || 'Failed to cancel invoice'));
+            }
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to cancel invoice. Please try again.', 'error');
+        } else {
+            alert('Failed to cancel invoice. Please try again.');
+        }
+    }
+}
+
+// Notes editing functions
+function editCustomerNotes() {
+    document.getElementById('customer-notes-display').style.display = 'none';
+    document.getElementById('customer-notes-edit').style.display = 'block';
+}
+
+function cancelEditCustomerNotes() {
+    document.getElementById('customer-notes-display').style.display = 'block';
+    document.getElementById('customer-notes-edit').style.display = 'none';
+    // Reset textarea to original value
+    const originalValue = <%- JSON.stringify(invoice.customer_notes || '') %>;
+    document.getElementById('customer-notes-textarea').value = originalValue;
+}
+
+async function saveCustomerNotes() {
+    const notes = document.getElementById('customer-notes-textarea').value;
+    
+    try {
+        const response = await fetch(`/api/v1/invoices/${invoiceId}/notes`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ customer_notes: notes })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            if (typeof showNotification === 'function') {
+                showNotification('Customer notes updated successfully!', 'success');
+            } else {
+                alert('Customer notes updated successfully!');
+            }
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            if (typeof showNotification === 'function') {
+                showNotification('Error: ' + (data.error || 'Failed to update notes'), 'error');
+            } else {
+                alert('Error: ' + (data.error || 'Failed to update notes'));
+            }
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to update customer notes. Please try again.', 'error');
+        } else {
+            alert('Failed to update customer notes. Please try again.');
+        }
+    }
+}
+
+function editInternalNotes() {
+    document.getElementById('internal-notes-display').style.display = 'none';
+    document.getElementById('internal-notes-edit').style.display = 'block';
+}
+
+function cancelEditInternalNotes() {
+    document.getElementById('internal-notes-display').style.display = 'block';
+    document.getElementById('internal-notes-edit').style.display = 'none';
+    // Reset textarea to original value
+    const originalValue = <%- JSON.stringify(invoice.internal_notes || '') %>;
+    document.getElementById('internal-notes-textarea').value = originalValue;
+}
+
+async function saveInternalNotes() {
+    const notes = document.getElementById('internal-notes-textarea').value;
+    
+    try {
+        const response = await fetch(`/api/v1/invoices/${invoiceId}/notes`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ internal_notes: notes })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            if (typeof showNotification === 'function') {
+                showNotification('Internal notes updated successfully!', 'success');
+            } else {
+                alert('Internal notes updated successfully!');
+            }
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            if (typeof showNotification === 'function') {
+                showNotification('Error: ' + (data.error || 'Failed to update notes'), 'error');
+            } else {
+                alert('Error: ' + (data.error || 'Failed to update notes'));
+            }
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to update internal notes. Please try again.', 'error');
+        } else {
+            alert('Failed to update internal notes. Please try again.');
+        }
+    }
+}
+
+// Line items editing functions
+function toggleEditMode() {
+    isEditMode = !isEditMode;
+    if (isEditMode) {
+        document.getElementById('line-items-view').style.display = 'none';
+        document.getElementById('line-items-edit').style.display = 'block';
+        document.getElementById('edit-line-items-btn').innerHTML = '<i class="fas fa-times"></i> Cancel Edit';
+        document.getElementById('edit-line-items-btn').classList.remove('btn-primary');
+        document.getElementById('edit-line-items-btn').classList.add('btn-secondary');
+        document.getElementById('edit-line-items-btn').setAttribute('onclick', 'cancelEditLineItems()');
+        
+        // Add event listeners for quantity changes
+        document.querySelectorAll('.line-item-quantity').forEach(input => {
+            input.addEventListener('input', updateLineItemTotal);
+        });
+    } else {
+        cancelEditLineItems();
+    }
+}
+
+function cancelEditLineItems() {
+    isEditMode = false;
+    document.getElementById('line-items-view').style.display = 'block';
+    document.getElementById('line-items-edit').style.display = 'none';
+    document.getElementById('edit-line-items-btn').innerHTML = '<i class="fas fa-edit"></i> Edit Line Items';
+    document.getElementById('edit-line-items-btn').classList.remove('btn-secondary');
+    document.getElementById('edit-line-items-btn').classList.add('btn-primary');
+    document.getElementById('edit-line-items-btn').setAttribute('onclick', 'toggleEditMode()');
+    
+    // Reload page to reset any changes
+    window.location.reload();
+}
+
+function updateLineItemTotal(event) {
+    const input = event.target;
+    const row = input.closest('tr');
+    const unitPrice = parseFloat(row.querySelector('.line-item-total').dataset.unitPrice || 0);
+    const quantity = parseFloat(input.value) || 0;
+    const total = (unitPrice * quantity).toFixed(2);
+    row.querySelector('.line-item-total').textContent = '$' + total;
+}
+
+async function removeLineItem(lineItemId) {
+    if (!confirm('Are you sure you want to remove this line item?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/v1/invoices/${invoiceId}/line-items/${lineItemId}`, {
+            method: 'DELETE',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            if (typeof showNotification === 'function') {
+                showNotification('Line item removed successfully!', 'success');
+            } else {
+                alert('Line item removed successfully!');
+            }
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            if (typeof showNotification === 'function') {
+                showNotification('Error: ' + (data.error || 'Failed to remove line item'), 'error');
+            } else {
+                alert('Error: ' + (data.error || 'Failed to remove line item'));
+            }
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to remove line item. Please try again.', 'error');
+        } else {
+            alert('Failed to remove line item. Please try again.');
+        }
+    }
+}
+
+async function saveLineItemChanges() {
+    const changes = [];
+    document.querySelectorAll('.line-item-quantity').forEach(input => {
+        const lineItemId = input.dataset.lineItemId;
+        const newQuantity = parseFloat(input.value);
+        if (newQuantity && newQuantity > 0) {
+            changes.push({
+                lineItemId: parseInt(lineItemId),
+                quantity: newQuantity
+            });
+        }
+    });
+    
+    if (changes.length === 0) {
+        if (typeof showNotification === 'function') {
+            showNotification('No changes to save', 'info');
+        } else {
+            alert('No changes to save');
+        }
+        return;
+    }
+    
+    try {
+        // Update each line item
+        for (const change of changes) {
+            const response = await fetch(`/api/v1/invoices/${invoiceId}/line-items/${change.lineItemId}`, {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ quantity: change.quantity })
+            });
+            
+            const data = await response.json();
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to update line item');
+            }
+        }
+        
+        if (typeof showNotification === 'function') {
+            showNotification('Line items updated successfully!', 'success');
+        } else {
+            alert('Line items updated successfully!');
+        }
+        setTimeout(() => window.location.reload(), 1000);
+    } catch (error) {
+        console.error('Error:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to update line items: ' + error.message, 'error');
+        } else {
+            alert('Failed to update line items: ' + error.message);
+        }
+    }
+}
+</script>
+
+<!-- Include notification system -->
+<script src="/public/js/shared/notifications.js"></script>
+<script>
+// Ensure showNotification is available globally
+if (typeof showNotification === 'undefined' && typeof NotificationSystem !== 'undefined') {
+    window.showNotification = function(message, type = 'info', duration = 3000) {
+        NotificationSystem.show(message, type, duration);
+    };
 }
 </script>
 

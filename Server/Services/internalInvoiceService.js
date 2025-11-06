@@ -60,14 +60,14 @@ class InternalInvoiceService {
             
             // Get location license number
             const locationResult = await client.query(`
-                SELECT license_number FROM "ORDERS-buyer_locations" WHERE id = $1
+                SELECT state_license FROM "ORDERS-buyer_locations" WHERE entry_id = $1
             `, [invoiceData.fk_location_id]);
             
             if (locationResult.rows.length === 0) {
                 throw new Error('Location not found');
             }
             
-            const locationLicense = locationResult.rows[0].license_number;
+            const locationLicense = locationResult.rows[0].state_license || null;
             
             // Create invoice record
             const invoice = await client.query(`
@@ -130,14 +130,15 @@ class InternalInvoiceService {
      */
     async addLineItem(invoiceId, itemData, userId, client) {
         // Get batch info and pricing
+        // Use INNER JOIN instead of LEFT JOIN to avoid FOR UPDATE on nullable side
         const batch = await client.query(`
             SELECT b.id, b.batch_name, b.fk_master_product_id, b.quantity,
                    b.allocated_quantity,
                    COALESCE(b.override_price, p.default_price, 0) as unit_price
             FROM "ORDERS-batches" b
-            LEFT JOIN "ORDERS-products" p ON b.fk_master_product_id = p.entry_id
+            INNER JOIN "ORDERS-products" p ON b.fk_master_product_id = p.entry_id
             WHERE b.id = $1
-            FOR UPDATE
+            FOR UPDATE OF b
         `, [itemData.fk_batch_id]);
         
         if (batch.rows.length === 0) {

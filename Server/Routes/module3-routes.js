@@ -596,17 +596,69 @@ router.get('/products/master/:id/batches', async (req, res) => {
  */
 router.patch('/batches/:id/status', async (req, res) => {
     const client = await pool.connect();
+    const userId = req.user?.id || req.session?.userId || null;
+    let batchBeforeUpdate = null;
+    
     try {
         const { status, reason } = req.body;
         const batchId = req.params.id;
 
         // Validate status
         if (!['Sellable', 'On Deck', 'On Hold'].includes(status)) {
+            // Log failed attempt
+            await auditLogger.logAction({
+                userId: userId,
+                action: 'batch_status_update',
+                resourceType: 'Batch',
+                resourceId: batchId.toString(),
+                details: {
+                    error: 'Invalid status. Must be Sellable, On Deck, or On Hold',
+                    attempted_status: status,
+                    update_type: 'manual'
+                },
+                status: 'failure',
+                sourceIp: req.ip
+            });
+            
             return res.status(400).json({
                 success: false,
                 error: 'Invalid status. Must be Sellable, On Deck, or On Hold'
             });
         }
+
+        // Get batch details BEFORE update for audit logging
+        const batchQuery = await client.query(`
+            SELECT 
+                id, batch_name, status, quantity, allocated_quantity, 
+                fk_master_product_id, override_price, thc_percentage, production_date
+            FROM "ORDERS-batches" 
+            WHERE id = $1
+        `, [batchId]);
+
+        if (batchQuery.rows.length === 0) {
+            // Log batch not found
+            await auditLogger.logAction({
+                userId: userId,
+                action: 'batch_status_update',
+                resourceType: 'Batch',
+                resourceId: batchId.toString(),
+                details: {
+                    error: 'Batch not found',
+                    attempted_status: status,
+                    update_type: 'manual'
+                },
+                status: 'failure',
+                sourceIp: req.ip
+            });
+            
+            return res.status(404).json({
+                success: false,
+                error: 'Batch not found'
+            });
+        }
+
+        batchBeforeUpdate = batchQuery.rows[0];
+        const oldStatus = batchBeforeUpdate.status;
 
         // Validate batch can be marked as Sellable
         if (status === 'Sellable') {
@@ -615,6 +667,23 @@ router.patch('/batches/:id/status', async (req, res) => {
             `, [batchId]);
 
             if (!validation.rows[0].can_be_sellable) {
+                // Log validation failure
+                await auditLogger.logAction({
+                    userId: userId,
+                    action: 'batch_status_update',
+                    resourceType: 'Batch',
+                    resourceId: batchId.toString(),
+                    details: {
+                        error: 'Batch cannot be marked as Sellable due to missing critical data',
+                        batch_name: batchBeforeUpdate.batch_name,
+                        old_status: oldStatus,
+                        attempted_status: status,
+                        update_type: 'manual'
+                    },
+                    status: 'failure',
+                    sourceIp: req.ip
+                });
+                
                 return res.status(400).json({
                     success: false,
                     error: 'Batch cannot be marked as Sellable due to missing critical data'
@@ -622,31 +691,32 @@ router.patch('/batches/:id/status', async (req, res) => {
             }
         }
 
-        await client.query('BEGIN');
-
-        // Get current status
-        const current = await client.query(`
-            SELECT status FROM "ORDERS-batches" WHERE id = $1
-        `, [batchId]);
-
-        if (current.rows.length === 0) {
-            await client.query('ROLLBACK');
-            return res.status(404).json({
-                success: false,
-                error: 'Batch not found'
-            });
-        }
-
-        const oldStatus = current.rows[0].status;
-
         if (oldStatus === status) {
-            await client.query('ROLLBACK');
+            // Log no change (but still successful)
+            await auditLogger.logAction({
+                userId: userId,
+                action: 'batch_status_update',
+                resourceType: 'Batch',
+                resourceId: batchId.toString(),
+                details: {
+                    message: `Batch "${batchBeforeUpdate.batch_name}" status unchanged (already ${status})`,
+                    batch_name: batchBeforeUpdate.batch_name,
+                    status: status,
+                    update_type: 'manual',
+                    changed: false
+                },
+                status: 'success',
+                sourceIp: req.ip
+            });
+            
             return res.json({
                 success: true,
                 changed: false,
                 message: 'Status unchanged'
             });
         }
+
+        await client.query('BEGIN');
 
         // Update status
         await client.query(`
@@ -662,9 +732,32 @@ router.patch('/batches/:id/status', async (req, res) => {
                 old_value, new_value, reason,
                 changed_by_user_id, changed_by_system
             ) VALUES ($1, 'status_changed', 'status', $2, $3, $4, $5, false)
-        `, [batchId, oldStatus, status, reason || 'Manual status change', req.user?.id || null]);
+        `, [batchId, oldStatus, status, reason || 'Manual status change', userId]);
 
         await client.query('COMMIT');
+
+        // Log to audit trail
+        await auditLogger.logAction({
+            userId: userId,
+            action: 'batch_status_update',
+            resourceType: 'Batch',
+            resourceId: batchId.toString(),
+            details: {
+                message: `User ID ${userId} manually updated Batch "${batchBeforeUpdate.batch_name}" status from "${oldStatus}" to "${status}" (Quantity: ${batchBeforeUpdate.quantity})`,
+                batch_id: batchId,
+                batch_name: batchBeforeUpdate.batch_name,
+                old_status: oldStatus,
+                new_status: status,
+                quantity: batchBeforeUpdate.quantity,
+                allocated_quantity: batchBeforeUpdate.allocated_quantity,
+                product_id: batchBeforeUpdate.fk_master_product_id,
+                reason: reason || 'Manual status change',
+                update_type: 'manual',
+                changed: true
+            },
+            status: 'success',
+            sourceIp: req.ip
+        });
 
         // If changed TO "Sellable", broadcast inventory availability
         if (status === 'Sellable' && oldStatus !== 'Sellable') {
@@ -717,6 +810,24 @@ router.patch('/batches/:id/status', async (req, res) => {
     } catch (error) {
         await client.query('ROLLBACK');
         console.error('Error updating batch status:', error.message);
+        
+        // Log error to audit trail
+        await auditLogger.logAction({
+            userId: userId,
+            action: 'batch_status_update',
+            resourceType: 'Batch',
+            resourceId: req.params.id?.toString() || 'unknown',
+            details: {
+                error: error.message,
+                attempted_status: req.body?.status,
+                batch_name: batchBeforeUpdate?.batch_name || null,
+                old_status: batchBeforeUpdate?.status || null,
+                update_type: 'manual'
+            },
+            status: 'failure',
+            sourceIp: req.ip
+        });
+        
         res.status(500).json({
             success: false,
             error: error.message

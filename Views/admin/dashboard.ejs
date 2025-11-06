@@ -316,13 +316,13 @@ const showSimpleDashboard = !showFullDashboard && !showSalesDashboard;
     <!-- Sales Statistics Cards -->
     <% if (invoiceStats && invoiceStats.total_invoices !== undefined) { %>
     <div class="sales-stats-grid">
-        <div class="sales-stat-card">
+        <a href="/admin/invoices" class="sales-stat-card" style="text-decoration: none; color: inherit; cursor: pointer;">
             <div class="sales-stat-icon">
                 <i class="fas fa-file-invoice-dollar"></i>
             </div>
             <div class="sales-stat-value"><%= invoiceStats.total_invoices || 0 %></div>
             <div class="sales-stat-label">Total Invoices</div>
-        </div>
+        </a>
         
         <div class="sales-stat-card">
             <div class="sales-stat-icon">
@@ -332,37 +332,37 @@ const showSimpleDashboard = !showFullDashboard && !showSalesDashboard;
             <div class="sales-stat-label">Total Revenue</div>
         </div>
         
-        <div class="sales-stat-card">
+        <a href="/admin/invoices?status=Approved" class="sales-stat-card" style="text-decoration: none; color: inherit; cursor: pointer;">
             <div class="sales-stat-icon">
                 <i class="fas fa-check-circle"></i>
             </div>
             <div class="sales-stat-value"><%= invoiceStats.approved_count || 0 %></div>
             <div class="sales-stat-label">Approved</div>
-        </div>
+        </a>
         
-        <div class="sales-stat-card">
+        <a href="/admin/invoices?status=Pending_Approval" class="sales-stat-card" style="text-decoration: none; color: inherit; cursor: pointer;">
             <div class="sales-stat-icon">
                 <i class="fas fa-clock"></i>
             </div>
             <div class="sales-stat-value"><%= invoiceStats.pending_count || 0 %></div>
             <div class="sales-stat-label">Pending Approval</div>
-        </div>
+        </a>
         
-        <div class="sales-stat-card">
+        <a href="/admin/invoices?status=Shipped" class="sales-stat-card" style="text-decoration: none; color: inherit; cursor: pointer;">
             <div class="sales-stat-icon">
                 <i class="fas fa-shipping-fast"></i>
             </div>
             <div class="sales-stat-value"><%= invoiceStats.shipped_count || 0 %></div>
             <div class="sales-stat-label">Shipped</div>
-        </div>
+        </a>
         
-        <div class="sales-stat-card">
+        <a href="/admin/invoices?status=Delivered" class="sales-stat-card" style="text-decoration: none; color: inherit; cursor: pointer;">
             <div class="sales-stat-icon">
                 <i class="fas fa-check-double"></i>
             </div>
             <div class="sales-stat-value"><%= invoiceStats.delivered_count || 0 %></div>
             <div class="sales-stat-label">Delivered</div>
-        </div>
+        </a>
     </div>
     <% } %>
     

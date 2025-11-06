@@ -182,12 +182,59 @@ class PortalController {
                 };
             });
             
+            // Get buyer name and all locations for this buyer
+            let buyerName = 'Buyer';
+            let buyerLocations = [];
+            let buyerInfo = null;
+            
+            if (portalAccess.buyerId) {
+                try {
+                    const buyerResult = await query(`
+                        SELECT 
+                            b.entry_id,
+                            b.name,
+                            b.website_url,
+                            b.buyer_type
+                        FROM "ORDERS-buyers" b
+                        WHERE b.entry_id = $1
+                    `, [portalAccess.buyerId]);
+                    
+                    if (buyerResult.rows.length > 0) {
+                        buyerInfo = buyerResult.rows[0];
+                        buyerName = buyerInfo.name || 'Buyer';
+                    }
+                    
+                    // Get all locations for this buyer
+                    const locationsResult = await query(`
+                        SELECT 
+                            entry_id,
+                            name,
+                            line_one,
+                            line_two,
+                            city,
+                            state,
+                            zip,
+                            state_license
+                        FROM "ORDERS-buyer_locations"
+                        WHERE orders_buyer_id = $1
+                        ORDER BY name
+                    `, [portalAccess.buyerId]);
+                    
+                    buyerLocations = locationsResult.rows || [];
+                } catch (err) {
+                    console.error('Error fetching buyer info:', err);
+                }
+            }
+            
             res.render('external/store', {
                 title: 'Product Catalog',
                 layout: 'layouts/portal',
                 products: productsWithImages,
                 portalAccess: portalAccess,
-                uuid: uuid
+                uuid: uuid,
+                buyerName: buyerName,
+                buyerLocations: buyerLocations,
+                buyerInfo: buyerInfo
             });
         } catch (error) {
             console.error('Error loading catalog:', error);
@@ -651,9 +698,9 @@ class PortalController {
                 return res.status(400).json({ error: 'Invalid line_item_id' });
             }
             
-            // Get the invoice ID and batch ID from the line item
+            // Get the invoice ID, batch ID, and allocated quantity from the line item
             const lineItemResult = await query(`
-                SELECT li.fk_invoice_id, li.fk_batch_id
+                SELECT li.fk_invoice_id, li.fk_batch_id, li.quantity_allocated
                 FROM "ORDERS-invoice-line-items" li
                 WHERE li.id = $1
             `, [line_item_id]);
@@ -664,6 +711,7 @@ class PortalController {
             
             const invoiceId = lineItemResult.rows[0].fk_invoice_id;
             const actualBatchId = lineItemResult.rows[0].fk_batch_id;
+            const allocatedQuantity = parseInt(lineItemResult.rows[0].quantity_allocated || 0, 10);
             const batchIdToDelete = batch_id || actualBatchId; // Use provided batch_id or the one from the line item
             
             // Verify invoice belongs to this buyer/location
@@ -678,6 +726,21 @@ class PortalController {
             
             if (invoiceCheck.rows.length === 0) {
                 return res.status(403).json({ error: 'Unauthorized' });
+            }
+            
+            // Get total allocated quantity for this batch before deletion
+            // This is needed to deallocate properly
+            let totalAllocatedToRelease = 0;
+            if (batch_id) {
+                // Get sum of all allocated quantities for this batch in this invoice
+                const allocatedSumResult = await query(`
+                    SELECT COALESCE(SUM(quantity_allocated), 0) as total_allocated
+                    FROM "ORDERS-invoice-line-items"
+                    WHERE fk_invoice_id = $1 AND fk_batch_id = $2
+                `, [invoiceId, batchIdToDelete]);
+                totalAllocatedToRelease = parseInt(allocatedSumResult.rows[0].total_allocated || 0, 10);
+            } else {
+                totalAllocatedToRelease = allocatedQuantity;
             }
             
             // If batch_id is provided, delete ALL line items for that batch in this invoice
@@ -714,8 +777,35 @@ class PortalController {
                 deleted_count: deleteResult.rows.length,
                 line_item_id, 
                 batch_id: batchIdToDelete,
-                invoice_id: invoiceId 
+                invoice_id: invoiceId,
+                allocated_to_release: totalAllocatedToRelease
             });
+            
+            // Deallocate batches - release the allocated quantity
+            if (totalAllocatedToRelease > 0) {
+                try {
+                    const allocationService = require('../Services/allocationService');
+                    const deallocationResult = await allocationService.releaseAllocation(
+                        batchIdToDelete,
+                        totalAllocatedToRelease,
+                        invoiceId,
+                        'Item removed from cart'
+                    );
+                    
+                    if (!deallocationResult.success) {
+                        console.error('Failed to deallocate batch:', deallocationResult.error);
+                        // Continue anyway - the line item is deleted
+                    } else {
+                        console.log('removeFromCart - Successfully deallocated:', {
+                            batch_id: batchIdToDelete,
+                            quantity: totalAllocatedToRelease
+                        });
+                    }
+                } catch (allocationError) {
+                    console.error('Error deallocating batch:', allocationError);
+                    // Continue anyway - the line item is deleted
+                }
+            }
             
             // Recalculate invoice totals
             const totalsResult = await query(`
@@ -780,6 +870,7 @@ class PortalController {
             // Get the line item and verify it belongs to this buyer
             const lineItemResult = await query(`
                 SELECT li.id, li.fk_invoice_id, li.unit_price, li.fk_batch_id, li.fk_master_product_id,
+                       li.quantity_ordered, li.quantity_allocated,
                        i.fk_buyer_id, i.fk_location_id
                 FROM "ORDERS-invoice-line-items" li
                 INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
@@ -810,7 +901,12 @@ class PortalController {
             }
             
             const batch = batchResult.rows[0];
-            const available = batch.quantity - batch.allocated_quantity;
+            const currentQuantity = parseInt(lineItem.quantity_ordered || 0, 10);
+            const currentAllocated = parseInt(lineItem.quantity_allocated || 0, 10);
+            const quantityChange = parseInt(quantity, 10) - currentQuantity;
+            
+            // Calculate available quantity (accounting for current allocation)
+            const available = batch.quantity - batch.allocated_quantity + currentAllocated;
             
             if (quantity > available) {
                 return res.status(400).json({ error: `Only ${available} cases available` });
@@ -899,6 +995,82 @@ class PortalController {
                 WHERE id = $3
             `, [subtotal, total, lineItem.fk_invoice_id]);
             
+            // Handle allocation/deallocation based on quantity change
+            if (quantityChange !== 0) {
+                try {
+                    const allocationService = require('../Services/allocationService');
+                    
+                    if (quantityChange < 0) {
+                        // Quantity decreased - deallocate the difference
+                        const quantityToDeallocate = Math.abs(quantityChange);
+                        const deallocationResult = await allocationService.releaseAllocation(
+                            lineItem.fk_batch_id,
+                            quantityToDeallocate,
+                            lineItem.fk_invoice_id,
+                            'Quantity decreased in cart'
+                        );
+                        
+                        if (!deallocationResult.success) {
+                            console.error('Failed to deallocate batch:', deallocationResult.error);
+                        } else {
+                            // Update quantity_allocated in line item
+                            const newAllocated = Math.max(0, currentAllocated - quantityToDeallocate);
+                            await query(`
+                                UPDATE "ORDERS-invoice-line-items"
+                                SET quantity_allocated = $1
+                                WHERE id = $2
+                            `, [newAllocated, line_item_id]);
+                            
+                            console.log('updateCartItem - Deallocated:', {
+                                batch_id: lineItem.fk_batch_id,
+                                quantity: quantityToDeallocate
+                            });
+                        }
+                    } else if (quantityChange > 0) {
+                        // Quantity increased - allocate the difference
+                        const quantityToAllocate = quantityChange;
+                        const allocationResult = await allocationService.allocateBatchToInvoice(
+                            lineItem.fk_batch_id,
+                            quantityToAllocate,
+                            lineItem.fk_invoice_id,
+                            line_item_id
+                        );
+                        
+                        if (!allocationResult.success) {
+                            console.error('Failed to allocate batch:', allocationResult.error);
+                            // Rollback quantity change
+                            await query(`
+                                UPDATE "ORDERS-invoice-line-items"
+                                SET quantity_ordered = $1,
+                                    line_total = $1 * unit_price,
+                                    updated_at = NOW()
+                                WHERE id = $2
+                            `, [currentQuantity, line_item_id]);
+                            
+                            return res.status(400).json({ 
+                                error: allocationResult.error || 'Failed to allocate inventory' 
+                            });
+                        } else {
+                            // Update quantity_allocated in line item
+                            const newAllocated = currentAllocated + quantityToAllocate;
+                            await query(`
+                                UPDATE "ORDERS-invoice-line-items"
+                                SET quantity_allocated = $1
+                                WHERE id = $2
+                            `, [newAllocated, line_item_id]);
+                            
+                            console.log('updateCartItem - Allocated:', {
+                                batch_id: lineItem.fk_batch_id,
+                                quantity: quantityToAllocate
+                            });
+                        }
+                    }
+                } catch (allocationError) {
+                    console.error('Error handling allocation/deallocation:', allocationError);
+                    // Continue - the line item is updated
+                }
+            }
+            
             res.json({ 
                 success: true, 
                 message: 'Quantity updated',
@@ -962,6 +1134,30 @@ class PortalController {
                 locationsFound: allLocations.rows.length
             });
             
+            // Get buyer name and info for header
+            let buyerName = 'Buyer';
+            let buyerInfo = null;
+            if (portalAccess.buyerId) {
+                try {
+                    const buyerResult = await query(`
+                        SELECT 
+                            b.entry_id,
+                            b.name,
+                            b.website_url,
+                            b.buyer_type
+                        FROM "ORDERS-buyers" b
+                        WHERE b.entry_id = $1
+                    `, [portalAccess.buyerId]);
+                    
+                    if (buyerResult.rows.length > 0) {
+                        buyerInfo = buyerResult.rows[0];
+                        buyerName = buyerInfo.name || 'Buyer';
+                    }
+                } catch (err) {
+                    console.error('Error fetching buyer info in checkout:', err);
+                }
+            }
+            
             res.render('external/checkout', {
                 title: 'Checkout',
                 layout: 'layouts/portal',
@@ -969,7 +1165,9 @@ class PortalController {
                 portalAccess: portalAccess,
                 uuid: uuid,
                 shippingAddress: shippingAddress,
-                locations: allLocations.rows
+                locations: allLocations.rows,
+                buyerName: buyerName,
+                buyerInfo: buyerInfo
             });
         } catch (error) {
             console.error('Error loading checkout:', error);
@@ -1043,6 +1241,30 @@ class PortalController {
                 ? invoice.sales_rep_full_name.trim() 
                 : null;
             
+            // Get buyer name and info for header
+            let buyerName = 'Buyer';
+            let buyerInfo = null;
+            if (portalAccess.buyerId) {
+                try {
+                    const buyerResult = await query(`
+                        SELECT 
+                            b.entry_id,
+                            b.name,
+                            b.website_url,
+                            b.buyer_type
+                        FROM "ORDERS-buyers" b
+                        WHERE b.entry_id = $1
+                    `, [portalAccess.buyerId]);
+                    
+                    if (buyerResult.rows.length > 0) {
+                        buyerInfo = buyerResult.rows[0];
+                        buyerName = buyerInfo.name || 'Buyer';
+                    }
+                } catch (err) {
+                    console.error('Error fetching buyer info in confirmation:', err);
+                }
+            }
+            
             res.render('external/order-confirmation', {
                 title: 'Order Confirmation',
                 layout: 'layouts/portal',
@@ -1050,7 +1272,9 @@ class PortalController {
                 invoiceNumber: invoice.invoice_number,
                 orderTotal: invoice.total,
                 creditApplied: invoice.credit_applied || 0,
-                salesRepName: salesRepName
+                salesRepName: salesRepName,
+                buyerName: buyerName,
+                buyerInfo: buyerInfo
             });
         } catch (error) {
             console.error('Error loading confirmation:', error);

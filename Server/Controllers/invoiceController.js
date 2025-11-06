@@ -167,9 +167,14 @@ class InvoiceController {
             
             // Get location license number
             const location = await query(`
-                SELECT license_number, assigned_sales_rep_id
-                FROM "ORDERS-buyer_locations"
-                WHERE id = $1
+                SELECT 
+                    l.state_license,
+                    l.entry_id,
+                    COALESCE(l.assigned_sales_rep_id, sr.fk_sales_rep_id) as assigned_sales_rep_id
+                FROM "ORDERS-buyer_locations" l
+                LEFT JOIN "ORDERS-buyer_sales_rep_assignments" sr ON l.orders_buyer_id = sr.fk_buyer_id
+                WHERE l.entry_id = $1
+                LIMIT 1
             `, [location_id]);
             
             if (location.rows.length === 0) {
@@ -179,8 +184,8 @@ class InvoiceController {
                 });
             }
             
-            const licenseNumber = location.rows[0].license_number;
-            const defaultSalesRep = location.rows[0].assigned_sales_rep_id;
+            const licenseNumber = location.rows[0].state_license || null;
+            const defaultSalesRep = location.rows[0].assigned_sales_rep_id || null;
             
             // Generate invoice number
             const invoiceNumber = await this.generateInvoiceNumber();
@@ -360,11 +365,12 @@ class InvoiceController {
                     i.credit_applied,
                     i.created_at,
                     i.updated_at,
+                    i.cart_expires_at,
                     i.fk_buyer_id,
                     i.fk_location_id,
                     COALESCE(b.name, 'Unknown Buyer') as buyer_name,
                     COALESCE(l.name, 'Unknown Location') as location_name,
-                    u.username as created_by_username,
+                    COALESCE(b.name, u.username, 'System') as created_by_username,
                     COALESCE(sr.first_name || ' ' || sr.last_name, 'Unassigned') as sales_rep_name
                 FROM "ORDERS-invoices" i
                 LEFT JOIN "ORDERS-buyers" b ON i.fk_buyer_id = b.entry_id
@@ -411,6 +417,10 @@ class InvoiceController {
                 paramIndex++;
             }
             
+            // Additional filter options
+            const fulfillmentStatus = req.query.fulfillment_status; // 'fulfilled', 'not_fulfilled', 'all'
+            const deliveryStatus = req.query.delivery_status; // 'delivered', 'not_delivered', 'all'
+            
             if (status) {
                 queryStr += ` AND i.status = $${paramIndex}`;
                 params.push(status);
@@ -423,7 +433,34 @@ class InvoiceController {
                 paramIndex++;
             }
             
-            queryStr += ` ORDER BY i.created_at DESC LIMIT 500`;
+            // Fulfillment status filter
+            if (fulfillmentStatus === 'fulfilled') {
+                queryStr += ` AND i.status IN ('Fulfillment_Accepted', 'Manifested', 'Shipped', 'Delivered', 'Paid')`;
+            } else if (fulfillmentStatus === 'not_fulfilled') {
+                queryStr += ` AND i.status NOT IN ('Fulfillment_Accepted', 'Manifested', 'Shipped', 'Delivered', 'Paid')`;
+            }
+            
+            // Delivery status filter
+            if (deliveryStatus === 'delivered') {
+                queryStr += ` AND i.status IN ('Delivered', 'Paid')`;
+            } else if (deliveryStatus === 'not_delivered') {
+                queryStr += ` AND i.status NOT IN ('Delivered', 'Paid')`;
+            }
+            
+            // Get total count for pagination (before adding LIMIT/OFFSET)
+            const countParams = params.slice(); // Copy params array
+            const countQuery = queryStr.replace(/SELECT[\s\S]*?FROM/, 'SELECT COUNT(*) as total FROM').replace(/ORDER BY[\s\S]*$/, '');
+            const countResult = await query(countQuery, countParams);
+            const totalInvoices = parseInt(countResult.rows[0]?.total || 0);
+            
+            // Pagination
+            const page = parseInt(req.query.page) || 1;
+            const limit = parseInt(req.query.limit) || 25;
+            const offset = (page - 1) * limit;
+            const totalPages = Math.ceil(totalInvoices / limit);
+            
+            queryStr += ` ORDER BY i.created_at DESC LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
+            params.push(limit, offset);
             
             const invoices = await query(queryStr, params);
             
@@ -431,7 +468,13 @@ class InvoiceController {
                 title: 'Invoices',
                 layout: 'layouts/main',
                 invoices: invoices.rows || [],
-                filters: { status, source },
+                filters: { status, source, fulfillment_status: fulfillmentStatus, delivery_status: deliveryStatus },
+                pagination: {
+                    page: page,
+                    limit: limit,
+                    total: totalInvoices,
+                    totalPages: totalPages
+                },
                 user: req.session.user,
                 isAdmin: isAdmin,
                 isSalesAdmin: isSalesAdmin,
@@ -514,17 +557,79 @@ class InvoiceController {
      */
     async showCreateInvoiceForm(req, res) {
         try {
-            // Get all buyers with locations for dropdown
-            const buyers = await query(`
-                SELECT 
+            const userId = req.session.userId || req.user?.id;
+            const UserModel = require('../Models/userModel');
+            
+            // Check if user is admin or sales admin
+            const isSuperuser = await UserModel.isSuperuser(userId);
+            const userRoles = await UserModel.getUserRoles(userId);
+            const userRoleNames = userRoles.map(r => r.name || r.role_name).filter(Boolean);
+            
+            const isAdmin = isSuperuser || userRoleNames.some(r => r.toLowerCase() === 'administrator');
+            const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
+            const isSalesRep = !isAdmin && !isSalesAdmin && userRoleNames.some(r => r.toLowerCase() === 'sales representative');
+            
+            // Build query to get buyers with locations
+            let queryStr = `
+                SELECT DISTINCT
                     b.entry_id as buyer_id,
                     b.name as buyer_name,
                     l.entry_id as location_id,
                     l.name as location_name
                 FROM "ORDERS-buyers" b
                 INNER JOIN "ORDERS-buyer_locations" l ON b.entry_id = l.orders_buyer_id
-                ORDER BY b.name, l.name
-            `);
+            `;
+            
+            const params = [];
+            let paramIndex = 1;
+            
+            // If Sales Rep, filter to only show assigned locations
+            // Sales Admin and Administrators see all buyers/locations (no filter)
+            if (isSalesRep && !isAdmin && !isSalesAdmin) {
+                // Check if assigned_sales_rep_id column exists on buyer_locations table
+                let hasLocationSalesRepColumn = false;
+                try {
+                    const columnCheck = await query(`
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_schema = 'public'
+                        AND table_name = 'ORDERS-buyer_locations' 
+                        AND column_name = 'assigned_sales_rep_id'
+                    `);
+                    hasLocationSalesRepColumn = columnCheck.rows.length > 0;
+                } catch (err) {
+                    console.warn('Could not check for assigned_sales_rep_id column:', err);
+                }
+                
+                if (hasLocationSalesRepColumn) {
+                    // Filter by locations directly assigned to this sales rep (via assigned_sales_rep_id)
+                    // OR locations belonging to buyers assigned to this sales rep
+                    queryStr += `
+                        LEFT JOIN "ORDERS-buyer_sales_rep_assignments" ba ON b.entry_id = ba.fk_buyer_id
+                        LEFT JOIN "ORDERS-sales_reps" sr ON ba.fk_sales_rep_id = sr.entry_id
+                        LEFT JOIN users u ON sr.email = u.email
+                        WHERE (
+                            l.assigned_sales_rep_id = $${paramIndex}
+                            OR u.id = $${paramIndex}
+                        )
+                    `;
+                } else {
+                    // Fallback: filter by buyer assignments only (if location-level assignment column doesn't exist)
+                    queryStr += `
+                        INNER JOIN "ORDERS-buyer_sales_rep_assignments" ba ON b.entry_id = ba.fk_buyer_id
+                        INNER JOIN "ORDERS-sales_reps" sr ON ba.fk_sales_rep_id = sr.entry_id
+                        INNER JOIN users u ON sr.email = u.email
+                        WHERE u.id = $${paramIndex}
+                    `;
+                }
+                params.push(userId);
+                paramIndex++;
+            }
+            // If Sales Admin or Admin, no WHERE clause - show all buyers and locations
+            
+            queryStr += ` ORDER BY b.name, l.name`;
+            
+            const buyers = await query(queryStr, params);
             
             res.render('admin/invoices/create', {
                 title: 'Create Invoice',
@@ -543,6 +648,15 @@ class InvoiceController {
      * POST /admin/invoices/:id/clone
      */
     async cloneInvoice(req, res) {
+        // Ensure 'this' context is preserved
+        if (!this || typeof this.generateInvoiceNumber !== 'function') {
+            console.error('Context lost in cloneInvoice. this:', this);
+            return res.status(500).json({ 
+                success: false, 
+                error: 'Internal server error - context issue',
+                details: 'Method context was lost'
+            });
+        }
         try {
             const { id } = req.params;
             const { new_location_id } = req.body;
@@ -574,20 +688,84 @@ class InvoiceController {
             
             // Get location details
             const locationId = new_location_id || origInvoice.fk_location_id;
-            const location = await query(`
-                SELECT license_number, assigned_sales_rep_id
-                FROM "ORDERS-buyer_locations"
-                WHERE id = $1
-            `, [locationId]);
+            
+            // First try to get state_license and check if assigned_sales_rep_id column exists
+            let location;
+            try {
+                location = await query(`
+                    SELECT 
+                        state_license,
+                        entry_id
+                    FROM "ORDERS-buyer_locations"
+                    WHERE entry_id = $1
+                    LIMIT 1
+                `, [locationId]);
+            } catch (err) {
+                // If state_license doesn't exist, try without it
+                console.warn('Error querying location with state_license, trying alternative:', err.message);
+                location = await query(`
+                    SELECT 
+                        entry_id
+                    FROM "ORDERS-buyer_locations"
+                    WHERE entry_id = $1
+                    LIMIT 1
+                `, [locationId]);
+            }
+            
+            // Try to get assigned_sales_rep_id if column exists
+            let assignedSalesRepId = null;
+            try {
+                const salesRepQuery = await query(`
+                    SELECT assigned_sales_rep_id
+                    FROM "ORDERS-buyer_locations"
+                    WHERE entry_id = $1
+                    LIMIT 1
+                `, [locationId]);
+                if (salesRepQuery.rows.length > 0 && salesRepQuery.rows[0].assigned_sales_rep_id) {
+                    assignedSalesRepId = salesRepQuery.rows[0].assigned_sales_rep_id;
+                }
+            } catch (err) {
+                // Column doesn't exist, try getting from buyer_sales_rep_assignments
+                try {
+                    const buyerId = origInvoice.fk_buyer_id;
+                    const salesRepAssignment = await query(`
+                        SELECT fk_sales_rep_id
+                        FROM "ORDERS-buyer_sales_rep_assignments"
+                        WHERE fk_buyer_id = $1
+                        LIMIT 1
+                    `, [buyerId]);
+                    if (salesRepAssignment.rows.length > 0) {
+                        assignedSalesRepId = salesRepAssignment.rows[0].fk_sales_rep_id;
+                    }
+                } catch (assignmentErr) {
+                    console.warn('Could not get sales rep assignment:', assignmentErr.message);
+                }
+            }
             
             if (location.rows.length === 0) {
                 return res.status(404).json({ success: false, error: 'Location not found' });
             }
             
             const locationData = location.rows[0];
+            const stateLicense = locationData.state_license || null;
             
             // Generate new invoice number
-            const invoiceNumber = await this.generateInvoiceNumber();
+            // Use bound method or fallback to direct call
+            let invoiceNumber;
+            if (this && typeof this.generateInvoiceNumber === 'function') {
+                invoiceNumber = await this.generateInvoiceNumber();
+            } else {
+                // Fallback: generate invoice number directly
+                const year = new Date().getFullYear();
+                const result = await query(`
+                    SELECT COUNT(*) as count
+                    FROM "ORDERS-invoices"
+                    WHERE invoice_number LIKE $1
+                `, [`INV-${year}-%`]);
+                
+                const count = parseInt(result.rows[0].count || 0) + 1;
+                invoiceNumber = `INV-${year}-${String(count).padStart(5, '0')}`;
+            }
             
             // Create new invoice
             const newInvoice = await query(`
@@ -601,10 +779,10 @@ class InvoiceController {
                 invoiceNumber,
                 origInvoice.fk_buyer_id,
                 locationId,
-                locationData.license_number,
+                stateLicense,
                 origInvoice.source,
                 userId,
-                locationData.assigned_sales_rep_id || userId,
+                assignedSalesRepId,
                 origInvoice.customer_notes,
                 `Cloned from invoice ${origInvoice.invoice_number}`
             ]);
@@ -715,7 +893,7 @@ class InvoiceController {
                     b.name as buyer_name,
                     l.name as location_name,
                     l.assigned_sales_rep_id as location_assigned_sales_rep_id,
-                    u.username as created_by_username
+                    COALESCE(b.name, u.username, 'System') as created_by_username
                 FROM "ORDERS-invoices" i
                 INNER JOIN "ORDERS-buyers" b ON i.fk_buyer_id = b.entry_id
                 INNER JOIN "ORDERS-buyer_locations" l ON i.fk_location_id = l.entry_id
@@ -790,6 +968,8 @@ class InvoiceController {
                 return res.status(400).json({ success: false, error: 'location_id is required' });
             }
             
+            // Get products with available sellable batches
+            // Note: Products aren't location-specific, but we verify the location exists
             let queryStr = `
                 SELECT DISTINCT
                     p.entry_id as product_id,
@@ -803,33 +983,41 @@ class InvoiceController {
                 FROM "ORDERS-products" p
                 INNER JOIN "ORDERS-batches" b ON p.entry_id = b.fk_master_product_id
                 WHERE b.status = 'Sellable'
-                  AND (b.quantity - b.allocated_quantity) > 0
+                  AND (b.quantity - COALESCE(b.allocated_quantity, 0)) > 0
+                  AND b.full_package_count > 0
             `;
             
             const params = [];
             let paramIndex = 1;
             
-            if (search) {
+            if (search && search.trim().length > 0) {
+                const searchTerm = search.trim();
                 queryStr += ` AND (
                     p.name ILIKE $${paramIndex} OR 
-                    p.brand_name ILIKE $${paramIndex} OR 
-                    p.cultivar_name ILIKE $${paramIndex}
+                    COALESCE(p.brand_name, '') ILIKE $${paramIndex} OR 
+                    COALESCE(p.cultivar_name, '') ILIKE $${paramIndex} OR
+                    COALESCE(p.product_type_name, '') ILIKE $${paramIndex}
                 )`;
-                params.push(`%${search}%`);
+                params.push(`%${searchTerm}%`);
                 paramIndex++;
             }
             
-            queryStr += ` ORDER BY p.brand_name, p.name LIMIT 50`;
+            queryStr += ` ORDER BY p.brand_name, p.name LIMIT 100`;
             
             const products = await query(queryStr, params);
             
             res.json({
                 success: true,
-                products: products.rows
+                products: products.rows,
+                count: products.rows.length
             });
         } catch (error) {
             console.error('Error getting products:', error);
-            res.status(500).json({ success: false, error: 'Failed to get products' });
+            res.status(500).json({ 
+                success: false, 
+                error: 'Failed to get products',
+                message: error.message 
+            });
         }
     }
 
@@ -891,12 +1079,77 @@ class InvoiceController {
             } = req.body;
             
             const userId = req.session.userId || req.user?.id;
+            const UserModel = require('../Models/userModel');
             
             if (!buyer_id || !location_id || !line_items || line_items.length === 0) {
                 return res.status(400).json({
                     success: false,
                     error: 'buyer_id, location_id, and line_items are required'
                 });
+            }
+            
+            // Check if user is Sales Rep and validate access to buyer/location
+            const isSuperuser = await UserModel.isSuperuser(userId);
+            const userRoles = await UserModel.getUserRoles(userId);
+            const userRoleNames = userRoles.map(r => r.name || r.role_name).filter(Boolean);
+            
+            const isAdmin = isSuperuser || userRoleNames.some(r => r.toLowerCase() === 'administrator');
+            const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
+            const isSalesRep = !isAdmin && !isSalesAdmin && userRoleNames.some(r => r.toLowerCase() === 'sales representative');
+            
+            // If Sales Rep, verify they have access to this buyer/location
+            if (isSalesRep) {
+                // Check if assigned_sales_rep_id column exists on buyer_locations table
+                let hasLocationSalesRepColumn = false;
+                try {
+                    const columnCheck = await query(`
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'ORDERS-buyer_locations' 
+                        AND column_name = 'assigned_sales_rep_id'
+                    `);
+                    hasLocationSalesRepColumn = columnCheck.rows.length > 0;
+                } catch (err) {
+                    console.warn('Could not check for assigned_sales_rep_id column:', err);
+                }
+                
+                let hasAccess = false;
+                if (hasLocationSalesRepColumn) {
+                    // Check if location is assigned to this sales rep OR buyer is assigned to this sales rep
+                    const accessCheck = await query(`
+                        SELECT 
+                            l.entry_id,
+                            l.assigned_sales_rep_id,
+                            ba.fk_sales_rep_id
+                        FROM "ORDERS-buyer_locations" l
+                        LEFT JOIN "ORDERS-buyer_sales_rep_assignments" ba ON l.orders_buyer_id = ba.fk_buyer_id
+                        LEFT JOIN "ORDERS-sales_reps" sr ON ba.fk_sales_rep_id = sr.entry_id
+                        WHERE l.entry_id = $1
+                          AND (
+                              l.assigned_sales_rep_id = $2
+                              OR sr.email = (SELECT email FROM users WHERE id = $2)
+                          )
+                    `, [parseInt(location_id), userId]);
+                    hasAccess = accessCheck.rows.length > 0;
+                } else {
+                    // Fallback: check buyer assignments only
+                    const accessCheck = await query(`
+                        SELECT ba.entry_id
+                        FROM "ORDERS-buyer_sales_rep_assignments" ba
+                        INNER JOIN "ORDERS-sales_reps" sr ON ba.fk_sales_rep_id = sr.entry_id
+                        WHERE ba.fk_buyer_id = $1
+                          AND sr.email = (SELECT email FROM users WHERE id = $2)
+                    `, [parseInt(buyer_id), userId]);
+                    hasAccess = accessCheck.rows.length > 0;
+                }
+                
+                if (!hasAccess) {
+                    return res.status(403).json({
+                        success: false,
+                        error: 'Forbidden',
+                        message: 'You do not have permission to create invoices for this buyer/location'
+                    });
+                }
             }
             
             const internalInvoiceService = require('../Services/internalInvoiceService');
@@ -1063,11 +1316,13 @@ class InvoiceController {
 
                 const item = lineItem.rows[0];
 
-                if (item.status !== 'Draft') {
+                // Allow editing if invoice is in Draft, Pending_Approval, or Fulfillment_Issue status
+                const editableStatuses = ['Draft', 'Pending_Approval', 'Fulfillment_Issue'];
+                if (!editableStatuses.includes(item.status)) {
                     await client.query('ROLLBACK');
                     return res.status(400).json({
                         success: false,
-                        error: 'Line items can only be updated in draft invoices'
+                        error: `Line items can only be updated when invoice is in Draft, Pending Approval, or Fulfillment Issue status. Current status: ${item.status}`
                     });
                 }
 
@@ -1259,11 +1514,13 @@ class InvoiceController {
 
                 const item = lineItem.rows[0];
 
-                if (item.status !== 'Draft') {
+                // Allow removing line items if invoice is in Draft, Pending_Approval, or Fulfillment_Issue status
+                const editableStatuses = ['Draft', 'Pending_Approval', 'Fulfillment_Issue'];
+                if (!editableStatuses.includes(item.status)) {
                     await client.query('ROLLBACK');
                     return res.status(400).json({
                         success: false,
-                        error: 'Line items can only be removed from draft invoices'
+                        error: `Line items can only be removed when invoice is in Draft, Pending Approval, or Fulfillment Issue status. Current status: ${item.status}`
                     });
                 }
 
@@ -1691,6 +1948,200 @@ class InvoiceController {
                 success: false,
                 error: 'Failed to get buyer invoices',
                 details: error.message
+            });
+        }
+    }
+
+    /**
+     * Update invoice notes (customer and internal)
+     * PATCH /api/v1/invoices/:id/notes
+     */
+    async updateInvoiceNotes(req, res) {
+        try {
+            const { id } = req.params;
+            const { customer_notes, internal_notes } = req.body;
+            const userId = req.session?.userId || req.user?.id;
+            
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    error: 'Authentication required'
+                });
+            }
+            
+            const invoiceId = parseInt(id, 10);
+            if (isNaN(invoiceId)) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Invalid invoice ID'
+                });
+            }
+            
+            // Verify invoice exists and user has access
+            const invoice = await query(`
+                SELECT 
+                    i.*,
+                    l.assigned_sales_rep_id as location_assigned_sales_rep_id
+                FROM "ORDERS-invoices" i
+                LEFT JOIN "ORDERS-buyer_locations" l ON i.fk_location_id = l.entry_id
+                WHERE i.id = $1
+            `, [invoiceId]);
+            
+            if (invoice.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Invoice not found'
+                });
+            }
+            
+            const invoiceData = invoice.rows[0];
+            
+            // Check permissions - Sales Rep can only update their assigned invoices
+            const UserModel = require('../Models/userModel');
+            const isSuperuser = await UserModel.isSuperuser(userId);
+            const userRoles = await UserModel.getUserRoles(userId);
+            const userRoleNames = userRoles.map(r => r.name || r.role_name).filter(Boolean);
+            const isAdmin = isSuperuser || userRoleNames.some(r => r.toLowerCase() === 'administrator');
+            const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
+            const isSalesRep = !isAdmin && !isSalesAdmin && userRoleNames.some(r => r.toLowerCase() === 'sales representative');
+            
+            if (isSalesRep) {
+                const hasAccess = invoiceData.assigned_sales_rep_id === userId || 
+                                 invoiceData.location_assigned_sales_rep_id === userId;
+                if (!hasAccess) {
+                    return res.status(403).json({
+                        success: false,
+                        error: 'You do not have permission to update this invoice'
+                    });
+                }
+            }
+            
+            // Update notes - only update fields that are provided
+            let updateFields = [];
+            let updateValues = [];
+            let paramIndex = 1;
+            
+            if (customer_notes !== undefined) {
+                updateFields.push(`customer_notes = $${paramIndex}`);
+                updateValues.push(customer_notes || null);
+                paramIndex++;
+            }
+            
+            if (internal_notes !== undefined) {
+                updateFields.push(`internal_notes = $${paramIndex}`);
+                updateValues.push(internal_notes || null);
+                paramIndex++;
+            }
+            
+            if (updateFields.length === 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'At least one note field (customer_notes or internal_notes) must be provided'
+                });
+            }
+            
+            updateFields.push(`updated_at = NOW()`);
+            
+            // Add id as the last parameter
+            updateValues.push(invoiceId);
+            
+            const updateQuery = `
+                UPDATE "ORDERS-invoices"
+                SET ${updateFields.join(', ')}
+                WHERE id = $${paramIndex}
+                RETURNING customer_notes, internal_notes
+            `;
+            
+            console.log('updateInvoiceNotes - Query:', updateQuery);
+            console.log('updateInvoiceNotes - Values:', updateValues);
+            
+            const result = await query(updateQuery, updateValues);
+            
+            if (result.rows.length === 0) {
+                return res.status(500).json({
+                    success: false,
+                    error: 'Failed to update invoice notes - no rows returned'
+                });
+            }
+            
+            // Log history
+            try {
+                // Get old values before update for history
+                const oldCustomerNotes = invoiceData.customer_notes || null;
+                const oldInternalNotes = invoiceData.internal_notes || null;
+                const newCustomerNotes = customer_notes !== undefined ? (customer_notes || null) : oldCustomerNotes;
+                const newInternalNotes = internal_notes !== undefined ? (internal_notes || null) : oldInternalNotes;
+                
+                // Build change details
+                const changes = [];
+                if (customer_notes !== undefined && oldCustomerNotes !== newCustomerNotes) {
+                    changes.push('customer_notes');
+                }
+                if (internal_notes !== undefined && oldInternalNotes !== newInternalNotes) {
+                    changes.push('internal_notes');
+                }
+                
+                // Log history entry if there were actual changes
+                if (changes.length > 0) {
+                    // Use status_changed as the modification_type since notes updates don't have a specific type
+                    // Store the actual change details in the reason and change_details fields
+                    await query(`
+                        INSERT INTO "ORDERS-invoice-history" (
+                            fk_invoice_id, modification_type, field_name, old_value, new_value, 
+                            reason, change_details, changed_by_user_id, changed_by_system
+                        ) VALUES ($1, 'status_changed', 'notes', $2, $3, $4, $5, $6, false)
+                    `, [
+                        invoiceId,
+                        JSON.stringify({ customer_notes: oldCustomerNotes, internal_notes: oldInternalNotes }),
+                        JSON.stringify({ customer_notes: newCustomerNotes, internal_notes: newInternalNotes }),
+                        `Notes updated: ${changes.join(', ')}`,
+                        JSON.stringify({ fields_changed: changes }),
+                        userId
+                    ]);
+                }
+            } catch (historyError) {
+                console.error('Error logging invoice history:', historyError);
+                console.error('History error details:', historyError.message, historyError.stack);
+                // Continue - history logging failure shouldn't block the update
+            }
+            
+            // Audit log
+            try {
+                await auditLogger.logAction({
+                    userId: userId,
+                    action: 'invoice_notes_updated',
+                    resourceType: 'Invoice',
+                    resourceId: invoiceId.toString(),
+                    details: {
+                        invoice_id: invoiceId,
+                        invoice_number: invoiceData.invoice_number,
+                        customer_notes_updated: customer_notes !== undefined,
+                        internal_notes_updated: internal_notes !== undefined
+                    },
+                    status: 'success',
+                    sourceIp: req.ip || req.connection?.remoteAddress
+                });
+            } catch (auditError) {
+                console.error('Error logging audit trail:', auditError);
+                // Continue - audit logging failure shouldn't block the update
+            }
+            
+            res.json({
+                success: true,
+                message: 'Invoice notes updated successfully',
+                invoice: {
+                    customer_notes: result.rows[0].customer_notes,
+                    internal_notes: result.rows[0].internal_notes
+                }
+            });
+        } catch (error) {
+            console.error('Error updating invoice notes:', error);
+            console.error('Error stack:', error.stack);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to update invoice notes',
+                details: error.message,
+                stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
             });
         }
     }

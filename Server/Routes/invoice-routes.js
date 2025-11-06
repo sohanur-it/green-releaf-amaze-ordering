@@ -55,6 +55,20 @@ const discountService = require('../Services/discountService');
 router.get('/', auth, invoiceController.getAllInvoices);
 
 /**
+ * Get products for location (for invoice creation UI)
+ * GET /api/v1/invoices/products?location_id=123&search=keyword
+ * NOTE: Must be before /:id route to avoid route conflict
+ */
+router.get('/products', auth, invoiceController.getProductsForLocation);
+
+/**
+ * Get batches for a product (for invoice creation UI)
+ * GET /api/v1/invoices/products/:productId/batches?location_id=123
+ * NOTE: Must be before /:id route to avoid route conflict
+ */
+router.get('/products/:productId/batches', auth, invoiceController.getBatchesForProduct);
+
+/**
  * @swagger
  * /api/v1/invoices/:id:
  *   get:
@@ -137,20 +151,9 @@ router.post('/', auth, auditMiddleware, invoiceController.createInvoice);
 router.post('/:id/transition', auth, auditMiddleware, invoiceController.transitionInvoice);
 
 /**
- * Get products for location (for invoice creation UI)
- * GET /api/v1/invoices/products?location_id=123&search=keyword
- */
-router.get('/products', auth, invoiceController.getProductsForLocation);
-
-/**
- * Get batches for a product (for invoice creation UI)
- * GET /api/v1/invoices/products/:productId/batches?location_id=123
- */
-router.get('/products/:productId/batches', auth, invoiceController.getBatchesForProduct);
-
-/**
  * Create internal invoice (for invoice creation UI)
  * POST /api/v1/invoices/internal
+ * NOTE: Must be before /:id routes to avoid route conflict
  */
 router.post('/internal', auth, auditMiddleware, invoiceController.createInternalInvoice);
 
@@ -267,6 +270,12 @@ router.post('/:id/fulfillment/accept', auth, auditMiddleware, invoiceController.
  * POST /api/v1/invoices/:id/fulfillment/issue
  */
 router.post('/:id/fulfillment/issue', auth, auditMiddleware, invoiceController.reportFulfillmentIssue);
+
+/**
+ * Update invoice notes (customer and internal)
+ * PATCH /api/v1/invoices/:id/notes
+ */
+router.patch('/:id/notes', auth, auditMiddleware, invoiceController.updateInvoiceNotes);
 
 module.exports = router;
 

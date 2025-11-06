@@ -262,8 +262,8 @@ router.get('/', async (req, res) => {
         });
     } catch (error) {
         console.error('Error loading dashboard:', error);
-        res.render('admin/dashboard', {
-            title: 'Dashboard',
+    res.render('admin/dashboard', {
+        title: 'Dashboard',
             layout: 'layouts/main',
             user: null,
             userEmail: req.session.username || '',
@@ -357,19 +357,19 @@ router.get('/audit-logs', requirePermission('admin', 'audit'), (req, res) => {
 router.get('/invoices', requireRole('Sales Admin', 'Sales Representative', 'Administrator'), invoiceController.showInvoiceList);
 
 // Show create invoice form
-router.get('/invoices/create', requireRole('Sales Admin', 'Administrator'), invoiceController.showCreateInvoiceForm);
+router.get('/invoices/create', requireRole('Sales Admin', 'Sales Representative', 'Administrator'), invoiceController.showCreateInvoiceForm);
 
 // Clone invoice
-router.post('/invoices/:id/clone', requireRole('Sales Admin', 'Administrator'), invoiceController.cloneInvoice);
+router.post('/invoices/:id/clone', requireRole('Sales Admin', 'Administrator'), invoiceController.cloneInvoice.bind(invoiceController));
 
 // Show invoice details
 router.get('/invoices/:id', requireRole('Sales Admin', 'Sales Representative', 'Administrator'), invoiceController.showInvoiceDetails);
 
-// Approve pending invoice
-router.post('/invoices/:id/approve', requireRole('Sales Admin', 'Administrator'), invoiceController.approveInvoice);
+// Approve pending invoice (Sales Admin, Sales Rep, and Administrator)
+router.post('/invoices/:id/approve', requireRole('Sales Admin', 'Sales Representative', 'Administrator'), invoiceController.approveInvoice);
 
-// Reject pending invoice
-router.post('/invoices/:id/reject', requireRole('Sales Admin', 'Administrator'), invoiceController.rejectInvoice);
+// Reject pending invoice (Sales Admin, Sales Rep, and Administrator)
+router.post('/invoices/:id/reject', requireRole('Sales Admin', 'Sales Representative', 'Administrator'), invoiceController.rejectInvoice);
 
 // =============================================
 // PORTAL ACCESS MANAGEMENT ROUTES (Module 4)
