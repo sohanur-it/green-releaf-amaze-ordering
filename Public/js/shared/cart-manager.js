@@ -70,6 +70,7 @@ class CartManager {
                 unit_price: productData.unit_price,
                 line_total: productData.unit_price * quantity,
                 quantity_available: productData.quantity_available, // Store available inventory
+                quantity_allocated: productData.quantity_allocated || 0,
                 image_url: productData.image_url || '/public/images/placeholder.jpg'
             };
             this.cart.items.push(newItem);
@@ -237,8 +238,14 @@ class CartManager {
             const response = await fetch(`/api/portal/${this.uuid}/cart`);
             if (response.ok) {
                 const data = await response.json();
+                const items = Array.isArray(data.items) ? data.items.map(item => ({
+                    ...item,
+                    quantity_allocated: item.quantity_allocated || 0,
+                    image_url: item.image_url || item.primary_image_url || '/public/images/placeholder.jpg'
+                })) : [];
+                
                 this.cart = {
-                    items: data.items || [],
+                    items,
                     subtotal: data.subtotal || 0,
                     total: data.total || 0
                 };

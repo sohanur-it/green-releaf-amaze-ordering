@@ -99,7 +99,7 @@ class AllocationService {
             if (lineItemId) {
                 await client.query(`
                     UPDATE "ORDERS-invoice-line-items"
-                    SET quantity_allocated = $1
+                    SET quantity_allocated = COALESCE(quantity_allocated, 0) + $1
                     WHERE id = $2
                 `, [quantity, lineItemId]);
             }

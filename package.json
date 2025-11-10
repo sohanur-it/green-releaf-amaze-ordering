@@ -46,6 +46,8 @@
     "sync:transferred:prod:5": "MAX_PAGES=5 NODE_ENV=production node scripts/sync/sync-transferred-packages.js",
     "sync:transferred:prod:10": "MAX_PAGES=10 NODE_ENV=production node scripts/sync/sync-transferred-packages.js",
     "sync:transferred:prod:test": "DRY_RUN=true MAX_PAGES=10 NODE_ENV=production node scripts/sync/sync-transferred-packages.js",
+    "recover:transferred": "NODE_ENV=production node scripts/sync/recover-transferred-packages.js",
+    "recover:transferred:test": "MAX_PAGES=10 NODE_ENV=production node scripts/sync/recover-transferred-packages.js",
     "sync:intransit:prod": "NODE_ENV=production node scripts/sync/sync-intransit-packages.js",
     "sync:all:prod": "npm run sync:active:prod && npm run sync:outgoing:prod && npm run sync:strains:prod && npm run sync:items:prod && npm run sync:transferred:prod && npm run sync:intransit:prod",
     "sync:transferred": "NODE_ENV=development node scripts/sync/sync-transferred-packages.js",

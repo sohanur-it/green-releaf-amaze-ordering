@@ -631,6 +631,14 @@
     </div>
 </div>
 
+<script id="portal-websocket-config" type="application/json">
+<%- JSON.stringify({
+    buyerId: portalAccess && portalAccess.buyerId ? Number(portalAccess.buyerId) : null,
+    locationId: portalAccess && portalAccess.locationId ? Number(portalAccess.locationId) : null,
+    websocketPort: typeof websocketPort !== 'undefined' ? websocketPort : 8080
+}) %>
+</script>
+
 <script>
 // Cart management functions
 // Initialize cart manager on page load
@@ -639,7 +647,13 @@ document.addEventListener('DOMContentLoaded', function() {
     initCartManager(uuid);
     const cart = getCartManager();
     if (cart) {
-        renderCart();
+        cart.loadFromBackend()
+            .catch(err => {
+                console.warn('Unable to sync cart from backend on load:', err);
+            })
+            .finally(() => {
+                renderCart();
+            });
     }
     
     // Add click handler for cart dropdown arrow to close cart
@@ -673,6 +687,8 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(() => {
         initProducts();
     }, 200);
+
+    initPortalWebSocket();
     
     // Populate brand filters dynamically
     const brands = new Set();
@@ -827,21 +843,154 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
-async function loadCart() {
-    const uuid = '<%= uuid %>';
+const portalWebSocketConfigEl = document.getElementById('portal-websocket-config');
+let portalContext = { buyerId: null, locationId: null, websocketPort: 8080 };
+
+if (portalWebSocketConfigEl && portalWebSocketConfigEl.textContent) {
     try {
-        const response = await fetch(`/api/portal/${uuid}/cart`);
-        const data = await response.json();
-        console.log('loadCart - Cart data received:', {
-            item_count: data.items ? data.items.length : 0,
-            items: data.items,
-            subtotal: data.subtotal,
-            total: data.total
+        portalContext = JSON.parse(portalWebSocketConfigEl.textContent);
+    } catch (error) {
+        console.error('Failed to parse portal WebSocket config:', error);
+    }
+}
+
+let portalWebSocket = null;
+let portalWebSocketReconnectTimer = null;
+let portalWebSocketAttempts = 0;
+
+function getPortalWebSocketUrl() {
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const host = window.location.hostname;
+    const port = portalContext.websocketPort || 8080;
+    return `${protocol}://${host}:${port}`;
+}
+
+function schedulePortalWebSocketReconnect() {
+    if (portalWebSocketReconnectTimer) {
+        return;
+    }
+
+    portalWebSocketAttempts = Math.min(portalWebSocketAttempts + 1, 6);
+    const delay = Math.min(15000, 1000 * Math.pow(2, portalWebSocketAttempts));
+
+    portalWebSocketReconnectTimer = setTimeout(() => {
+        portalWebSocketReconnectTimer = null;
+        initPortalWebSocket();
+    }, delay);
+}
+
+function handlePortalWebSocketMessage(event) {
+    let payload;
+    try {
+        payload = JSON.parse(event.data);
+    } catch (error) {
+        console.error('Failed to parse WebSocket message:', error);
+        return;
+    }
+
+    if (payload.type !== 'invoice_sync') {
+        return;
+    }
+
+    const targetBuyerId = payload.buyer_id ?? (payload.invoice ? payload.invoice.buyer_id : null);
+    const targetLocationId = payload.location_id ?? (payload.invoice ? payload.invoice.location_id : null);
+
+    if (portalContext.buyerId && targetBuyerId && Number(portalContext.buyerId) !== Number(targetBuyerId)) {
+        return;
+    }
+
+    if (portalContext.locationId && targetLocationId && Number(portalContext.locationId) !== Number(targetLocationId)) {
+        return;
+    }
+
+    const cart = getCartManager();
+    if (!cart) {
+        return;
+    }
+
+    cart.loadFromBackend()
+        .then(() => {
+            renderCart();
+            if (payload.event === 'invoice_cancelled' || payload.event === 'invoice_deleted') {
+                if (typeof showNotification === 'function') {
+                    showNotification('Your cart was refreshed because the draft invoice changed.', 'info');
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Failed to sync cart after WebSocket event:', error);
         });
-        currentCart = data;
+}
+
+function initPortalWebSocket() {
+    if (typeof WebSocket === 'undefined') {
+        console.warn('WebSocket not supported in this browser.');
+        return;
+    }
+
+    if (portalWebSocket && (portalWebSocket.readyState === WebSocket.OPEN || portalWebSocket.readyState === WebSocket.CONNECTING)) {
+        return;
+    }
+
+    try {
+        portalWebSocket = new WebSocket(getPortalWebSocketUrl());
+    } catch (error) {
+        console.error('Failed to establish WebSocket connection:', error);
+        schedulePortalWebSocketReconnect();
+        return;
+    }
+
+    portalWebSocket.addEventListener('open', () => {
+        portalWebSocketAttempts = 0;
+        if (portalWebSocketReconnectTimer) {
+            clearTimeout(portalWebSocketReconnectTimer);
+            portalWebSocketReconnectTimer = null;
+        }
+    });
+
+    portalWebSocket.addEventListener('message', handlePortalWebSocketMessage);
+
+    portalWebSocket.addEventListener('close', () => {
+        schedulePortalWebSocketReconnect();
+    });
+
+    portalWebSocket.addEventListener('error', () => {
+        schedulePortalWebSocketReconnect();
+    });
+}
+
+window.addEventListener('cartSidebarOpened', async () => {
+    const cart = getCartManager();
+    if (!cart) {
+        return;
+    }
+    
+    try {
+        await cart.loadFromBackend();
+    } catch (error) {
+        console.error('Failed to refresh cart after opening sidebar:', error);
+    } finally {
+        renderCart();
+    }
+});
+
+async function loadCart() {
+    try {
+        const cart = getCartManager();
+        if (!cart) {
+            console.warn('loadCart called before cart manager initialized');
+            return;
+        }
+
+        const synced = await cart.loadFromBackend();
+        if (!synced) {
+            console.warn('loadCart - Failed to sync cart from backend');
+        }
         renderCart();
     } catch (error) {
         console.error('Error loading cart:', error);
+        // Ensure cart UI stays responsive even if sync fails
+        renderCart();
     }
 }
 
@@ -942,18 +1091,54 @@ async function addToCart(event, batchId) {
             batch_id: batchId,
             quantity: quantity
         })
-    }).then(response => response.json())
-    .then(data => {
-        if (data.success && data.line_item_id) {
-            // Update the cart item with the real line_item_id from backend
-            const cartItem = cart.cart.items.find(item => item.batch_id === batchId);
+    }).then(async response => {
+        let data = {};
+        try {
+            data = await response.json();
+        } catch (parseError) {
+            console.error('Failed to parse add-to-cart response:', parseError);
+        }
+        
+        if (!response.ok || !data.success) {
+            const errorMessage = data.error || data.details || data.message || 'Failed to sync item to backend';
+            throw new Error(errorMessage);
+        }
+        
+        return data;
+    }).then(data => {
+        const backendItem = data.line_item || null;
+        if (backendItem) {
+            const cartItem = cart.cart.items.find(item => String(item.batch_id) === String(backendItem.batch_id));
             if (cartItem) {
-                cartItem.line_item_id = data.line_item_id;
-                cart.saveCart();
+                cartItem.line_item_id = backendItem.id;
+                cartItem.quantity = parseInt(backendItem.quantity_ordered, 10) || cartItem.quantity;
+                cartItem.unit_price = parseFloat(backendItem.unit_price ?? cartItem.unit_price);
+                cartItem.line_total = parseFloat(backendItem.line_total ?? (cartItem.unit_price * cartItem.quantity));
+                cartItem.quantity_allocated = parseInt(backendItem.quantity_allocated ?? cartItem.quantity_allocated ?? 0, 10);
             }
         }
-    }).catch(err => {
+        
+        if (data.totals) {
+            cart.cart.subtotal = parseFloat(data.totals.subtotal ?? cart.cart.subtotal ?? 0);
+            cart.cart.total = parseFloat(data.totals.total ?? cart.cart.total ?? 0);
+        }
+        
+        cart.saveCart();
+        renderCart();
+    }).catch(async err => {
         console.error('Error syncing item to backend:', err);
+        
+        if (typeof showNotification !== 'undefined') {
+            showNotification(err.message || 'Failed to sync cart item. Reverting changes.', 'error');
+        }
+        
+        // Reload cart state from backend to ensure consistency
+        try {
+            await cart.loadFromBackend();
+        } catch (syncError) {
+            console.error('Failed to reload cart from backend after error:', syncError);
+        }
+        renderCart();
     });
     
     // Show success notification
@@ -1058,7 +1243,7 @@ let cartUpdateTimer = null;
 let pendingCartUpdates = new Map();
 
 // INSTANT CART UPDATE - Frontend only
-function updateQuantity(lineItemId, delta) {
+async function updateQuantity(lineItemId, delta) {
     const cart = getCartManager();
     if (!cart) {
         console.error('Cart manager not initialized');
@@ -1095,13 +1280,19 @@ function updateQuantity(lineItemId, delta) {
     
     // Update instantly (frontend only)
     const updated = cart.updateQuantity(item.batch_id, newQuantity);
-    if (updated) {
-        renderCart();
-        
-        // Sync to backend in real-time
-        if (item.line_item_id && !item.line_item_id.startsWith('temp_')) {
-            // Only sync if we have a real line_item_id (not a temp one)
-            fetch(`/api/portal/${cart.uuid}/cart/update`, {
+    if (!updated) {
+        console.error('Failed to update quantity for batch:', item.batch_id);
+        return;
+    }
+
+    renderCart();
+
+    // Sync to backend in real-time
+    let refreshedFromBackend = false;
+
+    if (item.line_item_id && !String(item.line_item_id).startsWith('temp_')) {
+        try {
+            const response = await fetch(`/api/portal/${cart.uuid}/cart/update`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -1110,13 +1301,38 @@ function updateQuantity(lineItemId, delta) {
                     line_item_id: item.line_item_id,
                     quantity: newQuantity
                 })
-            }).catch(err => {
-                console.error('Error syncing quantity update:', err);
             });
+
+            let data = {};
+            try {
+                data = await response.json();
+            } catch (parseError) {
+                console.error('Failed to parse update quantity response:', parseError);
+            }
+
+            if (!response.ok || !data.success) {
+                const errorMessage = data.error || data.details || data.message || 'Failed to update cart item';
+                throw new Error(errorMessage);
+            }
+        } catch (err) {
+            console.error('Error syncing quantity update:', err);
+            if (typeof showNotification !== 'undefined') {
+                showNotification(err.message || 'Failed to update cart item. Reverting changes.', 'error');
+            }
+            await cart.loadFromBackend();
+            renderCart();
+            return;
         }
     } else {
-        console.error('Failed to update quantity for batch:', item.batch_id);
+        // Item hasn't been fully synced yet; refresh from backend to grab real IDs/totals
+        refreshedFromBackend = true;
+        await cart.loadFromBackend();
     }
+
+    if (!refreshedFromBackend) {
+        await cart.loadFromBackend();
+    }
+    renderCart();
 }
 
 async function syncCartUpdates() {
@@ -1163,7 +1379,7 @@ async function syncCartUpdates() {
 }
 
 // INSTANT CART REMOVE - Frontend only
-function removeItem(lineItemId, batchId) {
+async function removeItem(lineItemId, batchId) {
     const cart = getCartManager();
     if (!cart) {
         console.error('Cart manager not initialized');
@@ -1188,22 +1404,51 @@ function removeItem(lineItemId, batchId) {
     cart.removeItem(batchId || item.batch_id);
     renderCart();
     
+    let refreshedFromBackend = false;
+    
     // Sync to backend in real-time
-    if (lineItemId && !lineItemId.startsWith('temp_')) {
-        // Only sync if we have a real line_item_id (not a temp one)
-        fetch(`/api/portal/${cart.uuid}/cart/remove`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                line_item_id: lineItemId,
-                batch_id: batchId || item.batch_id
-            })
-        }).catch(err => {
+    if (lineItemId && !String(lineItemId).startsWith('temp_')) {
+        try {
+            const response = await fetch(`/api/portal/${cart.uuid}/cart/remove`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    line_item_id: lineItemId,
+                    batch_id: batchId || item.batch_id
+                })
+            });
+            
+            let data = {};
+            try {
+                data = await response.json();
+            } catch (parseError) {
+                console.error('Failed to parse remove item response:', parseError);
+            }
+            
+            if (!response.ok || !data.success) {
+                const errorMessage = data.error || data.details || data.message || 'Failed to remove item from cart';
+                throw new Error(errorMessage);
+            }
+        } catch (err) {
             console.error('Error syncing item removal:', err);
-        });
+            if (typeof showNotification !== 'undefined') {
+                showNotification(err.message || 'Failed to remove cart item. Reverting changes.', 'error');
+            }
+            await cart.loadFromBackend();
+            renderCart();
+            return;
+        }
+    } else {
+        refreshedFromBackend = true;
+        await cart.loadFromBackend();
     }
+    
+    if (!refreshedFromBackend) {
+        await cart.loadFromBackend();
+    }
+    renderCart();
     
     if (typeof showNotification !== 'undefined') {
         showNotification('Item removed from cart', 'success');

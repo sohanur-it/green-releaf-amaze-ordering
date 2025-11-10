@@ -271,7 +271,8 @@
 
         <!-- Actions -->
         <div style="display: flex; gap: 12px; margin-top: 20px;">
-            <button type="submit" class="btn btn-primary" id="create-invoice-btn">Create Invoice</button>
+            <button type="button" class="btn btn-secondary" id="save-draft-btn">Save Draft</button>
+            <button type="submit" class="btn btn-primary" id="create-invoice-btn">Submit Invoice</button>
             <a href="/admin/invoices" class="btn btn-secondary">Cancel</a>
         </div>
     </form>
@@ -395,8 +396,17 @@ document.addEventListener('DOMContentLoaded', function() {
     // Form submission
     document.getElementById('create-invoice-form').addEventListener('submit', async function(e) {
         e.preventDefault();
-        await createInvoice();
+        const submitBtn = document.getElementById('create-invoice-btn');
+        await createInvoice('Pending_Approval', submitBtn);
     });
+
+    const saveDraftBtn = document.getElementById('save-draft-btn');
+    if (saveDraftBtn) {
+        saveDraftBtn.addEventListener('click', async function(e) {
+            e.preventDefault();
+            await createInvoice('Draft', saveDraftBtn);
+        });
+    }
 
     // Close search results on outside click
     document.addEventListener('click', function(e) {
@@ -631,7 +641,9 @@ function renderLineItems() {
     totalsSection.style.display = 'block';
 }
 
-async function createInvoice() {
+async function createInvoice(desiredStatus = 'Pending_Approval', triggerBtn = null) {
+    const status = desiredStatus === 'Draft' ? 'Draft' : 'Pending_Approval';
+
     if (!selectedLocationId || !selectedBuyerId) {
         if (typeof showNotification === 'function') {
             showNotification('Please select a location', 'warning');
@@ -641,7 +653,7 @@ async function createInvoice() {
         return;
     }
 
-    if (lineItems.length === 0) {
+    if (status !== 'Draft' && lineItems.length === 0) {
         if (typeof showNotification === 'function') {
             showNotification('Please add at least one product', 'warning');
         } else {
@@ -650,9 +662,15 @@ async function createInvoice() {
         return;
     }
 
-    const btn = document.getElementById('create-invoice-btn');
-    btn.disabled = true;
-    btn.textContent = 'Creating...';
+    const btn = triggerBtn || document.getElementById('create-invoice-btn');
+    const originalButtonText = btn ? btn.textContent : null;
+
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = status === 'Draft' ? 'Saving Draft...' : 'Submitting...';
+    }
+
+    let completedSuccessfully = false;
 
     try {
         const response = await fetch('/api/v1/invoices/internal', {
@@ -664,6 +682,7 @@ async function createInvoice() {
                 buyer_id: parseInt(selectedBuyerId),
                 location_id: parseInt(selectedLocationId),
                 source: 'Internal',
+                status,
                 line_items: lineItems.map(item => ({
                     fk_batch_id: item.batch_id,
                     quantity: item.quantity
@@ -675,10 +694,14 @@ async function createInvoice() {
 
         const data = await response.json();
         if (data.success) {
+            completedSuccessfully = true;
+            const successMessage = data.status === 'Draft'
+                ? 'Invoice draft saved successfully!'
+                : 'Invoice created successfully!';
             if (typeof showNotification === 'function') {
-                showNotification('Invoice created successfully!', 'success');
+                showNotification(successMessage, 'success');
             } else {
-                alert('Invoice created successfully!');
+                alert(successMessage);
             }
             setTimeout(() => {
                 window.location.href = `/admin/invoices/${data.invoice_id}`;
@@ -689,8 +712,6 @@ async function createInvoice() {
             } else {
                 alert('Error: ' + (data.error || 'Failed to create invoice'));
             }
-            btn.disabled = false;
-            btn.textContent = 'Create Invoice';
         }
     } catch (error) {
         console.error('Error:', error);
@@ -699,8 +720,13 @@ async function createInvoice() {
         } else {
             alert('Failed to create invoice. Please try again.');
         }
-        btn.disabled = false;
-        btn.textContent = 'Create Invoice';
+    } finally {
+        if (!completedSuccessfully && btn) {
+            btn.disabled = false;
+            if (originalButtonText !== null) {
+                btn.textContent = originalButtonText;
+            }
+        }
     }
 }
 </script>

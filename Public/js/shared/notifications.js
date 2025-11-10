@@ -3,7 +3,13 @@
  * Usage: showNotification('Message', 'success|error|warning|info')
  */
 
-const NotificationSystem = {
+(function(global) {
+    if (global.NotificationSystem) {
+        // Already initialized; avoid duplicate declarations
+        return;
+    }
+
+    const NotificationSystem = {
     /**
      * Show a toast notification
      * @param {string} message - The message to display
@@ -167,9 +173,11 @@ const NotificationSystem = {
         notification.classList.add('notification-loading');
         return notification;
     }
-};
+    };
 
-// Expose globally
-window.showNotification = NotificationSystem.show.bind(NotificationSystem);
-window.notify = NotificationSystem;
+    // Expose globally
+    global.NotificationSystem = NotificationSystem;
+    global.showNotification = NotificationSystem.show.bind(NotificationSystem);
+    global.notify = NotificationSystem;
+})(window);
 

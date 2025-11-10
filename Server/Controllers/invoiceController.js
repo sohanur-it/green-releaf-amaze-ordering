@@ -6,6 +6,7 @@
 
 const invoiceStateMachine = require('../Services/invoiceStateMachineService');
 const { query } = require('../config/database');
+const websocketService = require('../Services/websocketService');
 const auditLogger = require('../Services/auditLogger');
 
 class InvoiceController {
@@ -117,10 +118,14 @@ class InvoiceController {
             
             // Get modification history
             const history = await query(`
-                SELECT *
-                FROM "ORDERS-invoice-history"
-                WHERE fk_invoice_id = $1
-                ORDER BY changed_at DESC
+                SELECT 
+                    h.*,
+                    u.first_name || ' ' || u.last_name AS changed_by_name,
+                    u.email AS changed_by_email
+                FROM "ORDERS-invoice-history" h
+                LEFT JOIN users u ON h.changed_by_user_id = u.id
+                WHERE h.fk_invoice_id = $1
+                ORDER BY h.changed_at DESC
             `, [id]);
             
             res.json({
@@ -464,6 +469,8 @@ class InvoiceController {
             
             const invoices = await query(queryStr, params);
             
+            const websocketPort = process.env.WEBSOCKET_PORT || 8080;
+
             res.render('admin/invoices/index', {
                 title: 'Invoices',
                 layout: 'layouts/main',
@@ -478,7 +485,8 @@ class InvoiceController {
                 user: req.session.user,
                 isAdmin: isAdmin,
                 isSalesAdmin: isSalesAdmin,
-                isSalesRep: isSalesRep
+                isSalesRep: isSalesRep,
+                websocketPort
             });
         } catch (error) {
             console.error('Error loading invoice list:', error);
@@ -933,10 +941,14 @@ class InvoiceController {
             
             // Get modification history
             const history = await query(`
-                SELECT *
-                FROM "ORDERS-invoice-history"
-                WHERE fk_invoice_id = $1
-                ORDER BY changed_at DESC
+                SELECT 
+                    h.*,
+                    u.first_name || ' ' || u.last_name AS changed_by_name,
+                    u.email AS changed_by_email
+                FROM "ORDERS-invoice-history" h
+                LEFT JOIN users u ON h.changed_by_user_id = u.id
+                WHERE h.fk_invoice_id = $1
+                ORDER BY h.changed_at DESC
             `, [id]);
             
             res.render('admin/invoices/details', {
@@ -1073,18 +1085,30 @@ class InvoiceController {
             const {
                 buyer_id,
                 location_id,
-                line_items,
+                line_items = [],
                 customer_notes,
-                internal_notes
+                internal_notes,
+                status
             } = req.body;
             
             const userId = req.session.userId || req.user?.id;
             const UserModel = require('../Models/userModel');
             
-            if (!buyer_id || !location_id || !line_items || line_items.length === 0) {
+            if (!buyer_id || !location_id) {
                 return res.status(400).json({
                     success: false,
-                    error: 'buyer_id, location_id, and line_items are required'
+                    error: 'buyer_id and location_id are required'
+                });
+            }
+
+            const requestedStatus = typeof status === 'string' ? status.trim() : 'Draft';
+            const allowedStatuses = ['Draft', 'Pending_Approval'];
+            const targetStatus = allowedStatuses.includes(requestedStatus) ? requestedStatus : 'Draft';
+
+            if (targetStatus !== 'Draft' && (!Array.isArray(line_items) || line_items.length === 0)) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'At least one line item is required when submitting the invoice for approval'
                 });
             }
             
@@ -1165,12 +1189,58 @@ class InvoiceController {
                 customer_notes: customer_notes || null,
                 internal_notes: internal_notes || null
             });
+
+            let finalStatus = 'Draft';
+
+            if (targetStatus !== 'Draft') {
+                try {
+                    const invoiceStateMachine = require('../Services/invoiceStateMachineService');
+                    const transition = await invoiceStateMachine.transitionTo(
+                        result.invoice_id,
+                        targetStatus,
+                        userId,
+                        `Invoice submitted for ${targetStatus.toLowerCase().replace(/_/g, ' ')} during creation`
+                    );
+
+                    if (!transition.success) {
+                        return res.status(400).json({
+                            success: false,
+                            error: transition.error || `Failed to transition invoice to ${targetStatus}`,
+                            valid_transitions: transition.validTransitions || []
+                        });
+                    }
+
+                    finalStatus = transition.newStatus || targetStatus;
+                } catch (transitionError) {
+                    console.error('Error transitioning invoice status:', transitionError);
+                    return res.status(500).json({
+                        success: false,
+                        error: 'Failed to finalize invoice status',
+                        details: transitionError.message
+                    });
+                }
+            }
             
             res.json({
                 success: true,
                 invoice_id: result.invoice_id,
-                invoice_number: result.invoice_number
+                invoice_number: result.invoice_number,
+                status: finalStatus
             });
+
+            try {
+                const eventName = finalStatus === 'Draft'
+                    ? 'invoice_draft_created'
+                    : 'invoice_created_internal';
+
+                await websocketService.broadcastInvoiceEvent(result.invoice_id, eventName, {
+                    buyer_id: parseInt(buyer_id),
+                    location_id: parseInt(location_id),
+                    status: finalStatus
+                });
+            } catch (wsError) {
+                console.error('WebSocket broadcast error (internal invoice create):', wsError.message);
+            }
         } catch (error) {
             console.error('Error creating internal invoice:', error);
             res.status(500).json({
@@ -1248,6 +1318,28 @@ class InvoiceController {
                     WHERE id = $1
                 `, [id]);
 
+                try {
+                    await websocketService.broadcastInvoiceEvent(parseInt(id), 'line_item_added', {
+                        buyer_id: invoice.rows[0].fk_buyer_id,
+                        location_id: invoice.rows[0].fk_location_id,
+                        line_item_id: lineItemId,
+                        totals: updatedInvoice.rows[0]
+                    });
+                } catch (wsError) {
+                    console.error('WebSocket broadcast error (line item added, internal):', wsError.message);
+                }
+
+                try {
+                    await websocketService.broadcastInvoiceEvent(parseInt(id), 'line_item_updated', {
+                        buyer_id: invoice.rows[0].fk_buyer_id,
+                        location_id: invoice.rows[0].fk_location_id,
+                        line_item_id: lineItemId,
+                        totals: updatedInvoice.rows[0]
+                    });
+                } catch (wsError) {
+                    console.error('WebSocket broadcast error (line item added, internal):', wsError.message);
+                }
+
                 res.json({
                     success: true,
                     message: 'Line item added successfully',
@@ -1299,7 +1391,8 @@ class InvoiceController {
                     SELECT 
                         li.*,
                         i.status,
-                        i.fk_location_id
+                        i.fk_location_id,
+                        i.fk_buyer_id
                     FROM "ORDERS-invoice-line-items" li
                     INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
                     WHERE li.id = $1 AND li.fk_invoice_id = $2
@@ -1456,6 +1549,18 @@ class InvoiceController {
                     WHERE id = $1
                 `, [id]);
 
+                try {
+                    await websocketService.broadcastInvoiceEvent(parseInt(id), 'line_item_updated', {
+                        buyer_id: item.fk_buyer_id,
+                        location_id: item.fk_location_id,
+                        line_item_id: parseInt(lineItemId),
+                        quantity: newQuantity,
+                        totals: updatedInvoice.rows[0]
+                    });
+                } catch (wsError) {
+                    console.error('WebSocket broadcast error (line item updated, internal):', wsError.message);
+                }
+
                 res.json({
                     success: true,
                     message: 'Line item updated successfully',
@@ -1497,7 +1602,9 @@ class InvoiceController {
                 const lineItem = await client.query(`
                     SELECT 
                         li.*,
-                        i.status
+                        i.status,
+                        i.fk_buyer_id,
+                        i.fk_location_id
                     FROM "ORDERS-invoice-line-items" li
                     INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
                     WHERE li.id = $1 AND li.fk_invoice_id = $2
@@ -1593,6 +1700,17 @@ class InvoiceController {
                     FROM "ORDERS-invoices"
                     WHERE id = $1
                 `, [id]);
+
+                try {
+                    await websocketService.broadcastInvoiceEvent(parseInt(id), 'line_item_removed', {
+                        buyer_id: item.fk_buyer_id,
+                        location_id: item.fk_location_id,
+                        removed_line_item_id: parseInt(lineItemId),
+                        totals: updatedInvoice.rows[0]
+                    });
+                } catch (wsError) {
+                    console.error('WebSocket broadcast error (line item removed, internal):', wsError.message);
+                }
 
                 res.json({
                     success: true,

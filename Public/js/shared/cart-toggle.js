@@ -58,6 +58,7 @@ function initCartToggle() {
                 cartOverlay.style.display = 'block';
                 setTimeout(() => { cartOverlay.style.opacity = '1'; }, 10);
             }
+            window.dispatchEvent(new CustomEvent('cartSidebarOpened'));
         } else {
             // Close cart
             cartEl.classList.add('collapsed');
@@ -66,6 +67,7 @@ function initCartToggle() {
                 cartOverlay.style.opacity = '0';
                 setTimeout(() => { cartOverlay.style.display = 'none'; }, 300);
             }
+            window.dispatchEvent(new CustomEvent('cartSidebarClosed'));
         }
     }
     

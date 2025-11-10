@@ -11,6 +11,33 @@
     <link rel="stylesheet" href="/public/css/portal-white-theme.css">
     <link rel="stylesheet" href="/public/css/notifications.css">
     <link rel="stylesheet" href="/public/css/checkout-inventory-warnings.css">
+    <style>
+        #locations-dropdown .location-link {
+            display: block;
+            padding: 12px;
+            border-bottom: 1px solid #f3f4f6;
+            text-decoration: none;
+            transition: background-color 0.2s;
+            border-radius: 6px;
+            margin-bottom: 4px;
+            color: inherit;
+            background: white;
+        }
+        #locations-dropdown .location-link.is-current {
+            background: #eef2ff;
+        }
+        #locations-dropdown .location-link:not(.is-disabled):hover {
+            background: #f9fafb;
+        }
+        #locations-dropdown .location-link.is-disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        #locations-dropdown .location-link:not(.is-disabled) {
+            cursor: pointer;
+        }
+    </style>
 </head>
 <body>
     <header class="portal-header">
@@ -19,7 +46,11 @@
             <button class="header-icon" id="location-toggle-btn" title="Locations">
                 <i class="fas fa-map-marker-alt"></i>
             </button>
-            <span class="header-text"><%= typeof buyerName !== 'undefined' ? buyerName : 'Buyer' %>:</span>
+            <span class="header-text">
+                <%= (typeof currentLocationName !== 'undefined' && currentLocationName)
+                    ? currentLocationName
+                    : (typeof buyerName !== 'undefined' && buyerName ? buyerName : 'Store') %>
+            </span>
             <button id="cart-toggle" class="header-icon" title="Cart">
                 <i class="fas fa-shopping-cart"></i>
                 <span id="cart-count-badge" style="display:inline-block;min-width:18px;height:18px;border-radius:9px;background:#4ade80;color:#fff;font-size:11px;line-height:18px;text-align:center;margin-left:6px;">0</span>
@@ -35,10 +66,15 @@
         </div>
         <div style="padding: 8px;">
             <% buyerLocations.forEach(location => { %>
-            <div style="padding: 12px; border-bottom: 1px solid #f3f4f6; cursor: pointer; transition: background-color 0.2s;" 
-                 onmouseover="this.style.backgroundColor='#f9fafb'" 
-                 onmouseout="this.style.backgroundColor='white'">
-                <div style="font-weight: 600; color: #1f2937; margin-bottom: 4px;"><%= location.name %></div>
+            <a class="location-link<%= location.is_current ? ' is-current' : '' %><%= location.portal_is_active ? '' : ' is-disabled' %>" 
+               href="<%= location.portal_url || '#' %>"
+               data-location-id="<%= location.entry_id %>">
+                <div style="font-weight: 600; color: #1f2937; margin-bottom: 4px;">
+                    <%= location.name %>
+                    <% if (location.is_current) { %>
+                        <span style="font-size: 0.75rem; color: #4f46e5; margin-left: 6px;">Current</span>
+                    <% } %>
+                </div>
                 <div style="font-size: 0.875rem; color: #6b7280;">
                     <% 
                     const addressLine = location.line_one || '';
@@ -52,7 +88,10 @@
                 <% if (location.state_license) { %>
                 <div style="font-size: 0.75rem; color: #9ca3af; margin-top: 4px;">License: <%= location.state_license %></div>
                 <% } %>
-            </div>
+                <% if (!location.portal_url) { %>
+                <div style="margin-top: 6px; font-size: 0.75rem; color: #b91c1c;">Access disabled</div>
+                <% } %>
+            </a>
             <% }); %>
         </div>
     </div>
@@ -155,6 +194,16 @@
                     isLocationsOpen = false;
                     locationsDropdown.style.display = 'none';
                 }
+            });
+
+            locationsDropdown.querySelectorAll('.location-link').forEach(link => {
+                link.addEventListener('click', function() {
+                    if (!this.getAttribute('href') || this.getAttribute('href') === '#') {
+                        return;
+                    }
+                    isLocationsOpen = false;
+                    locationsDropdown.style.display = 'none';
+                });
             });
         }
         

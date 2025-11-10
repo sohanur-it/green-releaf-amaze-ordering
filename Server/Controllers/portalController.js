@@ -1,6 +1,8 @@
 // Server/Controllers/portalController.js
 
 const { query } = require('../config/database');
+const cartCleanupService = require('../Services/cartCleanupService');
+const websocketService = require('../Services/websocketService');
 
 // Cache for system user ID (avoids repeated queries)
 let cachedSystemUserId = null;
@@ -186,6 +188,7 @@ class PortalController {
             let buyerName = 'Buyer';
             let buyerLocations = [];
             let buyerInfo = null;
+            let currentLocationName = portalAccess.locationName || null;
             
             if (portalAccess.buyerId) {
                 try {
@@ -220,12 +223,102 @@ class PortalController {
                         ORDER BY name
                     `, [portalAccess.buyerId]);
                     
-                    buyerLocations = locationsResult.rows || [];
+                    const portalAccessResult = await query(`
+                        SELECT 
+                            fk_location_id,
+                            access_uuid,
+                            is_active,
+                            created_at
+                        FROM "ORDERS-portal-access"
+                        WHERE fk_buyer_id = $1
+                        ORDER BY fk_location_id, created_at DESC
+                    `, [portalAccess.buyerId]);
+                    
+                    const anyAccessByLocation = new Map();
+                    const activeAccessByLocation = new Map();
+                    
+                    for (const row of portalAccessResult.rows) {
+                        if (!anyAccessByLocation.has(row.fk_location_id)) {
+                            anyAccessByLocation.set(row.fk_location_id, []);
+                        }
+                        anyAccessByLocation.get(row.fk_location_id).push(row);
+                        
+                        if (row.is_active && !activeAccessByLocation.has(row.fk_location_id)) {
+                            activeAccessByLocation.set(row.fk_location_id, row);
+                        }
+                    }
+                    
+                    let systemUserIdForAccess = null;
+                    
+                    buyerLocations = [];
+                    
+                    for (const rawLocation of locationsResult.rows || []) {
+                        const locationId = rawLocation.entry_id;
+                        const hasAnyAccess = anyAccessByLocation.has(locationId);
+                        let accessInfo = activeAccessByLocation.get(locationId);
+                        
+                        if (!hasAnyAccess) {
+                            if (systemUserIdForAccess === null) {
+                                systemUserIdForAccess = await PortalController.getSystemUserId();
+                            }
+                            
+                            try {
+                                const newAccess = await query(`
+                                    INSERT INTO "ORDERS-portal-access" (
+                                        fk_buyer_id,
+                                        fk_location_id,
+                                        is_active,
+                                        created_by
+                                    ) VALUES ($1, $2, true, $3)
+                                    RETURNING access_uuid, is_active
+                                `, [portalAccess.buyerId, locationId, systemUserIdForAccess]);
+                                
+                                accessInfo = {
+                                    fk_location_id: locationId,
+                                    access_uuid: newAccess.rows[0].access_uuid,
+                                    is_active: newAccess.rows[0].is_active
+                                };
+                                
+                                activeAccessByLocation.set(locationId, accessInfo);
+                                anyAccessByLocation.set(locationId, [accessInfo]);
+                            } catch (createErr) {
+                                console.error(`Error creating portal access for location ${locationId}:`, createErr);
+                            }
+                        }
+                        
+                        const portalUrl = accessInfo && accessInfo.is_active
+                            ? `/external/store/${accessInfo.access_uuid}`
+                            : null;
+                        
+                        const isCurrentLocation = locationId === portalAccess.locationId;
+
+                        const locationData = {
+                            ...rawLocation,
+                            access_uuid: accessInfo ? accessInfo.access_uuid : null,
+                            portal_is_active: !!(accessInfo && accessInfo.is_active),
+                            portal_url: portalUrl,
+                            portal_restricted: !portalUrl && (anyAccessByLocation.has(locationId) || hasAnyAccess),
+                            is_current: isCurrentLocation
+                        };
+                        
+                        buyerLocations.push(locationData);
+                        
+                        if (isCurrentLocation && rawLocation.name) {
+                            currentLocationName = rawLocation.name;
+                        }
+                    }
+                    
+                    if (!currentLocationName && buyerLocations.length > 0) {
+                        const currentLocation = buyerLocations.find(loc => loc.entry_id === portalAccess.locationId);
+                        currentLocationName = currentLocation?.name || buyerLocations[0].name || currentLocationName;
+                    }
                 } catch (err) {
                     console.error('Error fetching buyer info:', err);
                 }
             }
             
+            const websocketPort = process.env.WEBSOCKET_PORT || 8080;
+
             res.render('external/store', {
                 title: 'Product Catalog',
                 layout: 'layouts/portal',
@@ -234,7 +327,9 @@ class PortalController {
                 uuid: uuid,
                 buyerName: buyerName,
                 buyerLocations: buyerLocations,
-                buyerInfo: buyerInfo
+                buyerInfo: buyerInfo,
+                currentLocationName: currentLocationName,
+                websocketPort
             });
         } catch (error) {
             console.error('Error loading catalog:', error);
@@ -286,6 +381,31 @@ class PortalController {
             if (!portalAccess) {
                 return res.json({ items: [], subtotal: 0, total: 0 });
             }
+
+            // First, check if there's an expired draft cart lingering for this buyer/location
+            const expiredCart = await query(`
+                SELECT id, cart_expires_at
+                FROM "ORDERS-invoices"
+                WHERE fk_buyer_id = $1
+                  AND fk_location_id = $2
+                  AND status = 'Draft'
+                  AND source = 'External'
+                  AND cart_expires_at IS NOT NULL
+                  AND cart_expires_at <= NOW()
+                ORDER BY cart_expires_at ASC
+                LIMIT 1
+            `, [portalAccess.buyerId, portalAccess.locationId]);
+
+            if (expiredCart.rows.length > 0) {
+                const expiredCartId = expiredCart.rows[0].id;
+                try {
+                    console.log(`🧹 Detected expired cart ${expiredCartId} during portal load. Cleaning up...`);
+                    await cartCleanupService.clearExpiredCart(expiredCartId);
+                } catch (cleanupError) {
+                    console.error(`❌ Failed to clean expired cart ${expiredCartId}:`, cleanupError.message);
+                    // Continue gracefully so the user can still view their cart (which will be empty)
+                }
+            }
             
             // Get active draft invoice for this buyer/location
             // Use CTE to aggregate duplicate batch items (same batch in multiple line items)
@@ -296,6 +416,7 @@ class PortalController {
                         li.fk_batch_id,
                         li.fk_master_product_id,
                         SUM(li.quantity_ordered) as total_quantity,
+                        SUM(li.quantity_allocated) as total_allocated,
                         AVG(li.unit_price) as unit_price,
                         SUM(li.line_total) as total_line_total,
                         MAX(li.id) as line_item_id,
@@ -327,6 +448,7 @@ class PortalController {
                             'unit_measurement_name', p.unit_measurement_name,
                             'batch_name', b.batch_name,
                             'quantity', lia.total_quantity::INTEGER,
+                            'quantity_allocated', COALESCE(lia.total_allocated, 0)::INTEGER,
                             'unit_price', lia.unit_price,
                             'line_total', lia.total_line_total
                         ) ORDER BY lia.line_item_order
@@ -547,6 +669,7 @@ class PortalController {
             
             let lineItemId;
             let quantityToAllocate = parseInt(quantity, 10);
+            let isNewLineItem = false;
             
             if (existingLineItem.rows.length > 0) {
                 // Update existing line item
@@ -591,6 +714,7 @@ class PortalController {
                 `, [invoiceId, batch.fk_master_product_id, batch_id, insertQuantity, unitPrice, lineTotal, lineItemOrder]);
                 
                 lineItemId = lineItemResult.rows[0].id;
+                isNewLineItem = true;
             }
             
             // CRITICAL: Allocate inventory according to Module 4 requirements
@@ -660,21 +784,79 @@ class PortalController {
             const subtotal = parseFloat(updateResult.rows[0].subtotal || 0);
             const total = subtotal;
             
+            // Fetch latest line item data for response
+            const lineItemDataResult = await query(`
+                SELECT 
+                    id,
+                    fk_batch_id,
+                    quantity_ordered,
+                    quantity_allocated,
+                    unit_price,
+                    line_total
+                FROM "ORDERS-invoice-line-items"
+                WHERE id = $1
+            `, [lineItemId]);
+            
+            const lineItemData = lineItemDataResult.rows[0] || {
+                id: lineItemId,
+                fk_batch_id: batch_id,
+                quantity_ordered: parseInt(quantity, 10),
+                quantity_allocated: existingLineItem.rows.length > 0
+                    ? parseInt(existingLineItem.rows[0].quantity_allocated || 0, 10) + Math.max(quantityToAllocate, 0)
+                    : parseInt(quantity, 10),
+                unit_price: unitPrice,
+                line_total: lineTotal
+            };
+            
             console.log('Cart item added:', {
                 invoiceId,
                 invoiceNumber,
                 batchId: batch_id,
-                quantity,
-                quantityAllocated: quantityToAllocate,
+                quantity_ordered: parseInt(lineItemData.quantity_ordered, 10),
+                quantity_allocated: parseInt(lineItemData.quantity_allocated || 0, 10),
                 subtotal,
                 total
             });
             
+            const eventType = isNewLineItem ? 'line_item_added' : 'line_item_updated';
+            websocketService.broadcastInvoiceEvent(invoiceId, eventType, {
+                buyer_id: portalAccess.buyerId,
+                location_id: portalAccess.locationId,
+                line_item: {
+                    id: lineItemData.id,
+                    batch_id: lineItemData.fk_batch_id,
+                    quantity_ordered: parseInt(lineItemData.quantity_ordered, 10),
+                    quantity_allocated: parseInt(lineItemData.quantity_allocated || 0, 10),
+                    unit_price: parseFloat(lineItemData.unit_price || 0),
+                    line_total: parseFloat(lineItemData.line_total || 0)
+                },
+                totals: {
+                    subtotal,
+                    total
+                }
+            }).catch(err => {
+                console.error('WebSocket broadcast error (cart add):', err.message);
+            });
+
             res.json({ 
                 success: true, 
                 message: 'Item added to cart',
                 invoice_id: invoiceId,
-                invoice_number: invoiceNumber
+                invoice_number: invoiceNumber,
+                line_item_id: lineItemData.id,
+                line_item: {
+                    id: lineItemData.id,
+                    batch_id: lineItemData.fk_batch_id,
+                    quantity_ordered: parseInt(lineItemData.quantity_ordered, 10),
+                    quantity_allocated: parseInt(lineItemData.quantity_allocated || 0, 10),
+                    unit_price: parseFloat(lineItemData.unit_price || 0),
+                    line_total: parseFloat(lineItemData.line_total || 0)
+                },
+                totals: {
+                    subtotal,
+                    total
+                },
+                is_new_line_item: isNewLineItem
             });
         } catch (error) {
             console.error('Error adding to cart:', error);
@@ -768,6 +950,7 @@ class PortalController {
             }
             
             const deleteResult = await query(deleteQuery, deleteParams);
+            const removedLineItemIds = deleteResult.rows.map(row => row.id);
             
             if (deleteResult.rows.length === 0) {
                 return res.status(404).json({ error: 'Line item not found or already deleted' });
@@ -834,11 +1017,33 @@ class PortalController {
                 WHERE fk_invoice_id = $1
             `, [invoiceId]);
             
-            if (parseInt(itemCountResult.rows[0].count) === 0) {
+            const remainingCount = parseInt(itemCountResult.rows[0].count);
+            if (remainingCount === 0) {
                 await query(`
                     DELETE FROM "ORDERS-invoices"
                     WHERE id = $1
                 `, [invoiceId]);
+                
+                websocketService.broadcastInvoiceEvent(invoiceId, 'invoice_deleted', {
+                    buyer_id: portalAccess.buyerId,
+                    location_id: portalAccess.locationId,
+                    removed_line_item_ids: removedLineItemIds,
+                    cleared: true
+                }).catch(err => {
+                    console.error('WebSocket broadcast error (cart remove - deleted):', err.message);
+                });
+            } else {
+                websocketService.broadcastInvoiceEvent(invoiceId, 'line_item_removed', {
+                    buyer_id: portalAccess.buyerId,
+                    location_id: portalAccess.locationId,
+                    removed_line_item_ids: removedLineItemIds,
+                    totals: {
+                        subtotal,
+                        total
+                    }
+                }).catch(err => {
+                    console.error('WebSocket broadcast error (cart remove):', err.message);
+                });
             }
             
             res.json({ 
@@ -904,6 +1109,7 @@ class PortalController {
             const currentQuantity = parseInt(lineItem.quantity_ordered || 0, 10);
             const currentAllocated = parseInt(lineItem.quantity_allocated || 0, 10);
             const quantityChange = parseInt(quantity, 10) - currentQuantity;
+            let finalAllocated = currentAllocated;
             
             // Calculate available quantity (accounting for current allocation)
             const available = batch.quantity - batch.allocated_quantity + currentAllocated;
@@ -1021,6 +1227,8 @@ class PortalController {
                                 WHERE id = $2
                             `, [newAllocated, line_item_id]);
                             
+                            finalAllocated = newAllocated;
+
                             console.log('updateCartItem - Deallocated:', {
                                 batch_id: lineItem.fk_batch_id,
                                 quantity: quantityToDeallocate
@@ -1059,6 +1267,8 @@ class PortalController {
                                 WHERE id = $2
                             `, [newAllocated, line_item_id]);
                             
+                            finalAllocated = newAllocated;
+
                             console.log('updateCartItem - Allocated:', {
                                 batch_id: lineItem.fk_batch_id,
                                 quantity: quantityToAllocate
@@ -1071,6 +1281,25 @@ class PortalController {
                 }
             }
             
+            websocketService.broadcastInvoiceEvent(lineItem.fk_invoice_id, 'line_item_updated', {
+                buyer_id: portalAccess.buyerId,
+                location_id: portalAccess.locationId,
+                line_item: {
+                    id: line_item_id,
+                    batch_id: lineItem.fk_batch_id,
+                    quantity_ordered: parseInt(quantity, 10),
+                    quantity_allocated: finalAllocated,
+                    unit_price: parseFloat(lineItem.unit_price || 0),
+                    line_total: parseFloat(lineItem.unit_price || 0) * parseInt(quantity, 10)
+                },
+                totals: {
+                    subtotal,
+                    total
+                }
+            }).catch(err => {
+                console.error('WebSocket broadcast error (cart update):', err.message);
+            });
+
             res.json({ 
                 success: true, 
                 message: 'Quantity updated',

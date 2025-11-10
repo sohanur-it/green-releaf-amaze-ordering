@@ -373,6 +373,105 @@ class WebSocketService {
         // For now, return 'external'
         return 'external';
     }
+
+    /**
+     * Broadcast JSON payload to all connected clients
+     * @param {Object} payload 
+     */
+    broadcastJson(payload) {
+        if (!this.wss || !payload) {
+            return;
+        }
+
+        const message = JSON.stringify(payload);
+
+        this.wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN) {
+                client.send(message);
+            }
+        });
+    }
+
+    /**
+     * Broadcast invoice-related event to all clients
+     * @param {number} invoiceId 
+     * @param {string} event 
+     * @param {Object} extra 
+     */
+    async broadcastInvoiceEvent(invoiceId, event, extra = {}) {
+        if (!this.wss || this.wss.clients.size === 0) {
+            return;
+        }
+
+        let invoiceRecord = null;
+        let metadata = { ...extra };
+
+        try {
+            const client = await pool.connect();
+            const result = await client.query(`
+                SELECT 
+                    i.id,
+                    i.invoice_number,
+                    i.status,
+                    i.source,
+                    i.subtotal,
+                    i.total,
+                    i.cart_expires_at,
+                    i.created_at,
+                    i.updated_at,
+                    i.fk_buyer_id,
+                    i.fk_location_id,
+                    COALESCE(b.name, 'Unknown Buyer') as buyer_name,
+                    COALESCE(l.name, 'Unknown Location') as location_name
+                FROM "ORDERS-invoices" i
+                LEFT JOIN "ORDERS-buyers" b ON i.fk_buyer_id = b.entry_id
+                LEFT JOIN "ORDERS-buyer_locations" l ON i.fk_location_id = l.entry_id
+                WHERE i.id = $1
+            `, [invoiceId]);
+
+            if (result.rows.length > 0) {
+                const record = result.rows[0];
+                invoiceRecord = {
+                    id: record.id,
+                    invoice_number: record.invoice_number,
+                    status: record.status,
+                    source: record.source,
+                    subtotal: parseFloat(record.subtotal || 0),
+                    total: parseFloat(record.total || 0),
+                    cart_expires_at: record.cart_expires_at,
+                    created_at: record.created_at,
+                    updated_at: record.updated_at,
+                    buyer_id: record.fk_buyer_id,
+                    buyer_name: record.buyer_name,
+                    location_id: record.fk_location_id,
+                    location_name: record.location_name
+                };
+
+                metadata.buyer_id = metadata.buyer_id ?? record.fk_buyer_id;
+                metadata.location_id = metadata.location_id ?? record.fk_location_id;
+            } else {
+                metadata.buyer_id = metadata.buyer_id ?? null;
+                metadata.location_id = metadata.location_id ?? null;
+            }
+
+            client.release();
+        } catch (error) {
+            console.error('❌ Error fetching invoice for WebSocket broadcast:', error.message);
+        }
+
+        const payload = {
+            type: 'invoice_sync',
+            event: event,
+            invoice_id: invoiceId,
+            invoice: invoiceRecord,
+            buyer_id: metadata.buyer_id ?? null,
+            location_id: metadata.location_id ?? null,
+            metadata,
+            timestamp: new Date().toISOString()
+        };
+
+        this.broadcastJson(payload);
+    }
 }
 
 // Export singleton instance

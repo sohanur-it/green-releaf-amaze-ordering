@@ -8,6 +8,7 @@
 const { query } = require('../config/database');
 const { Pool } = require('pg');
 const path = require('path');
+const websocketService = require('./websocketService');
 
 class InvoiceStateMachineService {
     constructor() {
@@ -131,6 +132,18 @@ class InvoiceStateMachineService {
             
             // Trigger side effects (websocket broadcasts, notifications, etc.)
             await this.postTransitionEffects(invoiceId, currentStatus, newStatus);
+
+            const eventName = newStatus === 'Cancelled'
+                ? 'invoice_cancelled'
+                : 'invoice_status_changed';
+
+            websocketService.broadcastInvoiceEvent(invoiceId, eventName, {
+                old_status: currentStatus,
+                new_status: newStatus,
+                cart_cleared: newStatus === 'Cancelled'
+            }).catch(error => {
+                console.error('❌ Error broadcasting invoice status change:', error.message);
+            });
             
             console.log(`✅ Invoice ${invoiceId}: ${currentStatus} → ${newStatus}`);
             
@@ -198,6 +211,13 @@ class InvoiceStateMachineService {
                 if (!releaseResult.success) {
                     return releaseResult;
                 }
+
+                // Immediately expire any associated external cart session so the buyer's cart is cleared
+                await client.query(`
+                    UPDATE "ORDERS-invoices"
+                    SET cart_expires_at = NOW()
+                    WHERE id = $1
+                `, [invoiceId]);
             }
             
             // -> Cancelled_After_Ship

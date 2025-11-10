@@ -73,9 +73,33 @@ const TRANSFERRED_PACKAGE_FIELDS = {
 const pool = new Pool(DB_CONFIG);
 
 /**
- * Fetch transferred packages from METRC API
+ * Get the latest received_date_time from local database for delta sync
  */
-async function fetchTransferredPackages() {
+async function getLatestReceivedDateTime(client) {
+    try {
+        const query = `
+            SELECT MAX(received_date_time) as latest_timestamp 
+            FROM transferredpackages 
+            WHERE sync_license = $1 AND received_date_time IS NOT NULL
+        `;
+        
+        const result = await client.query(query, [metrcAuth.licenseNumber]);
+        
+        if (result.rows[0] && result.rows[0].latest_timestamp) {
+            return new Date(result.rows[0].latest_timestamp);
+        }
+        
+        return null;
+    } catch (error) {
+        console.error('❌ Error getting latest received_date_time:', error.message);
+        return null;
+    }
+}
+
+/**
+ * Fetch transferred packages from METRC API with incremental/delta sync
+ */
+async function fetchTransferredPackages(client = null, lastReceivedDateTime = null) {
     try {
         console.log('🔐 Authenticating with METRC T3 API...');
         const success = await metrcAuth.ensureValidToken();
@@ -83,11 +107,20 @@ async function fetchTransferredPackages() {
             throw new Error('Failed to obtain valid METRC authentication token');
         }
 
-        console.log('📡 Fetching transferred packages from METRC API...');
+        // Get latest timestamp from database if not provided
+        if (!lastReceivedDateTime && client) {
+            lastReceivedDateTime = await getLatestReceivedDateTime(client);
+        }
+
+        if (lastReceivedDateTime) {
+            console.log('📡 Fetching transferred packages from METRC API (DELTA SYNC MODE)...');
+            console.log(`🔍 Filtering packages received after: ${lastReceivedDateTime.toISOString()}`);
+        } else {
+            console.log('📡 Fetching transferred packages from METRC API (FULL SYNC MODE - first run)...');
+        }
+
         if (process.env.MAX_PAGES) {
             console.log(`🧪 TEST MODE: Limiting to ${process.env.MAX_PAGES} pages`);
-        } else {
-            console.log('🚀 FULL SYNC MODE: Fetching all pages');
         }
         
         if (process.env.DRY_RUN === 'true') {
@@ -104,6 +137,20 @@ async function fetchTransferredPackages() {
             console.log(`⚠️  PAGE LIMIT ENABLED: Will only fetch ${maxPages} pages for testing`);
         }
         
+        // Build API params
+        const baseParams = {
+            licenseNumber: metrcAuth.licenseNumber,
+            pageSize: pageSize
+        };
+
+        // Add timestamp filter if available (using receivedDateTimeStart parameter)
+        // Note: Check if API supports this parameter, if not we'll filter client-side
+        if (lastReceivedDateTime) {
+            // Try using receivedDateTimeStart if API supports it
+            // Otherwise we'll filter client-side after fetching
+            baseParams.receivedDateTimeStart = lastReceivedDateTime.toISOString();
+        }
+        
         while (hasMorePages && (!maxPages || page <= maxPages)) {
             if (maxPages && page > maxPages) {
                 console.log(`⚠️  Reached page limit (${maxPages}). Stopping fetch.`);
@@ -117,26 +164,57 @@ async function fetchTransferredPackages() {
             while (retries > 0 && !success) {
                 try {
                     console.log(`🔄 Attempting API request for page ${page} (attempt ${4-retries})...`);
+                    const params = {
+                        ...baseParams,
+                        page: page
+                    };
+                    
                     const response = await metrcAuth.makeAuthenticatedRequest({
                         method: 'GET',
                         url: `${metrcAuth.apiBaseUrl}/packages/transferred`,
-                        params: {
-                            licenseNumber: metrcAuth.licenseNumber,
-                            page: page,
-                            pageSize: pageSize
-                        },
+                        params: params,
                         timeout: 30000 // 30 second timeout
                     });
 
                     if (response.data && response.data.data) {
-                        const packages = response.data.data;
+                        let packages = response.data.data;
+                        const originalCount = packages.length;
+                        
+                        // Client-side filtering: Filter packages received after our last known timestamp
+                        // This handles cases where API doesn't support receivedDateTimeStart parameter
+                        if (lastReceivedDateTime) {
+                            packages = packages.filter(p => {
+                                if (!p.receivedDateTime) {
+                                    // Include packages without date (they might be new)
+                                    return true;
+                                }
+                                try {
+                                    const receivedDate = new Date(p.receivedDateTime);
+                                    return receivedDate > lastReceivedDateTime;
+                                } catch (e) {
+                                    // If date parsing fails, include it to be safe
+                                    return true;
+                                }
+                            });
+                            
+                            if (packages.length < originalCount) {
+                                console.log(`🔍 Filtered ${originalCount} packages to ${packages.length} new packages (after ${lastReceivedDateTime.toISOString()})`);
+                            }
+                            
+                            // If we got an empty page after filtering, we've likely reached the end
+                            if (packages.length === 0 && originalCount > 0) {
+                                console.log('🔍 Reached end of filtered results (no new packages on this page)');
+                                hasMorePages = false;
+                            }
+                        }
+                        
                         allPackages = allPackages.concat(packages);
                         
                         console.log(`✅ Retrieved ${packages.length} transferred packages from page ${page} (total: ${allPackages.length})`);
                         
                         // Check if there are more pages
                         const totalPages = response.data.totalPages || Math.ceil(response.data.total / pageSize);
-                        hasMorePages = page < totalPages && (!maxPages || page < maxPages);
+                        hasMorePages = hasMorePages && page < totalPages && (!maxPages || page < maxPages);
                         page++;
                         success = true;
                         
@@ -167,7 +245,11 @@ async function fetchTransferredPackages() {
             }
         }
 
-        console.log(`✅ Retrieved ${allPackages.length} total transferred packages across ${page - 1} pages`);
+        if (lastReceivedDateTime) {
+            console.log(`✅ Delta sync retrieved ${allPackages.length} new/updated transferred packages since ${lastReceivedDateTime.toISOString()}`);
+        } else {
+            console.log(`✅ Full sync retrieved ${allPackages.length} total transferred packages across ${page - 1} pages`);
+        }
         return allPackages;
     } catch (error) {
         console.error('❌ Error fetching transferred packages:', error.message);
@@ -701,8 +783,16 @@ async function syncTransferredPackages() {
         historyId = await createSyncHistory(client, 'transferred_packages', metrcAuth.licenseNumber, null, 'sync-transferred-packages.js');
         batchId = await createSyncBatchHistory(client, 'transferred_packages');
         
-        // Fetch data from API
-        const transferredPackages = await fetchTransferredPackages();
+        // Get latest timestamp for delta sync
+        const lastReceivedDateTime = await getLatestReceivedDateTime(client);
+        if (lastReceivedDateTime) {
+            console.log(`🔄 Delta sync mode: Only fetching packages received after ${lastReceivedDateTime.toISOString()}`);
+        } else {
+            console.log('🔄 Full sync mode: No previous sync found, fetching all packages');
+        }
+        
+        // Fetch data from API with delta sync
+        const transferredPackages = await fetchTransferredPackages(client, lastReceivedDateTime);
         
         if (transferredPackages.length === 0) {
             console.log('ℹ️ No transferred packages to sync');
@@ -752,10 +842,20 @@ async function syncTransferredPackages() {
         }
         
         // Find packages to delete (exist locally but not in API)
-        for (const [metrcid, existing] of existingPackages) {
-            if (!transferredPackages.find(pkg => String(pkg.id) === metrcid)) {
-                packagesToDelete.push(metrcid);
+        // CRITICAL: Only delete during FULL sync, not delta sync
+        // During delta sync, we only fetch new packages, so old packages won't be in the API response
+        // Deleting them would incorrectly remove valid historical data
+        if (!lastReceivedDateTime) {
+            // Full sync mode - safe to check for deletions
+            for (const [metrcid, existing] of existingPackages) {
+                if (!transferredPackages.find(pkg => String(pkg.id) === metrcid)) {
+                    packagesToDelete.push(metrcid);
+                }
             }
+            console.log(`📊 Full sync mode: Checking for ${packagesToDelete.length} packages to delete`);
+        } else {
+            // Delta sync mode - skip deletion to avoid removing historical data
+            console.log(`📊 Delta sync mode: Skipping deletion check (only processing new packages)`);
         }
         
         console.log(`📊 Sync plan: ${packagesToInsert.length} insert, ${packagesToUpdate.length} update, ${packagesToDelete.length} delete`);
@@ -776,6 +876,7 @@ async function syncTransferredPackages() {
         
         if (packagesToDelete.length > 0) {
             console.log('🗑️ Deleting stale packages...');
+            console.log(`⚠️ WARNING: Deleting ${packagesToDelete.length} packages that no longer exist in METRC`);
             const deleteQuery = `
                 DELETE FROM transferredpackages 
                 WHERE metrcid = ANY($1) AND sync_license = $2

@@ -28,9 +28,13 @@ const authenticatePortalAccess = async (req, res, next) => {
         
         // Check if UUID exists and is active
         const portalAccess = await query(`
-            SELECT pa.*, b.name as company_name, b.name
+            SELECT 
+                pa.*,
+                b.name AS buyer_name,
+                l.name AS location_name
             FROM "ORDERS-portal-access" pa
             INNER JOIN "ORDERS-buyers" b ON pa.fk_buyer_id = b.entry_id
+            LEFT JOIN "ORDERS-buyer_locations" l ON pa.fk_location_id = l.entry_id
             WHERE pa.access_uuid = $1
             AND pa.is_active = true
         `, [uuid]);
@@ -66,8 +70,8 @@ const authenticatePortalAccess = async (req, res, next) => {
             accessId: access.id,
             buyerId: access.fk_buyer_id,
             locationId: access.fk_location_id,
-            buyerName: access.company_name,
-            buyerCity: access.name,
+            buyerName: access.buyer_name,
+            locationName: access.location_name,
             uuid: access.access_uuid
         };
         

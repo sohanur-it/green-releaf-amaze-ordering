@@ -353,31 +353,31 @@
                 </thead>
                 <tbody>
                     <% invoices.forEach(invoice => { %>
-                        <tr>
-                            <td>
-                                <span style="color: var(--text-color); font-size: 0.875rem; white-space: nowrap; display: block;">
+                        <tr data-invoice-id="<%= invoice.id %>">
+                            <td data-field="invoice-number">
+                                <span class="invoice-number-value" style="color: var(--text-color); font-size: 0.875rem; white-space: nowrap; display: block;">
                                     #<%= invoice.invoice_number || invoice.id %>
                                 </span>
                             </td>
-                            <td style="color: var(--text-color);"><%= invoice.buyer_name || 'Unknown Buyer' %></td>
-                            <td style="color: var(--text-color);"><%= invoice.location_name || 'Unknown Location' %></td>
-                            <td>
+                            <td data-field="buyer" style="color: var(--text-color);"><%= invoice.buyer_name || 'Unknown Buyer' %></td>
+                            <td data-field="location" style="color: var(--text-color);"><%= invoice.location_name || 'Unknown Location' %></td>
+                            <td data-field="status">
                                 <% const statusClass = (invoice.status || '').toLowerCase().replace(/_/g, ''); %>
-                                <span class="status-badge status-<%= statusClass %>">
+                                <span class="status-badge status-<%= statusClass %> status-text">
                                     <%= (invoice.status || 'Unknown').replace(/_/g, ' ') %>
                                 </span>
                             </td>
-                            <td>
-                                <span class="source-badge source-<%= (invoice.source || 'internal').toLowerCase() %>">
+                            <td data-field="source">
+                                <span class="source-badge source-<%= (invoice.source || 'internal').toLowerCase() %> source-text">
                                     <%= invoice.source || 'Internal' %>
                                 </span>
                             </td>
-                            <td><strong style="color: var(--text-color);">$<%= parseFloat(invoice.total || 0).toFixed(2) %></strong></td>
-                            <td style="color: var(--text-color);"><%= invoice.created_at ? new Date(invoice.created_at).toLocaleDateString() : 'N/A' %></td>
+                            <td data-field="total"><strong style="color: var(--text-color);">$<%= parseFloat(invoice.total || 0).toFixed(2) %></strong></td>
+                            <td data-field="created" style="color: var(--text-color);"><%= invoice.created_at ? new Date(invoice.created_at).toLocaleDateString() : 'N/A' %></td>
                             <% if (invoices.some(inv => inv.status === 'Draft' && inv.cart_expires_at)) { %>
-                            <td style="color: var(--text-color);">
+                            <td data-field="expires" style="color: var(--text-color);">
                                 <% if (invoice.status === 'Draft' && invoice.cart_expires_at) { %>
-                                    <span style="<%= new Date(invoice.cart_expires_at) < new Date() ? 'color: #dc3545; font-weight: 600;' : '' %>">
+                                    <span class="cart-expiration" style="<%= new Date(invoice.cart_expires_at) < new Date() ? 'color: #dc3545; font-weight: 600;' : '' %>">
                                         <%= new Date(invoice.cart_expires_at).toLocaleString() %>
                                     </span>
                                 <% } else { %>
@@ -385,7 +385,7 @@
                                 <% } %>
                             </td>
                             <% } %>
-                            <td>
+                            <td data-field="actions">
                                 <div style="display: flex; gap: 8px; align-items: center;">
                                     <a href="/admin/invoices/<%= invoice.id %>" class="table-action-link">
                                         <i class="fas fa-eye"></i> View
@@ -470,6 +470,13 @@
         </div>
     <% } %>
 </div>
+
+<script id="invoice-ws-config" type="application/json">
+<%- JSON.stringify({
+    websocketPort: websocketPort || 8080,
+    filters: filters || {}
+}) %>
+</script>
 
 <script>
 function applyFilters(page = 1) {
@@ -602,6 +609,222 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
 });
+
+// WebSocket real-time updates
+(function() {
+    const wsConfigEl = document.getElementById('invoice-ws-config');
+    let wsConfig = { websocketPort: 8080, filters: {} };
+
+    if (wsConfigEl && wsConfigEl.textContent) {
+        try {
+            wsConfig = JSON.parse(wsConfigEl.textContent);
+        } catch (error) {
+            console.error('Failed to parse invoice WebSocket config:', error);
+        }
+    }
+
+    const wsPort = Number(wsConfig.websocketPort || 8080);
+    const invoiceFilters = wsConfig.filters || {};
+    let ws;
+    let reconnectTimer = null;
+    let reloadTimer = null;
+
+    function getWebSocketUrl() {
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const host = window.location.hostname;
+        return `${protocol}://${host}:${wsPort}`;
+    }
+
+    function scheduleReconnect() {
+        if (reconnectTimer) {
+            return;
+        }
+        reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            connect();
+        }, 5000);
+    }
+
+    function scheduleTableRefresh(delay = 1500) {
+        if (reloadTimer) {
+            return;
+        }
+        reloadTimer = setTimeout(() => {
+            reloadTimer = null;
+            window.location.reload();
+        }, delay);
+    }
+
+    function invoicePassesFilters(invoice) {
+        if (!invoice) {
+            return false;
+        }
+
+        if (invoiceFilters.status && invoice.status !== invoiceFilters.status) {
+            return false;
+        }
+
+        if (invoiceFilters.source && invoice.source !== invoiceFilters.source) {
+            return false;
+        }
+
+        if (invoiceFilters.fulfillment_status === 'fulfilled') {
+            const fulfilledStatuses = ['Fulfillment_Accepted', 'Manifested', 'Shipped', 'Delivered', 'Paid'];
+            if (!fulfilledStatuses.includes(invoice.status)) {
+                return false;
+            }
+        } else if (invoiceFilters.fulfillment_status === 'not_fulfilled') {
+            const fulfilledStatuses = ['Fulfillment_Accepted', 'Manifested', 'Shipped', 'Delivered', 'Paid'];
+            if (fulfilledStatuses.includes(invoice.status)) {
+                return false;
+            }
+        }
+
+        if (invoiceFilters.delivery_status === 'delivered') {
+            const deliveredStatuses = ['Delivered', 'Paid'];
+            if (!deliveredStatuses.includes(invoice.status)) {
+                return false;
+            }
+        } else if (invoiceFilters.delivery_status === 'not_delivered') {
+            const deliveredStatuses = ['Delivered', 'Paid'];
+            if (deliveredStatuses.includes(invoice.status)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    function updateInvoiceRow(invoice) {
+        const row = document.querySelector(`tr[data-invoice-id="${invoice.id}"]`);
+        if (!row) {
+            // Row not on current page; safest to refresh once
+            scheduleTableRefresh();
+            return;
+        }
+
+        const numberCell = row.querySelector('[data-field="invoice-number"] .invoice-number-value');
+        if (numberCell) {
+            numberCell.textContent = `#${invoice.invoice_number || invoice.id}`;
+        }
+
+        const buyerCell = row.querySelector('[data-field="buyer"]');
+        if (buyerCell) {
+            buyerCell.textContent = invoice.buyer_name || 'Unknown Buyer';
+        }
+
+        const locationCell = row.querySelector('[data-field="location"]');
+        if (locationCell) {
+            locationCell.textContent = invoice.location_name || 'Unknown Location';
+        }
+
+        const statusCell = row.querySelector('[data-field="status"] .status-text');
+        if (statusCell) {
+            const statusClass = (invoice.status || '').toLowerCase().replace(/_/g, '');
+            statusCell.className = `status-badge status-${statusClass} status-text`;
+            statusCell.textContent = (invoice.status || 'Unknown').replace(/_/g, ' ');
+        }
+
+        const sourceCell = row.querySelector('[data-field="source"] .source-text');
+        if (sourceCell) {
+            const sourceClass = (invoice.source || 'internal').toLowerCase();
+            sourceCell.className = `source-badge source-${sourceClass} source-text`;
+            sourceCell.textContent = invoice.source || 'Internal';
+        }
+
+        const totalCell = row.querySelector('[data-field="total"] strong');
+        if (totalCell) {
+            totalCell.textContent = `$${Number(invoice.total || 0).toFixed(2)}`;
+        }
+
+        const createdCell = row.querySelector('[data-field="created"]');
+        if (createdCell) {
+            createdCell.textContent = invoice.created_at ? new Date(invoice.created_at).toLocaleDateString() : 'N/A';
+        }
+
+        const expiresCell = row.querySelector('[data-field="expires"] .cart-expiration');
+        if (expiresCell) {
+            if (invoice.status === 'Draft' && invoice.cart_expires_at) {
+                const expiresAt = new Date(invoice.cart_expires_at);
+                expiresCell.textContent = expiresAt.toLocaleString();
+                if (expiresAt < new Date()) {
+                    expiresCell.style.color = '#dc3545';
+                    expiresCell.style.fontWeight = '600';
+                } else {
+                    expiresCell.style.color = '';
+                    expiresCell.style.fontWeight = '';
+                }
+            } else {
+                expiresCell.textContent = '—';
+                expiresCell.style.color = '#999';
+            }
+        }
+    }
+
+    function handleInvoiceSync(payload) {
+        const invoiceId = payload.invoice_id;
+        const invoice = payload.invoice;
+
+        if (!invoice) {
+            const row = document.querySelector(`tr[data-invoice-id="${invoiceId}"]`);
+            if (row) {
+                row.parentElement.removeChild(row);
+                scheduleTableRefresh();
+            }
+            return;
+        }
+
+        if (!invoicePassesFilters(invoice)) {
+            const row = document.querySelector(`tr[data-invoice-id="${invoice.id}"]`);
+            if (row) {
+                row.parentElement.removeChild(row);
+                scheduleTableRefresh();
+            }
+            return;
+        }
+
+        updateInvoiceRow(invoice);
+    }
+
+    function connect() {
+        if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+            return;
+        }
+
+        try {
+            ws = new WebSocket(getWebSocketUrl());
+        } catch (error) {
+            console.error('Failed to initialize WebSocket:', error);
+            scheduleReconnect();
+            return;
+        }
+
+        ws.addEventListener('open', () => {
+            reconnectTimer = null;
+        });
+
+        ws.addEventListener('message', (event) => {
+            try {
+                const payload = JSON.parse(event.data);
+                if (payload.type === 'invoice_sync') {
+                    handleInvoiceSync(payload);
+                }
+            } catch (error) {
+                console.error('Failed to parse WebSocket message:', error);
+            }
+        });
+
+        ws.addEventListener('close', () => {
+            scheduleReconnect();
+        });
+
+        ws.addEventListener('error', () => {
+            scheduleReconnect();
+        });
+    }
+
+    connect();
+})();
 </script>
 
 <!-- Include notification system -->
