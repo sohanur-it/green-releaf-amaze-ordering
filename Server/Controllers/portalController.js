@@ -1049,6 +1049,24 @@ class PortalController {
                 unit_price: unitPrice,
                 line_total: lineTotal
             };
+
+            const availabilitySnapshot = await client.query(`
+                SELECT 
+                    (quantity - allocated_quantity)::INTEGER AS quantity_available,
+                    quantity,
+                    allocated_quantity
+                FROM "ORDERS-batches"
+                WHERE id = $1
+            `, [batch_id]);
+
+            const batchQuantityAvailable = availabilitySnapshot.rows.length > 0
+                ? parseInt(availabilitySnapshot.rows[0].quantity_available || 0, 10)
+                : 0;
+
+            const affectedBatch = {
+                batch_id: parseInt(batch_id, 10),
+                quantity_available: batchQuantityAvailable
+            };
             
             console.log('Cart item added:', {
                 invoiceId,
@@ -1080,7 +1098,8 @@ class PortalController {
                 totals: {
                     subtotal,
                     total
-                }
+                },
+                affected_batches: [affectedBatch]
             }).catch(err => {
                 console.error('WebSocket broadcast error (cart add):', err.message);
             });
@@ -1107,7 +1126,8 @@ class PortalController {
                     subtotal,
                     total
                 },
-                is_new_line_item: isNewLineItem
+                is_new_line_item: isNewLineItem,
+                batch_availability: affectedBatch
             });
         } catch (error) {
             console.error('Error adding to cart:', error);
@@ -1160,6 +1180,7 @@ class PortalController {
             const invoiceStatus = lineItemResult.rows[0].status;
             const cartExpiresAt = lineItemResult.rows[0].cart_expires_at;
             const batchIdToDelete = batch_id || actualBatchId; // Use provided batch_id or the one from the line item
+            let affectedBatch = null;
             
             // CRITICAL: Verify invoice is still valid (not cancelled or expired)
             if (invoiceStatus === 'Cancelled') {
@@ -1267,6 +1288,20 @@ class PortalController {
                     // Continue anyway - the line item is deleted
                 }
             }
+
+            const availabilitySnapshot = await query(`
+                SELECT 
+                    (quantity - allocated_quantity)::INTEGER AS quantity_available
+                FROM "ORDERS-batches"
+                WHERE id = $1
+            `, [batchIdToDelete]);
+
+            if (availabilitySnapshot.rows.length > 0) {
+                affectedBatch = {
+                    batch_id: parseInt(batchIdToDelete, 10),
+                    quantity_available: parseInt(availabilitySnapshot.rows[0].quantity_available || 0, 10)
+                };
+            }
             
             // Recalculate invoice totals
             const totalsResult = await query(`
@@ -1309,7 +1344,8 @@ class PortalController {
                     triggered_by_session_id: clientSessionId,
                     exclude_session: req.sessionID,
                     removed_line_item_ids: removedLineItemIds,
-                    cleared: true
+                    cleared: true,
+                    ...(affectedBatch ? { affected_batches: [affectedBatch] } : {})
                 }).catch(err => {
                     console.error('WebSocket broadcast error (cart remove - deleted):', err.message);
                 });
@@ -1324,16 +1360,23 @@ class PortalController {
                     totals: {
                         subtotal,
                         total
-                    }
+                    },
+                    ...(affectedBatch ? { affected_batches: [affectedBatch] } : {})
                 }).catch(err => {
                     console.error('WebSocket broadcast error (cart remove):', err.message);
                 });
             }
             
-            res.json({ 
-                success: true, 
+            const responsePayload = {
+                success: true,
                 message: 'Item removed from cart'
-            });
+            };
+
+            if (affectedBatch) {
+                responsePayload.batch_availability = affectedBatch;
+            }
+
+            res.json(responsePayload);
         } catch (error) {
             console.error('Error removing from cart:', error);
             res.status(500).json({ error: 'Failed to remove item from cart', details: error.message });
@@ -1579,34 +1622,62 @@ class PortalController {
                 }
             }
             
+            const lineItemPayload = {
+                id: line_item_id,
+                batch_id: lineItem.fk_batch_id,
+                quantity_ordered: parseInt(quantity, 10),
+                quantity_allocated: finalAllocated,
+                unit_price: parseFloat(lineItem.unit_price || 0),
+                line_total: parseFloat(lineItem.unit_price || 0) * parseInt(quantity, 10)
+            };
+
+            const availabilitySnapshot = await query(`
+                SELECT 
+                    (quantity - allocated_quantity)::INTEGER AS quantity_available
+                FROM "ORDERS-batches"
+                WHERE id = $1
+            `, [lineItem.fk_batch_id]);
+
+            const affectedBatch = availabilitySnapshot.rows.length > 0
+                ? {
+                    batch_id: parseInt(lineItem.fk_batch_id, 10),
+                    quantity_available: parseInt(availabilitySnapshot.rows[0].quantity_available || 0, 10)
+                }
+                : null;
+
             websocketService.broadcastInvoiceEvent(lineItem.fk_invoice_id, 'line_item_updated', {
                 buyer_id: portalAccess.buyerId,
                 location_id: portalAccess.locationId,
                 triggered_by: 'external_portal',
                 triggered_by_session_id: clientSessionId,
                 exclude_session: req.sessionID,
-                line_item: {
-                    id: line_item_id,
-                    batch_id: lineItem.fk_batch_id,
-                    quantity_ordered: parseInt(quantity, 10),
-                    quantity_allocated: finalAllocated,
-                    unit_price: parseFloat(lineItem.unit_price || 0),
-                    line_total: parseFloat(lineItem.unit_price || 0) * parseInt(quantity, 10)
-                },
+                line_item: lineItemPayload,
                 totals: {
                     subtotal,
                     total
-                }
+                },
+                ...(affectedBatch ? { affected_batches: [affectedBatch] } : {})
             }).catch(err => {
                 console.error('WebSocket broadcast error (cart update):', err.message);
             });
 
-            res.json({ 
-                success: true, 
+            const responsePayload = {
+                success: true,
                 message: 'Quantity updated',
-                subtotal: subtotal,
-                total: total
-            });
+                subtotal,
+                total,
+                totals: {
+                    subtotal,
+                    total
+                },
+                line_item: lineItemPayload
+            };
+
+            if (affectedBatch) {
+                responsePayload.batch_availability = affectedBatch;
+            }
+
+            res.json(responsePayload);
         } catch (error) {
             console.error('Error updating cart item:', error);
             res.status(500).json({ error: 'Failed to update quantity', details: error.message });

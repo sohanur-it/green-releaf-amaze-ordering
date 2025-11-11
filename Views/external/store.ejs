@@ -60,6 +60,61 @@
             opacity: 0.6;
             cursor: not-allowed;
         }
+        .product-card {
+            position: relative;
+        }
+        .product-card.out-of-stock {
+            opacity: 0.55;
+            pointer-events: none;
+        }
+        .product-card.out-of-stock::after {
+            content: 'OUT OF STOCK';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(23, 23, 23, 0.85);
+            color: #fff;
+            padding: 0.5rem 0.85rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            z-index: 4;
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+        }
+        .product-card.out-of-stock-hidden {
+            display: none !important;
+        }
+        .product-card .add-to-cart-btn.disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        .table-add-btn.disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        .product-row.out-of-stock {
+            opacity: 0.5;
+        }
+        .product-row.out-of-stock-hidden {
+            display: none !important;
+        }
+        .product-row .out-of-stock-label {
+            display: inline-block;
+            margin-top: 4px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: rgba(220, 38, 38, 0.12);
+            color: #b91c1c;
+            font-weight: 600;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+        .out-of-stock-label.inline {
+            margin-left: 6px;
+        }
     </style>
     <!-- Filter Sidebar (Left) -->
     <div class="filter-sidebar">
@@ -320,7 +375,7 @@
                                         <span class="price-amount">$<%= casePrice %></span><span class="price-rest"> / Cases</span>
                                     </div>
                                     <div class="quantity-available">
-                                        Quantity: <span class="quantity-bold"><%= batch.quantity_available %></span> Cases
+                                        Quantity: <span class="quantity-bold available-count"><%= batch.quantity_available %></span> Cases
                                     </div>
                                     <% if (product.unit_size) { %>
                                         <div class="detail-line">Weight: <%= product.unit_size %></div>
@@ -427,7 +482,7 @@
                                     <td><span class="table-thc"><%= batch.thc_percentage ? batch.thc_percentage.toFixed(2) : '0.00' %>% THC</span></td>
                                     <td>
                                         <span class="table-quantity">
-                                            <%= batch.quantity_available %> Cases<br>
+                                            <span class="available-count"><%= batch.quantity_available %></span> Cases<br>
                                             <%= product.units_per_case || 24 %> units per case<br>
                                             <%= batch.metrc_item_name || 'N/A' %>
                                         </span>
@@ -793,6 +848,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Then initialize products after a small delay to ensure DOM is ready
     setTimeout(() => {
         initProducts();
+        updateProductCount();
     }, 200);
 
     initPortalWebSocket();
@@ -971,6 +1027,8 @@ const portalClientSessionId = (() => {
     return id;
 })();
 
+const outOfStockTimers = new Map();
+
 let portalWebSocket = null;
 let portalWebSocketReconnectTimer = null;
 let portalWebSocketAttempts = 0;
@@ -1127,6 +1185,188 @@ function ensureCartOnline(actionDescription) {
     return true;
 }
 
+function updateProductCount() {
+    const productCountEl = document.getElementById('product-count');
+    if (!productCountEl) {
+        return;
+    }
+
+    const visibleCards = Array.from(document.querySelectorAll('.product-card[data-batch-id]')).filter(card => {
+        if (card.dataset.hiddenDueToStock === 'true') {
+            return false;
+        }
+        if (card.classList.contains('out-of-stock-hidden')) {
+            return false;
+        }
+        return card.style.display !== 'none';
+    });
+
+    productCountEl.textContent = visibleCards.length;
+}
+
+function updateProductAvailability(batchId, quantityAvailable) {
+    if (batchId === undefined || batchId === null) {
+        return;
+    }
+
+    const normalizedBatchId = String(batchId);
+    const parsedQuantity = Math.max(0, parseInt(quantityAvailable, 10) || 0);
+    const isOutOfStock = parsedQuantity <= 0;
+
+    const productSelectors = [
+        `.product-card[data-batch-id="${normalizedBatchId}"]`,
+        `.product-row[data-batch-id="${normalizedBatchId}"]`
+    ];
+
+    const productElements = document.querySelectorAll(productSelectors.join(', '));
+    const ensureOriginalDisplay = (element) => {
+        if (!element.dataset.originalDisplay) {
+            element.dataset.originalDisplay = getComputedStyle(element).display || '';
+        }
+    };
+
+    const toggleRowOutOfStockLabel = (element, show) => {
+        const quantityCell = element.querySelector('.table-quantity');
+        if (!quantityCell) {
+            return;
+        }
+        let label = quantityCell.querySelector('.out-of-stock-label');
+        if (show) {
+            if (!label) {
+                label = document.createElement('span');
+                label.className = 'out-of-stock-label';
+                label.textContent = 'OUT OF STOCK';
+                quantityCell.appendChild(label);
+            }
+            label.style.display = 'inline-block';
+        } else if (label) {
+            label.remove();
+        }
+    };
+
+    productElements.forEach(element => {
+        ensureOriginalDisplay(element);
+        element.dataset.quantityAvailable = parsedQuantity;
+
+        element.querySelectorAll('.available-count').forEach(span => {
+            span.textContent = parsedQuantity;
+        });
+
+        element.querySelectorAll('.quantity-input, .table-qty-input').forEach(input => {
+            input.max = parsedQuantity;
+            const currentValue = parseInt(input.value, 10) || 1;
+            if (parsedQuantity > 0) {
+                if (currentValue > parsedQuantity) {
+                    input.value = parsedQuantity;
+                } else if (currentValue < 1) {
+                    input.value = 1;
+                }
+            } else {
+                input.value = 0;
+            }
+        });
+
+        const addButton = element.querySelector('.add-to-cart-btn');
+        if (addButton) {
+            addButton.disabled = isOutOfStock;
+            addButton.classList.toggle('disabled', isOutOfStock);
+        }
+
+        const tableAddButton = element.querySelector('.table-add-btn');
+        if (tableAddButton) {
+            tableAddButton.disabled = isOutOfStock;
+            tableAddButton.classList.toggle('disabled', isOutOfStock);
+        }
+
+        if (element.classList.contains('product-card')) {
+            element.classList.toggle('out-of-stock', isOutOfStock);
+            if (!isOutOfStock) {
+                element.classList.remove('out-of-stock-hidden');
+            }
+        }
+
+        if (element.classList.contains('product-row')) {
+            element.classList.toggle('out-of-stock', isOutOfStock);
+            toggleRowOutOfStockLabel(element, isOutOfStock);
+            if (!isOutOfStock) {
+                element.classList.remove('out-of-stock-hidden');
+            }
+        }
+    });
+
+    const timerKey = normalizedBatchId;
+
+    if (isOutOfStock) {
+        if (!outOfStockTimers.has(timerKey)) {
+            const timerId = setTimeout(() => {
+                const elementsToHide = document.querySelectorAll(productSelectors.join(', '));
+                elementsToHide.forEach(el => {
+                    ensureOriginalDisplay(el);
+                    el.style.display = 'none';
+                    el.dataset.hiddenDueToStock = 'true';
+                    el.classList.add('out-of-stock-hidden');
+                });
+                outOfStockTimers.delete(timerKey);
+                updateProductCount();
+            }, 30000);
+            outOfStockTimers.set(timerKey, timerId);
+        }
+    } else {
+        if (outOfStockTimers.has(timerKey)) {
+            clearTimeout(outOfStockTimers.get(timerKey));
+            outOfStockTimers.delete(timerKey);
+        }
+
+        const elementsToRestore = document.querySelectorAll(productSelectors.join(', '));
+        elementsToRestore.forEach(element => {
+            const originalDisplay = element.dataset.originalDisplay || '';
+            element.style.display = originalDisplay === 'none' ? '' : originalDisplay;
+            element.dataset.hiddenDueToStock = 'false';
+            element.classList.remove('out-of-stock-hidden');
+
+            element.querySelectorAll('.quantity-input, .table-qty-input').forEach(input => {
+                const currentValue = parseInt(input.value, 10) || 0;
+                if (currentValue < 1) {
+                    input.value = 1;
+                }
+            });
+        });
+    }
+
+    if (currentModalBatchId && String(currentModalBatchId) === normalizedBatchId) {
+        const modalAvailableEl = document.getElementById('modal-available');
+        if (modalAvailableEl) {
+            modalAvailableEl.textContent = `${parsedQuantity} Cases`;
+        }
+
+        const modalTotalUnitsEl = document.getElementById('modal-total-units');
+        if (modalTotalUnitsEl) {
+            const totalUnits = parsedQuantity * (currentModalUnitsPerCase || 0);
+            modalTotalUnitsEl.textContent = Number.isFinite(totalUnits) && totalUnits >= 0
+                ? totalUnits.toLocaleString()
+                : '0';
+        }
+
+        const modalQuantityInput = document.getElementById('modal-quantity');
+        if (modalQuantityInput) {
+            modalQuantityInput.max = parsedQuantity;
+            const modalCurrentValue = parseInt(modalQuantityInput.value, 10) || 1;
+            if (parsedQuantity > 0) {
+                const adjustedValue = Math.min(parsedQuantity, Math.max(modalCurrentValue, 1));
+                if (adjustedValue !== modalCurrentValue) {
+                    modalQuantityInput.value = adjustedValue;
+                    updateModalTotalCost();
+                }
+            } else {
+                modalQuantityInput.value = 1;
+                updateModalTotalCost();
+            }
+        }
+    }
+
+    updateProductCount();
+}
+
 // Track last user action timestamp to prevent unnecessary reloads
 let lastUserActionTime = 0;
 const USER_ACTION_DEBOUNCE_MS = 3000; // Ignore WebSocket events within 3 seconds of user action
@@ -1171,6 +1411,30 @@ function handlePortalWebSocketMessage(event) {
             return;
         }
     }
+
+    const affectedBatches = [];
+    if (payload.metadata) {
+        if (Array.isArray(payload.metadata.affected_batches)) {
+            affectedBatches.push(...payload.metadata.affected_batches);
+        } else if (payload.metadata.batch_availability) {
+            affectedBatches.push(payload.metadata.batch_availability);
+        }
+    }
+    if (Array.isArray(payload.affected_batches)) {
+        affectedBatches.push(...payload.affected_batches);
+    }
+
+    affectedBatches.forEach(batchInfo => {
+        if (!batchInfo) return;
+        const batchId = batchInfo.batch_id ?? batchInfo.id;
+        if (batchId === undefined || batchId === null) {
+            return;
+        }
+        const quantityAvailable = batchInfo.quantity_available ?? batchInfo.available ?? batchInfo.remaining_available;
+        if (quantityAvailable !== undefined) {
+            updateProductAvailability(batchId, quantityAvailable);
+        }
+    });
 
     // CRITICAL: Don't reload if user just made an action (within debounce window)
     // This prevents the cart from refreshing immediately after user adds/removes items
@@ -1463,21 +1727,46 @@ async function addToCart(event, batchId) {
         return data;
     }).then(data => {
         const backendItem = data.line_item || null;
-        if (backendItem) {
-            const cartItem = cart.cart.items.find(item => String(item.batch_id) === String(backendItem.batch_id));
-            if (cartItem) {
-                cartItem.line_item_id = backendItem.id;
-                cartItem.quantity = parseInt(backendItem.quantity_ordered, 10) || cartItem.quantity;
-                cartItem.unit_price = parseFloat(backendItem.unit_price ?? cartItem.unit_price);
-                cartItem.line_total = parseFloat(backendItem.line_total ?? (cartItem.unit_price * cartItem.quantity));
-                cartItem.quantity_allocated = parseInt(backendItem.quantity_allocated ?? cartItem.quantity_allocated ?? 0, 10);
-            }
+        let cartItem = cart.cart.items.find(item => String(item.batch_id) === String(batchId));
+
+        if (backendItem && cartItem) {
+            cartItem.line_item_id = backendItem.id;
+            cartItem.quantity = parseInt(backendItem.quantity_ordered, 10) || cartItem.quantity;
+            cartItem.unit_price = parseFloat(backendItem.unit_price ?? cartItem.unit_price);
+            cartItem.line_total = parseFloat(backendItem.line_total ?? (cartItem.unit_price * cartItem.quantity));
+            cartItem.quantity_allocated = parseInt(backendItem.quantity_allocated ?? cartItem.quantity_allocated ?? 0, 10);
         }
         
         if (data.totals) {
             cart.cart.subtotal = parseFloat(data.totals.subtotal ?? cart.cart.subtotal ?? 0);
             cart.cart.total = parseFloat(data.totals.total ?? cart.cart.total ?? 0);
         }
+
+        const availabilityRecords = [];
+        if (data.batch_availability) {
+            availabilityRecords.push(data.batch_availability);
+        } else if (Array.isArray(data.affected_batches)) {
+            availabilityRecords.push(...data.affected_batches);
+        }
+
+        availabilityRecords.forEach(record => {
+            if (!record) return;
+            const recordBatchId = record.batch_id ?? backendItem?.batch_id ?? batchId;
+            const recordQuantity = record.quantity_available ?? record.remaining_available ?? record.available;
+            if (recordBatchId === undefined || recordQuantity === undefined) {
+                return;
+            }
+
+            const parsedQuantity = parseInt(recordQuantity, 10);
+            if (!Number.isNaN(parsedQuantity)) {
+                updateProductAvailability(recordBatchId, parsedQuantity);
+
+                const targetItem = cart.cart.items.find(item => String(item.batch_id) === String(recordBatchId));
+                if (targetItem) {
+                    targetItem.quantity_available = parsedQuantity;
+                }
+            }
+        });
         
         cart.saveCart();
         renderCart();
@@ -1779,15 +2068,14 @@ async function updateQuantity(lineItemId, delta) {
                 }
 
                 // Update frontend cart with backend response data
-                if (data.line_item) {
-                    const cartItem = cart.cart.items.find(i => String(i.batch_id) === String(item.batch_id));
-                    if (cartItem) {
-                        cartItem.line_item_id = data.line_item.id;
-                        cartItem.quantity = parseInt(data.line_item.quantity_ordered, 10) || cartItem.quantity;
-                        cartItem.unit_price = parseFloat(data.line_item.unit_price ?? cartItem.unit_price);
-                        cartItem.line_total = parseFloat(data.line_item.line_total ?? (cartItem.unit_price * cartItem.quantity));
-                        cartItem.quantity_allocated = parseInt(data.line_item.quantity_allocated ?? cartItem.quantity_allocated ?? 0, 10);
-                    }
+                let cartItemRef = cart.cart.items.find(i => String(i.batch_id) === String(item.batch_id));
+
+                if (data.line_item && cartItemRef) {
+                    cartItemRef.line_item_id = data.line_item.id;
+                    cartItemRef.quantity = parseInt(data.line_item.quantity_ordered, 10) || cartItemRef.quantity;
+                    cartItemRef.unit_price = parseFloat(data.line_item.unit_price ?? cartItemRef.unit_price);
+                    cartItemRef.line_total = parseFloat(data.line_item.line_total ?? (cartItemRef.unit_price * cartItemRef.quantity));
+                    cartItemRef.quantity_allocated = parseInt(data.line_item.quantity_allocated ?? cartItemRef.quantity_allocated ?? 0, 10);
                 }
 
                 // Update totals from backend response
@@ -1795,6 +2083,30 @@ async function updateQuantity(lineItemId, delta) {
                     cart.cart.subtotal = parseFloat(data.totals.subtotal ?? cart.cart.subtotal ?? 0);
                     cart.cart.total = parseFloat(data.totals.total ?? cart.cart.total ?? 0);
                 }
+
+                const availabilityRecords = [];
+                if (data.batch_availability) {
+                    availabilityRecords.push(data.batch_availability);
+                } else if (Array.isArray(data.affected_batches)) {
+                    availabilityRecords.push(...data.affected_batches);
+                }
+
+                availabilityRecords.forEach(record => {
+                    if (!record) return;
+                    const recordBatchId = record.batch_id ?? item.batch_id;
+                    const recordQuantity = record.quantity_available ?? record.remaining_available ?? record.available;
+                    if (recordBatchId === undefined || recordQuantity === undefined) {
+                        return;
+                    }
+                    const parsedQuantity = parseInt(recordQuantity, 10);
+                    if (!Number.isNaN(parsedQuantity)) {
+                        updateProductAvailability(recordBatchId, parsedQuantity);
+                        const targetItem = cart.cart.items.find(i => String(i.batch_id) === String(recordBatchId));
+                        if (targetItem) {
+                            targetItem.quantity_available = parsedQuantity;
+                        }
+                    }
+                });
 
                 cart.saveCart();
                 renderCart(); // Final render with backend data
@@ -1995,6 +2307,26 @@ async function removeItem(lineItemId, batchId) {
                     const errorMessage = data.error || data.details || data.message || 'Failed to remove item from cart';
                     throw new Error(errorMessage);
                 }
+
+                const availabilityRecords = [];
+                if (data.batch_availability) {
+                    availabilityRecords.push(data.batch_availability);
+                } else if (Array.isArray(data.affected_batches)) {
+                    availabilityRecords.push(...data.affected_batches);
+                }
+
+                availabilityRecords.forEach(record => {
+                    if (!record) return;
+                    const recordBatchId = record.batch_id ?? batchId ?? item.batch_id;
+                    const recordQuantity = record.quantity_available ?? record.remaining_available ?? record.available;
+                    if (recordBatchId === undefined || recordQuantity === undefined) {
+                        return;
+                    }
+                    const parsedQuantity = parseInt(recordQuantity, 10);
+                    if (!Number.isNaN(parsedQuantity)) {
+                        updateProductAvailability(recordBatchId, parsedQuantity);
+                    }
+                });
                 
                 // CRITICAL: After successful backend removal, reload from backend to get accurate state
                 // Force reload (ignore the frontend-has-items check) since we just removed an item
@@ -2155,6 +2487,7 @@ async function goToCheckout() {
 // Product Details Modal Functions
 let currentModalBatchId = null;
 let currentModalUnitPrice = 0;
+let currentModalUnitsPerCase = 24;
 
 function openProductModal(productData) {
     currentModalBatchId = productData.batchId;
@@ -2245,6 +2578,7 @@ function openProductModal(productData) {
     
     // Set packaging info at top
     const unitsPerCase = productData.unitsPerCase || 24;
+    currentModalUnitsPerCase = unitsPerCase;
     document.getElementById('modal-packaging-top').textContent = `${unitsPerCase} units per case`;
     
     // Set packaging info
@@ -2402,6 +2736,26 @@ async function addToCartFromBatch(batchId, quantity) {
         
         const data = await response.json();
         if (data.success) {
+            const availabilityRecords = [];
+            if (data.batch_availability) {
+                availabilityRecords.push(data.batch_availability);
+            } else if (Array.isArray(data.affected_batches)) {
+                availabilityRecords.push(...data.affected_batches);
+            }
+
+            availabilityRecords.forEach(record => {
+                if (!record) return;
+                const recordBatchId = record.batch_id ?? batchId;
+                const recordQuantity = record.quantity_available ?? record.remaining_available ?? record.available;
+                if (recordBatchId === undefined || recordQuantity === undefined) {
+                    return;
+                }
+                const parsedQuantity = parseInt(recordQuantity, 10);
+                if (!Number.isNaN(parsedQuantity)) {
+                    updateProductAvailability(recordBatchId, parsedQuantity);
+                }
+            });
+
             await loadCart();
             // Show success notification with item count
             const itemText = parsedQuantity === 1 ? '1 item' : `${parsedQuantity} items`;
