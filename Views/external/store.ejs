@@ -1,5 +1,66 @@
 
 <div class="portal-main-container">
+    <style>
+        .cart-connection-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 12px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+        .cart-connection-status .status-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .cart-status-online {
+            background: rgba(34, 197, 94, 0.12);
+            color: #047857;
+        }
+        .cart-status-online .status-dot {
+            background: #047857;
+        }
+        .cart-status-connecting {
+            background: rgba(59, 130, 246, 0.12);
+            color: #1d4ed8;
+        }
+        .cart-status-connecting .status-dot {
+            background: #1d4ed8;
+        }
+        .cart-status-offline {
+            background: rgba(239, 68, 68, 0.12);
+            color: #b91c1c;
+        }
+        .cart-status-offline .status-dot {
+            background: #b91c1c;
+        }
+        .cart-offline-message {
+            text-align: center;
+            padding: 28px 16px;
+            color: #b91c1c;
+        }
+        .cart-offline-message .cart-offline-icon {
+            font-size: 2rem;
+            margin-bottom: 8px;
+        }
+        .cart-offline-message p {
+            margin: 4px 0;
+        }
+        .cart-actions-disabled .quantity-btn,
+        .cart-actions-disabled .remove-item-btn {
+            opacity: 0.5;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+        .cart-actions-disabled .checkout-btn {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+    </style>
     <!-- Filter Sidebar (Left) -->
     <div class="filter-sidebar">
         <div class="sidebar-header">
@@ -593,6 +654,10 @@
                 </div>
                 <div class="cart-dropdown">▼</div>
             </div>
+            <div class="cart-connection-status cart-status-connecting" id="cart-connection-status">
+                <span class="status-dot"></span>
+                <span id="cart-connection-status-text">Connecting to live cart…</span>
+            </div>
             
             <div class="cart-instruction">
                 Review your selected items before proceeding to checkout.
@@ -693,22 +758,10 @@ document.addEventListener('DOMContentLoaded', function() {
     initCartManager(uuid);
     const cart = getCartManager();
     if (cart) {
-        // OPTIMISTIC UI: Show cached cart immediately (from localStorage) for instant feedback
-        // This prevents the empty cart flash while waiting for backend API response
         renderCart();
-        
-        // Then sync from backend in background (backend is source of truth)
-        // Once backend responds, update cart with accurate data
-        cart.loadFromBackend(true, 0) // force = true, lastActionTime = 0 (not recent)
-            .then(() => {
-                // Backend sync completed - update cart with accurate data
-                renderCart();
-            })
-            .catch(err => {
-                console.warn('Unable to sync cart from backend on load:', err);
-                // If sync fails, keep showing cached cart (better than empty)
-            });
     }
+    setCartControlsEnabled(false);
+    setCartConnectionStatus('connecting');
     
     // Add click handler for cart dropdown arrow to close cart
     const cartDropdown = document.querySelector('.cart-dropdown');
@@ -908,9 +961,23 @@ if (portalWebSocketConfigEl && portalWebSocketConfigEl.textContent) {
     }
 }
 
+const portalClientSessionId = (() => {
+    const key = 'portal_client_session_id';
+    let id = sessionStorage.getItem(key);
+    if (!id) {
+        id = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        sessionStorage.setItem(key, id);
+    }
+    return id;
+})();
+
 let portalWebSocket = null;
 let portalWebSocketReconnectTimer = null;
 let portalWebSocketAttempts = 0;
+let portalWebSocketConnected = false;
+let portalWebSocketEverConnected = false;
+let cartInteractionsEnabled = false;
+let cartOfflineClearApplied = false;
 
 function getPortalWebSocketUrl() {
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -927,10 +994,137 @@ function schedulePortalWebSocketReconnect() {
     portalWebSocketAttempts = Math.min(portalWebSocketAttempts + 1, 6);
     const delay = Math.min(15000, 1000 * Math.pow(2, portalWebSocketAttempts));
 
+    setCartConnectionStatus('connecting');
+    setCartControlsEnabled(false);
+
     portalWebSocketReconnectTimer = setTimeout(() => {
         portalWebSocketReconnectTimer = null;
         initPortalWebSocket();
     }, delay);
+}
+
+function setCartConnectionStatus(state, options = {}) {
+    const statusEl = document.getElementById('cart-connection-status');
+    const statusTextEl = document.getElementById('cart-connection-status-text');
+    if (!statusEl || !statusTextEl) {
+        return;
+    }
+
+    statusEl.classList.remove('cart-status-online', 'cart-status-offline', 'cart-status-connecting');
+
+    let message = '';
+    switch (state) {
+        case 'online':
+            statusEl.classList.add('cart-status-online');
+            message = 'Live cart connected';
+            break;
+        case 'offline':
+            statusEl.classList.add('cart-status-offline');
+            message = options.reason || 'Live connection lost. Waiting to reconnect…';
+            break;
+        default:
+            statusEl.classList.add('cart-status-connecting');
+            message = 'Connecting to live cart…';
+            break;
+    }
+
+    statusTextEl.textContent = message;
+}
+
+function setCartControlsEnabled(enabled) {
+    cartInteractionsEnabled = enabled;
+    setAddToCartButtonsEnabled(enabled);
+
+    const quantityButtons = document.querySelectorAll('.quantity-btn, .remove-item-btn');
+    quantityButtons.forEach(btn => {
+        btn.disabled = !enabled;
+        if (!enabled) {
+            btn.classList.add('disabled');
+        } else {
+            btn.classList.remove('disabled');
+        }
+    });
+
+    const cartContainer = document.querySelector('.portal-cart .cart-container');
+    if (cartContainer) {
+        cartContainer.classList.toggle('cart-actions-disabled', !enabled);
+    }
+
+    const checkoutBtn = document.getElementById('checkout-btn');
+    if (checkoutBtn) {
+        if (!enabled) {
+            checkoutBtn.dataset.offlineDisabled = 'true';
+            checkoutBtn.disabled = true;
+        } else {
+            delete checkoutBtn.dataset.offlineDisabled;
+            // renderCart will handle enabling/disabling based on cart contents
+        }
+    }
+}
+
+function handlePortalSocketConnected() {
+    portalWebSocketConnected = true;
+    portalWebSocketEverConnected = true;
+    cartOfflineClearApplied = false;
+
+    setCartConnectionStatus('online');
+    setCartControlsEnabled(false);
+
+    const cart = getCartManager();
+    if (cart) {
+        cart.loadFromBackend(true, 0)
+            .then(() => {
+                renderCart();
+                setCartControlsEnabled(true);
+            })
+            .catch(error => {
+                console.error('Failed to sync cart after reconnect:', error);
+                renderCart();
+                setCartControlsEnabled(false);
+                if (typeof showNotification === 'function') {
+                    showNotification('Reconnected, but failed to verify cart. Trying again shortly…', 'warning');
+                }
+            });
+    } else {
+        renderCart();
+        setCartControlsEnabled(false);
+    }
+}
+
+function handlePortalSocketDisconnected(reason) {
+    if (!portalWebSocketConnected && cartOfflineClearApplied) {
+        // Already handled
+        setCartConnectionStatus('offline', { reason });
+        setCartControlsEnabled(false);
+        return;
+    }
+
+    portalWebSocketConnected = false;
+    setCartConnectionStatus('offline', { reason });
+    setCartControlsEnabled(false);
+
+    const cart = getCartManager();
+    if (cart && !cartOfflineClearApplied) {
+        cartOfflineClearApplied = true;
+        cart.clearCart();
+    }
+
+    renderCart();
+}
+
+function ensureCartOnline(actionDescription) {
+    if (!portalWebSocketConnected) {
+        const message = actionDescription
+            ? `Cannot ${actionDescription} while the live cart connection is offline.`
+            : 'Live cart connection is currently offline.';
+        if (typeof showNotification === 'function') {
+            showNotification(message, 'error');
+        } else {
+            alert(message);
+        }
+        return false;
+    }
+    return true;
 }
 
 // Track last user action timestamp to prevent unnecessary reloads
@@ -953,6 +1147,11 @@ function handlePortalWebSocketMessage(event) {
         return;
     }
 
+    if (!portalWebSocketConnected) {
+        // Ignore messages while offline; we'll resync once connection is restored
+        return;
+    }
+
     const targetBuyerId = payload.buyer_id ?? (payload.invoice ? payload.invoice.buyer_id : null);
     const targetLocationId = payload.location_id ?? (payload.invoice ? payload.invoice.location_id : null);
 
@@ -967,8 +1166,10 @@ function handlePortalWebSocketMessage(event) {
     // CRITICAL: Ignore events triggered by external portal (we already have the latest state)
     // These events are from our own actions, so we don't need to reload
     if (payload.triggered_by === 'external_portal') {
-        console.log('Ignoring WebSocket event from external portal (self-broadcast)');
-        return;
+        if (payload.triggered_by_session_id && payload.triggered_by_session_id === portalClientSessionId) {
+            console.log('Ignoring WebSocket event triggered by this session');
+            return;
+        }
     }
 
     // CRITICAL: Don't reload if user just made an action (within debounce window)
@@ -1024,10 +1225,14 @@ function initPortalWebSocket() {
         return;
     }
 
+    setCartConnectionStatus('connecting');
+    setCartControlsEnabled(false);
+
     try {
         portalWebSocket = new WebSocket(getPortalWebSocketUrl());
     } catch (error) {
         console.error('Failed to establish WebSocket connection:', error);
+        handlePortalSocketDisconnected('Unable to reach live cart. Retrying…');
         schedulePortalWebSocketReconnect();
         return;
     }
@@ -1038,17 +1243,20 @@ function initPortalWebSocket() {
             clearTimeout(portalWebSocketReconnectTimer);
             portalWebSocketReconnectTimer = null;
         }
+        handlePortalSocketConnected();
     });
 
     portalWebSocket.addEventListener('message', handlePortalWebSocketMessage);
 
     portalWebSocket.addEventListener('close', () => {
+        handlePortalSocketDisconnected('Connection lost. Reconnecting…');
         schedulePortalWebSocketReconnect();
     });
 
     portalWebSocket.addEventListener('error', (error) => {
         console.error('WebSocket connection error:', error);
         console.error('Failed to connect to:', getPortalWebSocketUrl());
+        handlePortalSocketDisconnected('Unable to reach live cart. Retrying…');
         schedulePortalWebSocketReconnect();
     });
 }
@@ -1056,6 +1264,11 @@ function initPortalWebSocket() {
 window.addEventListener('cartSidebarOpened', async () => {
     const cart = getCartManager();
     if (!cart) {
+        return;
+    }
+    
+    if (!portalWebSocketConnected) {
+        renderCart();
         return;
     }
     
@@ -1095,7 +1308,12 @@ async function loadCart() {
             return;
         }
 
-        // OPTIMISTIC UI: Show cached cart immediately (no waiting)
+        if (!portalWebSocketConnected) {
+            renderCart();
+            return;
+        }
+
+        // Show current cart while fetching updated data
         renderCart();
 
         // Force reload from backend (backend is source of truth)
@@ -1128,6 +1346,10 @@ async function addToCart(event, batchId) {
     const cart = getCartManager();
     if (!cart) {
         console.error('Cart manager not initialized');
+        return;
+    }
+
+    if (!ensureCartOnline('add items to the cart')) {
         return;
     }
     
@@ -1222,7 +1444,8 @@ async function addToCart(event, batchId) {
         },
         body: JSON.stringify({
             batch_id: batchId,
-            quantity: quantity
+            quantity: quantity,
+            client_session_id: portalClientSessionId
         })
     }).then(async response => {
         let data = {};
@@ -1290,6 +1513,11 @@ function renderCart() {
         console.warn('renderCart: Cart manager not initialized');
         return;
     }
+
+    if (!renderCart.listenerBound) {
+        window.addEventListener('cartChanged', renderCart);
+        renderCart.listenerBound = true;
+    }
     
     const cartData = cart.getCart();
     const cartItemsDiv = document.getElementById('cart-items');
@@ -1308,6 +1536,47 @@ function renderCart() {
         });
         return;
     }
+
+    if (!portalWebSocketConnected) {
+        const isInitialConnect = !portalWebSocketEverConnected;
+        const offlineIcon = isInitialConnect ? '🔄' : '⚠️';
+        const offlineLine1 = isInitialConnect
+            ? 'Connecting to your live cart…'
+            : 'Live cart connection lost.';
+        const offlineLine2 = isInitialConnect
+            ? 'Verifying availability before displaying your cart.'
+            : 'We’re reconnecting to verify current availability.';
+
+        cartItemsDiv.innerHTML = `
+            <div class="cart-offline-message">
+                <div class="cart-offline-icon">${offlineIcon}</div>
+                <p>${offlineLine1}</p>
+                <p>${offlineLine2}</p>
+            </div>
+        `;
+        if (cartCountSpan) {
+            cartCountSpan.textContent = '--';
+        }
+        const headerBadge = document.getElementById('cart-count-badge');
+        if (headerBadge) {
+            headerBadge.textContent = '!';
+            headerBadge.style.display = 'inline-block';
+        }
+        if (cartSubtotalSpan) {
+            cartSubtotalSpan.textContent = '—';
+        }
+        if (cartTotalSpan) {
+            cartTotalSpan.textContent = '—';
+        }
+        if (checkoutBtn) {
+            checkoutBtn.dataset.offlineDisabled = 'true';
+            checkoutBtn.disabled = true;
+        }
+        setCartControlsEnabled(false);
+        return;
+    }
+    
+    setCartControlsEnabled(true);
     
     if (cartData.items && cartData.items.length > 0) {
         cartItemsDiv.innerHTML = cartData.items.map(item => {
@@ -1363,6 +1632,7 @@ function renderCart() {
             cart.updateCartIcon();
         }
         if (checkoutBtn) {
+            delete checkoutBtn.dataset.offlineDisabled;
             checkoutBtn.disabled = false;
         }
     } else {
@@ -1385,18 +1655,15 @@ function renderCart() {
             cart.updateCartIcon();
         }
         if (checkoutBtn) {
+            delete checkoutBtn.dataset.offlineDisabled;
             checkoutBtn.disabled = true;
         }
     }
     
     cartSubtotalSpan.textContent = `$${cartData.subtotal.toFixed(2)}`;
     cartTotalSpan.textContent = `$${cartData.total.toFixed(2)}`;
-    
-    // Listen for cart changes
-    window.addEventListener('cartChanged', function() {
-        renderCart();
-    });
 }
+renderCart.listenerBound = false;
 
 // Debounce timer for cart updates
 let cartUpdateTimer = null;
@@ -1409,6 +1676,10 @@ async function updateQuantity(lineItemId, delta) {
     // CRITICAL: Prevent concurrent updates to avoid race conditions and freezing
     if (updateQuantityInProgress) {
         console.log('Update already in progress, skipping...');
+        return;
+    }
+
+    if (!ensureCartOnline('update cart quantities')) {
         return;
     }
     
@@ -1483,7 +1754,8 @@ async function updateQuantity(lineItemId, delta) {
                     },
                     body: JSON.stringify({
                         line_item_id: item.line_item_id,
-                        quantity: newQuantity
+                        quantity: newQuantity,
+                        client_session_id: portalClientSessionId
                     }),
                     signal: abortController.signal // Allow cancellation
                 });
@@ -1557,6 +1829,11 @@ async function updateQuantity(lineItemId, delta) {
 
 async function syncCartUpdates() {
     if (pendingCartUpdates.size === 0) return;
+    
+    if (!ensureCartOnline('synchronize cart changes')) {
+        pendingCartUpdates.clear();
+        return;
+    }
     
     const uuid = '<%= uuid %>';
     const updates = Array.from(pendingCartUpdates.values());
@@ -1653,6 +1930,10 @@ async function removeItem(lineItemId, batchId) {
         console.error('Cart manager not initialized');
         return;
     }
+
+    if (!ensureCartOnline('remove items from the cart')) {
+        return;
+    }
     
     // Verify item exists
     const item = cart.cart.items.find(i => {
@@ -1698,7 +1979,8 @@ async function removeItem(lineItemId, batchId) {
                     },
                     body: JSON.stringify({
                         line_item_id: lineItemId,
-                        batch_id: batchId || item.batch_id
+                        batch_id: batchId || item.batch_id,
+                        client_session_id: portalClientSessionId
                     })
                 });
                 
@@ -1811,6 +2093,10 @@ async function goToCheckout() {
     const cart = getCartManager();
     if (!cart) {
         alert('Cart not initialized');
+        return;
+    }
+
+    if (!ensureCartOnline('proceed to checkout')) {
         return;
     }
 
@@ -2055,6 +2341,11 @@ async function addToCartFromModal() {
         }
         return;
     }
+
+    if (!ensureCartOnline('add items to the cart')) {
+        return;
+    }
+
     const quantity = parseInt(document.getElementById('modal-quantity').value) || 1;
     
     if (!currentModalBatchId) {
@@ -2088,6 +2379,10 @@ async function addToCartFromBatch(batchId, quantity) {
         }
         return;
     }
+
+    if (!ensureCartOnline('add items to the cart')) {
+        return;
+    }
     
     const uuid = '<%= uuid %>';
     const parsedQuantity = parseInt(quantity, 10);
@@ -2100,7 +2395,8 @@ async function addToCartFromBatch(batchId, quantity) {
             },
             body: JSON.stringify({
                 batch_id: batchId,
-                quantity: parsedQuantity
+                quantity: parsedQuantity,
+                client_session_id: portalClientSessionId
             })
         });
         

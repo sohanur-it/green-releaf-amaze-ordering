@@ -644,7 +644,8 @@ class PortalController {
             await client.query('BEGIN');
             
             const portalAccess = req.session.portalAccess;
-            const { batch_id, quantity: quantityParam } = req.body;
+            const { batch_id, quantity: quantityParam, client_session_id: clientSessionIdRaw } = req.body;
+            const clientSessionId = clientSessionIdRaw ? String(clientSessionIdRaw) : null;
             
             if (!portalAccess) {
                 await client.query('ROLLBACK');
@@ -1066,6 +1067,7 @@ class PortalController {
                 buyer_id: portalAccess.buyerId,
                 location_id: portalAccess.locationId,
                 triggered_by: 'external_portal', // Mark as external portal action
+                triggered_by_session_id: clientSessionId,
                 exclude_session: req.sessionID, // Don't send to the session that triggered it
                 line_item: {
                     id: lineItemData.id,
@@ -1128,7 +1130,8 @@ class PortalController {
     static async removeFromCart(req, res) {
         try {
             const portalAccess = req.session.portalAccess;
-            const { line_item_id, batch_id } = req.body;
+            const { line_item_id, batch_id, client_session_id: clientSessionIdRaw } = req.body;
+            const clientSessionId = clientSessionIdRaw ? String(clientSessionIdRaw) : null;
             
             if (!portalAccess) {
                 return res.status(401).json({ error: 'Not authenticated' });
@@ -1303,6 +1306,7 @@ class PortalController {
                     buyer_id: portalAccess.buyerId,
                     location_id: portalAccess.locationId,
                     triggered_by: 'external_portal',
+                    triggered_by_session_id: clientSessionId,
                     exclude_session: req.sessionID,
                     removed_line_item_ids: removedLineItemIds,
                     cleared: true
@@ -1314,6 +1318,7 @@ class PortalController {
                     buyer_id: portalAccess.buyerId,
                     location_id: portalAccess.locationId,
                     triggered_by: 'external_portal',
+                    triggered_by_session_id: clientSessionId,
                     exclude_session: req.sessionID,
                     removed_line_item_ids: removedLineItemIds,
                     totals: {
@@ -1341,7 +1346,8 @@ class PortalController {
     static async updateCartItem(req, res) {
         try {
             const portalAccess = req.session.portalAccess;
-            const { line_item_id, quantity } = req.body;
+            const { line_item_id, quantity, client_session_id: clientSessionIdRaw } = req.body;
+            const clientSessionId = clientSessionIdRaw ? String(clientSessionIdRaw) : null;
             
             if (!portalAccess) {
                 return res.status(401).json({ error: 'Not authenticated' });
@@ -1577,6 +1583,7 @@ class PortalController {
                 buyer_id: portalAccess.buyerId,
                 location_id: portalAccess.locationId,
                 triggered_by: 'external_portal',
+                triggered_by_session_id: clientSessionId,
                 exclude_session: req.sessionID,
                 line_item: {
                     id: line_item_id,

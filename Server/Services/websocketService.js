@@ -547,6 +547,7 @@ class WebSocketService {
             buyer_id: metadata.buyer_id ?? null,
             location_id: metadata.location_id ?? null,
             triggered_by: metadata.triggered_by || null, // Track who triggered this
+            triggered_by_session_id: metadata.triggered_by_session_id || null,
             metadata,
             timestamp: new Date().toISOString()
         };
