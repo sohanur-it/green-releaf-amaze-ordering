@@ -353,11 +353,17 @@ async function cloneInvoice() {
         const data = await response.json();
         if (data.success) {
             let message = `Invoice cloned successfully! New Invoice: ${data.invoice_number}`;
-            if (data.errors && data.errors.length > 0) {
+            if (data.allocation_failures && data.allocation_failures.length > 0) {
+                const failureCount = data.allocation_failures.length;
+                const productNames = data.allocation_failures.map(f => f.product_name || 'Unknown').join(', ');
+                message += `\n\n⚠️ ${failureCount} item(s) could not be cloned:\n${productNames}`;
+                message += '\n\nPlease review the new invoice and adjust quantities or select different batches.';
+            } else if (data.errors && data.errors.length > 0) {
+                // Legacy support for old error format
                 message += ' (Warnings: ' + data.errors.join(', ') + ')';
             }
             if (typeof showNotification === 'function') {
-                showNotification(message, 'success');
+                showNotification(message, data.allocation_failures && data.allocation_failures.length > 0 ? 'warning' : 'success');
             } else {
                 alert(message);
             }

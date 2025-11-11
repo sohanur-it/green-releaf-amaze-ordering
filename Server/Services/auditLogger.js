@@ -94,9 +94,26 @@ class AuditLogger {
                 sourceIp
             ];
             
+            console.log(`📝 [AUDIT LOGGER] Executing INSERT query with values:`, {
+                userId,
+                action,
+                resourceType,
+                resourceId,
+                status,
+                sourceIp,
+                detailsKeys: details ? Object.keys(details) : []
+            });
+            
             const result = await client.query(query, values);
             
-            console.log(`📝 Audit Log: ${action} by user ${userId || 'SYSTEM'} - ${status}`);
+            console.log(`✅ [AUDIT LOGGER] Successfully inserted audit log:`, {
+                logId: result.rows[0].id,
+                timestamp: result.rows[0].timestamp,
+                action,
+                userId: userId || 'SYSTEM',
+                status
+            });
+            console.log(`📝 [AUDIT LOGGER] Audit Log: ${action} by user ${userId || 'SYSTEM'} - ${status}`);
             
             return {
                 success: true,
@@ -105,7 +122,15 @@ class AuditLogger {
             };
             
         } catch (error) {
-            console.error('❌ Failed to log audit action:', error.message);
+            console.error('❌ [AUDIT LOGGER] Failed to log audit action:', error.message);
+            console.error('❌ [AUDIT LOGGER] Error stack:', error.stack);
+            console.error('❌ [AUDIT LOGGER] Failed action details:', {
+                action,
+                userId,
+                resourceType,
+                resourceId,
+                status
+            });
             return {
                 success: false,
                 error: error.message
@@ -431,6 +456,7 @@ class AuditLogger {
                 paramCount++;
                 query += ` AND al.action = $${paramCount}`;
                 values.push(filters.action);
+                console.log(`🔍 [AUDIT LOGGER GETLOGS] Filtering by action: "${filters.action}"`);
             }
             
             if (filters.resourceType) {
@@ -472,7 +498,17 @@ class AuditLogger {
                 values.push(filters.offset);
             }
             
+            console.log(`🔍 [AUDIT LOGGER GETLOGS] Executing query with filters:`, {
+                action: filters.action || 'none',
+                resourceType: filters.resourceType || 'none',
+                status: filters.status || 'none',
+                limit: filters.limit || 'none',
+                offset: filters.offset || 'none'
+            });
+            
             const result = await client.query(query, values);
+            
+            console.log(`📊 [AUDIT LOGGER GETLOGS] Query returned ${result.rows.length} log(s)`);
             
             return result.rows.map(row => {
                 const details = row.details ? (typeof row.details === 'string' ? JSON.parse(row.details) : row.details) : null;

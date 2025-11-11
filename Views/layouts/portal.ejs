@@ -60,7 +60,7 @@
     
     <!-- Locations Dropdown -->
     <% if (typeof buyerLocations !== 'undefined' && buyerLocations && buyerLocations.length > 0) { %>
-    <div id="locations-dropdown" style="display: none; position: fixed; top: 60px; right: 20px; width: 300px; max-width: calc(100vw - 40px); background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1000; max-height: 400px; overflow-y: auto; font-family: 'Inter', sans-serif;">
+    <div id="locations-dropdown" style="display: none; position: fixed; top: 60px; right: 20px; width: 300px; max-width: calc(100vw - 40px); background: white; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 1002; max-height: 400px; overflow-y: auto; font-family: 'Inter', sans-serif; pointer-events: auto;">
         <div style="padding: 16px; border-bottom: 1px solid #e5e7eb;">
             <h3 style="margin: 0; font-size: 16px; font-weight: 600; color: #1f2937;">Locations</h3>
         </div>
@@ -197,10 +197,64 @@
             });
 
             locationsDropdown.querySelectorAll('.location-link').forEach(link => {
-                link.addEventListener('click', function() {
-                    if (!this.getAttribute('href') || this.getAttribute('href') === '#') {
+                link.addEventListener('click', async function(e) {
+                    e.preventDefault();
+                    
+                    // Check if we're on checkout page
+                    const isCheckoutPage = window.location.pathname.includes('/checkout');
+                    const locationId = this.getAttribute('data-location-id');
+                    const href = this.getAttribute('href');
+                    
+                    if (!locationId) {
                         return;
                     }
+                    
+                    // If on checkout page, update location via API instead of navigating
+                    if (isCheckoutPage) {
+                        try {
+                            const uuid = window.location.pathname.match(/\/external\/store\/([^\/]+)/)?.[1];
+                            if (uuid) {
+                                // Update invoice location
+                                const response = await fetch(`/api/portal/${uuid}/update-location`, {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json'
+                                    },
+                                    body: JSON.stringify({ location_id: locationId })
+                                });
+                                
+                                const data = await response.json();
+                                if (data.success) {
+                                    // Update checkout page location select
+                                    const locationSelect = document.getElementById('location-select');
+                                    if (locationSelect) {
+                                        locationSelect.value = locationId;
+                                        // Trigger location change handler to update address fields
+                                        if (typeof handleLocationChange === 'function') {
+                                            await handleLocationChange(locationId);
+                                        }
+                                    }
+                                    
+                                    // Reload page to reflect location change
+                                    window.location.reload();
+                                } else {
+                                    console.error('Failed to update location:', data.error);
+                                    if (typeof showNotification !== 'undefined') {
+                                        showNotification('Failed to update location: ' + (data.error || 'Unknown error'), 'error');
+                                    }
+                                }
+                            }
+                        } catch (error) {
+                            console.error('Error updating location:', error);
+                            if (typeof showNotification !== 'undefined') {
+                                showNotification('Failed to update location. Please try again.', 'error');
+                            }
+                        }
+                    } else if (href && href !== '#') {
+                        // On other pages, navigate to location's portal URL
+                        window.location.href = href;
+                    }
+                    
                     isLocationsOpen = false;
                     locationsDropdown.style.display = 'none';
                 });

@@ -682,16 +682,20 @@ class InvoiceController {
             
             const origInvoice = original.rows[0];
             
-            // Get original line items
+            // Get original line items with product info for better error messages
             const lineItems = await query(`
                 SELECT 
-                    fk_master_product_id,
-                    fk_batch_id,
-                    quantity_ordered,
-                    unit_price,
-                    specific_package_labels
-                FROM "ORDERS-invoice-line-items"
-                WHERE fk_invoice_id = $1
+                    li.fk_master_product_id,
+                    li.fk_batch_id,
+                    li.quantity_ordered,
+                    li.unit_price,
+                    li.specific_package_labels,
+                    p.name as product_name,
+                    b.batch_name
+                FROM "ORDERS-invoice-line-items" li
+                INNER JOIN "ORDERS-products" p ON li.fk_master_product_id = p.entry_id
+                LEFT JOIN "ORDERS-batches" b ON li.fk_batch_id = b.id
+                WHERE li.fk_invoice_id = $1
             `, [id]);
             
             // Get location details
@@ -802,48 +806,117 @@ class InvoiceController {
             try {
                 await client.query('BEGIN');
                 
-                const errors = [];
+                const allocationFailures = [];
                 
-                // Clone line items
+                // Clone line items with proper error handling
                 for (const item of lineItems.rows) {
-                    // Check batch availability
-                    const batch = await client.query(`
-                        SELECT quantity, allocated_quantity, status
-                        FROM "ORDERS-batches"
-                        WHERE id = $1
-                    `, [item.fk_batch_id]);
-                    
-                    if (batch.rows.length === 0) {
-                        errors.push(`Batch ${item.fk_batch_id} not found`);
-                        continue;
+                    try {
+                        // CRITICAL: Use FOR UPDATE to lock batch row and prevent race conditions
+                        // This ensures availability check and allocation happen atomically
+                        const batch = await client.query(`
+                            SELECT 
+                                id,
+                                batch_name,
+                                quantity, 
+                                allocated_quantity, 
+                                status,
+                                fk_master_product_id
+                            FROM "ORDERS-batches"
+                            WHERE id = $1
+                            FOR UPDATE
+                        `, [item.fk_batch_id]);
+                        
+                        if (batch.rows.length === 0) {
+                            allocationFailures.push({
+                                batch_id: item.fk_batch_id,
+                                product_id: item.fk_master_product_id,
+                                product_name: item.product_name || 'Unknown Product',
+                                batch_name: item.batch_name || 'Unknown Batch',
+                                reason: 'batch_not_found',
+                                message: `Batch ${item.fk_batch_id} not found`,
+                                requested_quantity: item.quantity_ordered,
+                                available_quantity: null
+                            });
+                            continue;
+                        }
+                        
+                        const batchData = batch.rows[0];
+                        const available = batchData.quantity - batchData.allocated_quantity;
+                        
+                        if (batchData.status !== 'Sellable') {
+                            allocationFailures.push({
+                                batch_id: item.fk_batch_id,
+                                product_id: item.fk_master_product_id,
+                                product_name: item.product_name || 'Unknown Product',
+                                batch_name: batchData.batch_name || 'Unknown Batch',
+                                reason: 'batch_not_sellable',
+                                message: `Batch "${batchData.batch_name || item.fk_batch_id}" is not sellable (status: ${batchData.status})`,
+                                requested_quantity: item.quantity_ordered,
+                                available_quantity: available,
+                                batch_status: batchData.status
+                            });
+                            continue;
+                        }
+                        
+                        if (available < item.quantity_ordered) {
+                            allocationFailures.push({
+                                batch_id: item.fk_batch_id,
+                                product_id: item.fk_master_product_id,
+                                product_name: item.product_name || 'Unknown Product',
+                                batch_name: batchData.batch_name || 'Unknown Batch',
+                                reason: 'insufficient_inventory',
+                                message: `Insufficient inventory for "${item.product_name || 'Product'}" - Batch "${batchData.batch_name || item.fk_batch_id}": Available ${available}, Needed ${item.quantity_ordered}`,
+                                requested_quantity: item.quantity_ordered,
+                                available_quantity: available
+                            });
+                            continue;
+                        }
+                        
+                        // Add line item with error handling
+                        // Note: addLineItem also checks availability, but we've already checked here
+                        // This provides better error messages and prevents unnecessary processing
+                        try {
+                            await internalInvoiceService.addLineItem(
+                                newInvoiceId,
+                                {
+                                    fk_batch_id: item.fk_batch_id,
+                                    quantity: item.quantity_ordered,
+                                    partial_packages_selected: item.specific_package_labels 
+                                        ? JSON.parse(item.specific_package_labels) 
+                                        : null
+                                },
+                                userId,
+                                client
+                            );
+                        } catch (addItemError) {
+                            // If addLineItem fails (e.g., batch became unavailable between checks),
+                            // add to allocation failures and continue with other items
+                            allocationFailures.push({
+                                batch_id: item.fk_batch_id,
+                                product_id: item.fk_master_product_id,
+                                product_name: item.product_name || 'Unknown Product',
+                                batch_name: batchData.batch_name || 'Unknown Batch',
+                                reason: 'allocation_failed',
+                                message: `Failed to allocate "${item.product_name || 'Product'}" - Batch "${batchData.batch_name || item.fk_batch_id}": ${addItemError.message}`,
+                                requested_quantity: item.quantity_ordered,
+                                available_quantity: available,
+                                error: addItemError.message
+                            });
+                        }
+                    } catch (itemError) {
+                        // Catch any unexpected errors during item processing
+                        allocationFailures.push({
+                            batch_id: item.fk_batch_id,
+                            product_id: item.fk_master_product_id,
+                            product_name: item.product_name || 'Unknown Product',
+                            batch_name: item.batch_name || 'Unknown Batch',
+                            reason: 'unexpected_error',
+                            message: `Unexpected error cloning "${item.product_name || 'Product'}": ${itemError.message}`,
+                            requested_quantity: item.quantity_ordered,
+                            available_quantity: null,
+                            error: itemError.message
+                        });
                     }
-                    
-                    const batchData = batch.rows[0];
-                    const available = batchData.quantity - batchData.allocated_quantity;
-                    
-                    if (batchData.status !== 'Sellable') {
-                        errors.push(`Batch ${item.fk_batch_id} is not sellable`);
-                        continue;
-                    }
-                    
-                    if (available < item.quantity_ordered) {
-                        errors.push(`Batch ${item.fk_batch_id} has insufficient inventory (available: ${available}, needed: ${item.quantity_ordered})`);
-                        continue;
-                    }
-                    
-                    // Add line item
-                    await internalInvoiceService.addLineItem(
-                        newInvoiceId,
-                        {
-                            fk_batch_id: item.fk_batch_id,
-                            quantity: item.quantity_ordered,
-                            partial_packages_selected: item.specific_package_labels 
-                                ? JSON.parse(item.specific_package_labels) 
-                                : null
-                        },
-                        userId,
-                        client
-                    );
                 }
                 
                 await internalInvoiceService.recalculateTotals(newInvoiceId, client);
@@ -861,7 +934,9 @@ class InvoiceController {
                     success: true,
                     invoice_id: newInvoiceId,
                     invoice_number: invoiceNumber,
-                    errors: errors.length > 0 ? errors : undefined
+                    allocation_failures: allocationFailures.length > 0 ? allocationFailures : undefined,
+                    // Legacy support: also include errors array for backward compatibility
+                    errors: allocationFailures.length > 0 ? allocationFailures.map(f => f.message) : undefined
                 });
             } catch (error) {
                 await client.query('ROLLBACK');
@@ -1369,7 +1444,7 @@ class InvoiceController {
     async updateLineItem(req, res) {
         try {
             const { id, lineItemId } = req.params;
-            const { quantity } = req.body;
+            const { quantity, modification_reason } = req.body;
             const userId = req.session.userId || req.user?.id;
 
             if (!quantity || quantity <= 0) {
@@ -1386,13 +1461,15 @@ class InvoiceController {
             try {
                 await client.query('BEGIN');
 
-                // Get current line item
+                // Get current line item with invoice manifest info
                 const lineItem = await client.query(`
                     SELECT 
                         li.*,
                         i.status,
                         i.fk_location_id,
-                        i.fk_buyer_id
+                        i.fk_buyer_id,
+                        i.metrc_manifest_number,
+                        i.manifest_created_at
                     FROM "ORDERS-invoice-line-items" li
                     INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
                     WHERE li.id = $1 AND li.fk_invoice_id = $2
@@ -1409,6 +1486,15 @@ class InvoiceController {
 
                 const item = lineItem.rows[0];
 
+                // CRITICAL: Prevent modifications after manifest creation (Module 4 compliance requirement)
+                if (item.metrc_manifest_number || item.manifest_created_at) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({
+                        success: false,
+                        error: 'Cannot modify invoice after manifest has been created. The order is locked for compliance reasons.'
+                    });
+                }
+
                 // Allow editing if invoice is in Draft, Pending_Approval, or Fulfillment_Issue status
                 const editableStatuses = ['Draft', 'Pending_Approval', 'Fulfillment_Issue'];
                 if (!editableStatuses.includes(item.status)) {
@@ -1423,6 +1509,21 @@ class InvoiceController {
                 const currentAllocated = parseInt(item.quantity_allocated || 0);
                 const newQuantity = parseInt(quantity);
                 const quantityDelta = newQuantity - currentQuantity;
+
+                // Store original quantity if this is a modification (Module 4 requirement)
+                // Only store original_quantity if it hasn't been set before (first modification)
+                const originalQuantity = item.original_quantity || currentQuantity;
+                
+                // Determine modification reason
+                // Use provided reason, or default based on context
+                let modReason = modification_reason;
+                if (!modReason) {
+                    if (item.status === 'Fulfillment_Issue') {
+                        modReason = 'Modified to resolve fulfillment issue';
+                    } else {
+                        modReason = 'Line item quantity updated';
+                    }
+                }
 
                 // Check batch availability if increasing quantity
                 if (quantityDelta > 0) {
@@ -1497,7 +1598,7 @@ class InvoiceController {
                     ]);
                 }
 
-                // Update line item
+                // Update line item with modification tracking (Module 4 requirement)
                 const unitPrice = parseFloat(item.unit_price);
                 const newLineTotal = unitPrice * newQuantity - parseFloat(item.line_discount_amount || 0);
 
@@ -1507,20 +1608,35 @@ class InvoiceController {
                         quantity_ordered = $1,
                         quantity_allocated = $1,
                         line_total = $2,
+                        was_modified = true,
+                        original_quantity = $3,
+                        modification_reason = $4,
+                        modified_at = NOW(),
+                        modified_by = $5,
                         updated_at = NOW()
-                    WHERE id = $3
-                `, [newQuantity, newLineTotal, lineItemId]);
+                    WHERE id = $6
+                `, [newQuantity, newLineTotal, originalQuantity, modReason, userId, lineItemId]);
 
                 // Recalculate invoice totals
                 await internalInvoiceService.recalculateTotals(parseInt(id), client);
 
-                // Log to invoice history
+                // Log to invoice history with modification reason
+                // Mark as triggered by fulfillment issue if invoice is in that state
+                const triggeredByIssue = item.status === 'Fulfillment_Issue';
                 await client.query(`
                     INSERT INTO "ORDERS-invoice-history" (
                         fk_invoice_id, modification_type, field_name,
-                        old_value, new_value, reason, changed_by_user_id
-                    ) VALUES ($1, 'line_item_quantity_changed', $2, $3, $4, 'Quantity updated', $5)
-                `, [id, `line_item_${lineItemId}`, currentQuantity.toString(), newQuantity.toString(), userId]);
+                        old_value, new_value, reason, changed_by_user_id, triggered_by_fulfillment_issue
+                    ) VALUES ($1, 'line_item_quantity_changed', $2, $3, $4, $5, $6, $7)
+                `, [
+                    id, 
+                    `line_item_${lineItemId}`, 
+                    currentQuantity.toString(), 
+                    newQuantity.toString(), 
+                    modReason,
+                    userId,
+                    triggeredByIssue
+                ]);
 
                 await client.query('COMMIT');
 
@@ -1598,13 +1714,15 @@ class InvoiceController {
             try {
                 await client.query('BEGIN');
 
-                // Get line item details
+                // Get line item details with invoice manifest info
                 const lineItem = await client.query(`
                     SELECT 
                         li.*,
                         i.status,
                         i.fk_buyer_id,
-                        i.fk_location_id
+                        i.fk_location_id,
+                        i.metrc_manifest_number,
+                        i.manifest_created_at
                     FROM "ORDERS-invoice-line-items" li
                     INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
                     WHERE li.id = $1 AND li.fk_invoice_id = $2
@@ -1620,6 +1738,15 @@ class InvoiceController {
                 }
 
                 const item = lineItem.rows[0];
+
+                // CRITICAL: Prevent modifications after manifest creation (Module 4 compliance requirement)
+                if (item.metrc_manifest_number || item.manifest_created_at) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({
+                        success: false,
+                        error: 'Cannot modify invoice after manifest has been created. The order is locked for compliance reasons.'
+                    });
+                }
 
                 // Allow removing line items if invoice is in Draft, Pending_Approval, or Fulfillment_Issue status
                 const editableStatuses = ['Draft', 'Pending_Approval', 'Fulfillment_Issue'];

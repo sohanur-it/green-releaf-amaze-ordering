@@ -782,12 +782,162 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
         
         cart.updateCartIcon();
+        
+        // Render cart in sidebar if it exists
+        if (typeof renderCart === 'function') {
+            renderCart();
+        }
     }
     
     // Initialize checkout validator
     if (typeof initCheckoutValidator !== 'undefined') {
         initCheckoutValidator(uuid);
     }
+});
+
+// Render cart function for checkout page (similar to store.ejs)
+function renderCart() {
+    const cart = getCartManager();
+    if (!cart) {
+        console.warn('renderCart: Cart manager not initialized');
+        return;
+    }
+    
+    const cartData = cart.getCart();
+    const cartItemsDiv = document.getElementById('cart-items');
+    const cartCountSpan = document.getElementById('cart-count');
+    const cartSubtotalSpan = document.getElementById('cart-subtotal');
+    const cartTotalSpan = document.getElementById('cart-total');
+    
+    // Validate required DOM elements exist
+    if (!cartItemsDiv || !cartCountSpan || !cartSubtotalSpan || !cartTotalSpan) {
+        // Cart sidebar might not be visible yet, that's okay
+        return;
+    }
+    
+    if (cartData.items && cartData.items.length > 0) {
+        cartItemsDiv.innerHTML = cartData.items.map(item => {
+            const imageUrl = (item.image_url && item.image_url !== '') 
+                ? item.image_url 
+                : '/public/images/placeholder.jpg';
+            return `
+            <div class="cart-item" data-line-item-id="${item.line_item_id}">
+                <div class="cart-item-header">
+                    <img src="${imageUrl}" 
+                         alt="${item.product_name}" 
+                         class="cart-item-image"
+                         onerror="this.src='/public/images/placeholder.jpg'; this.onerror=null;">
+                    <div class="cart-item-info">
+                        <div class="cart-item-name">${item.product_name || 'Product'}</div>
+                        <div class="cart-item-details">
+                            ${item.batch_name ? `Batch: ${item.batch_name}` : ''}
+                        </div>
+                    </div>
+                </div>
+                <div class="cart-item-body">
+                    <div class="cart-item-quantity">
+                        <span>Qty: ${item.quantity}</span>
+                    </div>
+                    <div class="cart-item-price">
+                        $${(item.unit_price || 0).toFixed(2)} each
+                    </div>
+                    <div class="cart-item-total">
+                        $${(item.line_total || 0).toFixed(2)}
+                    </div>
+                </div>
+                <div class="cart-item-actions">
+                    <button class="remove-item-btn" onclick="removeCartItemFromSidebar('${item.line_item_id}')" title="Remove Item">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+        }).join('');
+        
+        const itemCount = cart.getItemCount();
+        if (cartCountSpan) {
+            cartCountSpan.textContent = itemCount;
+        }
+        const headerBadge = document.getElementById('cart-count-badge');
+        if (headerBadge) {
+            headerBadge.textContent = itemCount;
+            headerBadge.style.display = itemCount > 0 ? 'inline-block' : 'none';
+        }
+        if (cart && typeof cart.updateCartIcon === 'function') {
+            cart.updateCartIcon();
+        }
+    } else {
+        cartItemsDiv.innerHTML = `
+            <div class="empty-cart">
+                <div class="empty-cart-icon">🛒</div>
+                <p>Your cart is empty</p>
+            </div>
+        `;
+        if (cartCountSpan) {
+            cartCountSpan.textContent = '0';
+        }
+        const headerBadge = document.getElementById('cart-count-badge');
+        if (headerBadge) {
+            headerBadge.textContent = '0';
+            headerBadge.style.display = 'none';
+        }
+        if (cart && typeof cart.updateCartIcon === 'function') {
+            cart.updateCartIcon();
+        }
+    }
+    
+    if (cartSubtotalSpan) {
+        cartSubtotalSpan.textContent = `$${cartData.subtotal.toFixed(2)}`;
+    }
+    if (cartTotalSpan) {
+        cartTotalSpan.textContent = `$${cartData.total.toFixed(2)}`;
+    }
+}
+
+// Remove item from cart sidebar
+async function removeCartItemFromSidebar(lineItemId) {
+    const uuid = '<%= uuid %>';
+    try {
+        const response = await fetch(`/api/portal/${uuid}/cart/remove`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ line_item_id: lineItemId })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            const cart = getCartManager();
+            if (cart) {
+                await cart.loadFromBackend(true, 0);
+                renderCart();
+                // Reload page to update checkout table
+                window.location.reload();
+            }
+        } else {
+            if (typeof showNotification !== 'undefined') {
+                showNotification(data.error || 'Failed to remove item', 'error');
+            }
+        }
+    } catch (error) {
+        console.error('Error removing item:', error);
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Failed to remove item. Please try again.', 'error');
+        }
+    }
+}
+
+// Listen for cart sidebar opened event
+window.addEventListener('cartSidebarOpened', async () => {
+    const cart = getCartManager();
+    if (!cart) {
+        return;
+    }
+    
+    // Load cart from backend and render
+    await cart.loadFromBackend(true, 0);
+    renderCart();
 });
 
 // Update quantity on checkout page (frontend only, then sync to backend)
@@ -1117,3 +1267,49 @@ async function placeOrder() {
     }
 }
 </script>
+
+<!-- Cart Overlay -->
+<div class="cart-overlay" id="cart-overlay"></div>
+
+<!-- Shopping Cart Sidebar (Right) -->
+<div class="portal-cart">
+    <div class="cart-container">
+        <div class="cart-header">
+            <div class="cart-title">
+                <div class="cart-logo-small">GR</div>
+                Cart: <span id="cart-count">0</span>
+            </div>
+            <div class="cart-dropdown">▼</div>
+        </div>
+        
+        <div class="cart-instruction">
+            Review your selected items. You can edit quantities or remove items.
+        </div>
+        
+        <div class="cart-items" id="cart-items">
+            <div class="empty-cart">
+                <div class="empty-cart-icon">🛒</div>
+                <p>Your cart is empty</p>
+            </div>
+        </div>
+        
+        <div class="order-summary">
+            <div class="summary-row">
+                <span class="summary-label">Subtotal:</span>
+                <span class="summary-value" id="cart-subtotal">$0.00</span>
+            </div>
+            <div class="summary-row">
+                <span class="summary-label">Discounts:</span>
+                <span class="summary-value">$0.00</span>
+            </div>
+            <div class="summary-row summary-total">
+                <span>Total:</span>
+                <span id="cart-total">$0.00</span>
+            </div>
+        </div>
+        
+        <button class="checkout-btn" id="checkout-btn-sidebar" onclick="window.location.reload()" style="margin-top: 16px;">
+            Refresh Checkout
+        </button>
+    </div>
+</div>

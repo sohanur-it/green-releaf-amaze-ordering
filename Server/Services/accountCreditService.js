@@ -59,9 +59,26 @@ class AccountCreditService {
             
             const invoiceData = invoice.rows[0];
             const locationId = invoiceData.fk_location_id;
-            const subtotal = parseFloat(invoiceData.subtotal);
             const currentCredit = parseFloat(invoiceData.current_credit_applied);
-            const balanceNeeded = subtotal - currentCredit;
+            
+            // Recalculate actual subtotal from current line items (Module 4 requirement)
+            // This ensures accuracy if line items have been modified (discounts, quantity changes)
+            const lineItems = await queryFunc(`
+                SELECT id, line_total
+                FROM "ORDERS-invoice-line-items"
+                WHERE fk_invoice_id = $1
+            `, [invoiceId]);
+            
+            if (lineItems.rows.length === 0) {
+                return { success: false, error: 'Invoice has no line items' };
+            }
+            
+            // Calculate actual subtotal from current line items
+            const actualSubtotal = lineItems.rows.reduce((sum, item) => 
+                sum + parseFloat(item.line_total), 0
+            );
+            
+            const balanceNeeded = actualSubtotal - currentCredit;
             
             if (balanceNeeded <= 0) {
                 return { success: true, applied: 0, message: 'Invoice already covered by credits' };
@@ -113,17 +130,10 @@ class AccountCreditService {
                 totalApplied += toApply;
             }
             
-            // Calculate proportional distribution across line items
-            const lineItems = await queryFunc(`
-                SELECT id, line_total
-                FROM "ORDERS-invoice-line-items"
-                WHERE fk_invoice_id = $1
-            `, [invoiceId]);
-            
-            // Apply credits proportionally to each line item
+            // Apply credits proportionally to each line item using actual subtotal
             for (const item of lineItems.rows) {
                 const itemTotal = parseFloat(item.line_total);
-                const proportion = itemTotal / subtotal;
+                const proportion = itemTotal / actualSubtotal;
                 const itemCredit = totalApplied * proportion;
                 
                 await queryFunc(`
@@ -135,14 +145,16 @@ class AccountCreditService {
             }
             
             // Update invoice with total credit applied
+            // Recalculate subtotal to ensure it matches actual line items
             await queryFunc(`
                 UPDATE "ORDERS-invoices"
                 SET 
-                    credit_applied = COALESCE(credit_applied, 0) + $1,
-                    total = subtotal - (COALESCE(credit_applied, 0) + $1),
+                    subtotal = $1,
+                    credit_applied = COALESCE(credit_applied, 0) + $2,
+                    total = $1 - (COALESCE(credit_applied, 0) + $2),
                     updated_at = NOW()
-                WHERE id = $2
-            `, [totalApplied, invoiceId]);
+                WHERE id = $3
+            `, [actualSubtotal, totalApplied, invoiceId]);
             
             // Record credit applications in audit table
             for (const app of creditApplications) {

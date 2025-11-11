@@ -174,7 +174,7 @@
         </div>
         
         <!-- Grid View -->
-        <div class="product-grid-view" id="grid-view">
+        <div class="product-grid-view" id="grid-view" style="display: none;">
             <% products.forEach(product => { %>
                 <% if (product.available_batches && product.available_batches.length > 0) { %>
                     <% product.available_batches.forEach(batch => { %>
@@ -297,7 +297,7 @@
         <% } %>
         
         <!-- Table View -->
-        <div class="product-table-view" id="table-view">
+        <div class="product-table-view" id="table-view" style="display: none;">
             <table class="products-table">
                 <thead>
                     <tr>
@@ -640,6 +640,52 @@
 </script>
 
 <script>
+// Set initial view state IMMEDIATELY to prevent flickering
+// This runs before DOMContentLoaded to set view before page renders
+(function() {
+    const params = new URLSearchParams(window.location.search);
+    const paramView = params.get('view');
+    const savedView = paramView || localStorage.getItem('preferredView') || 'grid';
+    const initialView = savedView === 'table' ? 'table' : 'grid';
+    
+    // Store view preference for later use
+    window.__initialViewPreference = initialView;
+    
+    // Set view immediately - use a function that runs as soon as possible
+    function setInitialView() {
+        const gridView = document.getElementById('grid-view');
+        const tableView = document.getElementById('table-view');
+        
+        if (!gridView || !tableView) {
+            // Elements not ready yet, try again
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', setInitialView);
+            } else {
+                setTimeout(setInitialView, 10);
+            }
+            return;
+        }
+        
+        if (initialView === 'grid') {
+            gridView.style.display = 'grid';
+            tableView.classList.remove('active');
+            tableView.style.display = 'none';
+        } else {
+            gridView.style.display = 'none';
+            tableView.classList.add('active');
+            tableView.style.display = 'block';
+        }
+    }
+    
+    // Try to set view immediately
+    setInitialView();
+    
+    // Also set on DOMContentLoaded as backup
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', setInitialView);
+    }
+})();
+
 // Cart management functions
 // Initialize cart manager on page load
 document.addEventListener('DOMContentLoaded', function() {
@@ -647,12 +693,20 @@ document.addEventListener('DOMContentLoaded', function() {
     initCartManager(uuid);
     const cart = getCartManager();
     if (cart) {
-        cart.loadFromBackend()
+        // OPTIMISTIC UI: Show cached cart immediately (from localStorage) for instant feedback
+        // This prevents the empty cart flash while waiting for backend API response
+        renderCart();
+        
+        // Then sync from backend in background (backend is source of truth)
+        // Once backend responds, update cart with accurate data
+        cart.loadFromBackend(true, 0) // force = true, lastActionTime = 0 (not recent)
+            .then(() => {
+                // Backend sync completed - update cart with accurate data
+                renderCart();
+            })
             .catch(err => {
                 console.warn('Unable to sync cart from backend on load:', err);
-            })
-            .finally(() => {
-                renderCart();
+                // If sync fails, keep showing cached cart (better than empty)
             });
     }
     
@@ -879,6 +933,13 @@ function schedulePortalWebSocketReconnect() {
     }, delay);
 }
 
+// Track last user action timestamp to prevent unnecessary reloads
+let lastUserActionTime = 0;
+const USER_ACTION_DEBOUNCE_MS = 3000; // Ignore WebSocket events within 3 seconds of user action
+
+// Track cart operation state to prevent adding items during removal
+let cartOperationInProgress = false;
+
 function handlePortalWebSocketMessage(event) {
     let payload;
     try {
@@ -903,19 +964,50 @@ function handlePortalWebSocketMessage(event) {
         return;
     }
 
+    // CRITICAL: Ignore events triggered by external portal (we already have the latest state)
+    // These events are from our own actions, so we don't need to reload
+    if (payload.triggered_by === 'external_portal') {
+        console.log('Ignoring WebSocket event from external portal (self-broadcast)');
+        return;
+    }
+
+    // CRITICAL: Don't reload if user just made an action (within debounce window)
+    // This prevents the cart from refreshing immediately after user adds/removes items
+    const timeSinceLastAction = Date.now() - lastUserActionTime;
+    if (timeSinceLastAction < USER_ACTION_DEBOUNCE_MS) {
+        console.log(`Ignoring WebSocket event (user action ${timeSinceLastAction}ms ago, debounce: ${USER_ACTION_DEBOUNCE_MS}ms)`);
+        return;
+    }
+
     const cart = getCartManager();
     if (!cart) {
         return;
     }
 
-    cart.loadFromBackend()
+    // Only reload for critical events or if enough time has passed since last user action
+    const criticalEvents = ['invoice_cancelled', 'invoice_deleted', 'invoice_status_changed'];
+    const isCriticalEvent = criticalEvents.includes(payload.event);
+    
+    // For non-critical events, only reload if it's been a while since last user action
+    if (!isCriticalEvent && timeSinceLastAction < 5000) {
+        console.log('Ignoring non-critical WebSocket event (recent user activity)');
+        return;
+    }
+
+    // Force reload from backend on WebSocket events (backend is source of truth)
+    cart.loadFromBackend(true, 0)
         .then(() => {
-            renderCart();
+            // CRITICAL: If invoice was cancelled or deleted, explicitly clear the frontend cart
             if (payload.event === 'invoice_cancelled' || payload.event === 'invoice_deleted') {
+                // Clear frontend cart immediately
+                if (cart && typeof cart.clearCart === 'function') {
+                    cart.clearCart();
+                }
                 if (typeof showNotification === 'function') {
-                    showNotification('Your cart was refreshed because the draft invoice changed.', 'info');
+                    showNotification('Your cart was cleared because the invoice was cancelled.', 'info');
                 }
             }
+            renderCart();
         })
         .catch(error => {
             console.error('Failed to sync cart after WebSocket event:', error);
@@ -954,7 +1046,9 @@ function initPortalWebSocket() {
         schedulePortalWebSocketReconnect();
     });
 
-    portalWebSocket.addEventListener('error', () => {
+    portalWebSocket.addEventListener('error', (error) => {
+        console.error('WebSocket connection error:', error);
+        console.error('Failed to connect to:', getPortalWebSocketUrl());
         schedulePortalWebSocketReconnect();
     });
 }
@@ -965,12 +1059,31 @@ window.addEventListener('cartSidebarOpened', async () => {
         return;
     }
     
+    // OPTIMISTIC UI: Show cached cart immediately (no waiting for API)
+    renderCart();
+    
+    // CRITICAL: If user just added items (within last 3 seconds), sync frontend to backend first
+    // This prevents the cart from appearing empty if backend hasn't finished syncing yet
+    const timeSinceLastAction = Date.now() - lastUserActionTime;
+    const recentlyAddedItems = timeSinceLastAction < 3000; // 3 seconds
+    
     try {
-        await cart.loadFromBackend();
+        if (recentlyAddedItems && cart.cart.items.length > 0) {
+            // User just added items - sync frontend cart to backend first
+            console.log('Cart opened shortly after adding items - syncing frontend to backend first');
+            // Wait a moment for any pending backend syncs to complete
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        
+        // Then reload from backend to get latest data (line_item_ids, totals, etc.)
+        // Pass lastActionTime to allow keeping frontend cart if items were just added
+        await cart.loadFromBackend(false, lastUserActionTime);
+        
+        // Update cart UI with backend data once sync completes
+        renderCart();
     } catch (error) {
         console.error('Failed to refresh cart after opening sidebar:', error);
-    } finally {
-        renderCart();
+        // If backend reload fails, keep showing cached cart (don't clear it)
     }
 });
 
@@ -982,21 +1095,34 @@ async function loadCart() {
             return;
         }
 
-        const synced = await cart.loadFromBackend();
+        // OPTIMISTIC UI: Show cached cart immediately (no waiting)
+        renderCart();
+
+        // Force reload from backend (backend is source of truth)
+        const synced = await cart.loadFromBackend(true, 0);
         if (!synced) {
             console.warn('loadCart - Failed to sync cart from backend');
         }
+        
+        // Update cart UI with backend data once sync completes
         renderCart();
     } catch (error) {
         console.error('Error loading cart:', error);
-        // Ensure cart UI stays responsive even if sync fails
-        renderCart();
+        // If sync fails, keep showing cached cart (better than empty)
     }
 }
 
 // INSTANT CART - Frontend only, no backend API call
 async function addToCart(event, batchId) {
     event.preventDefault();
+    
+    // Prevent adding items while cart operations are in progress
+    if (cartOperationInProgress) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Please wait while cart items are being removed...', 'info');
+        }
+        return;
+    }
     
     // Get cart manager
     const cart = getCartManager();
@@ -1078,8 +1204,15 @@ async function addToCart(event, batchId) {
         }
     }
     
+    // Track user action timestamp to prevent unnecessary WebSocket reloads
+    lastUserActionTime = Date.now();
+    
     // Add to cart instantly (frontend only)
     cart.addItem(batchId, quantity, productData);
+    
+    // CRITICAL: Render cart IMMEDIATELY after adding item (before backend sync)
+    // This ensures the user sees the item right away
+    renderCart();
     
     // Sync to backend in real-time
     fetch(`/api/portal/${cart.uuid}/cart/add`, {
@@ -1147,16 +1280,16 @@ async function addToCart(event, batchId) {
         showNotification(`${itemText} added to cart`, 'success');
     }
     
-    // Update cart UI
-    renderCart();
-    
-    // Don't auto-open cart - user must click cart icon to open
-    // This keeps the UI clean and gives user control
+    // Note: renderCart() was already called immediately after addItem() above
+    // This ensures the cart updates instantly, even before backend sync completes
 }
 
 function renderCart() {
     const cart = getCartManager();
-    if (!cart) return;
+    if (!cart) {
+        console.warn('renderCart: Cart manager not initialized');
+        return;
+    }
     
     const cartData = cart.getCart();
     const cartItemsDiv = document.getElementById('cart-items');
@@ -1164,6 +1297,17 @@ function renderCart() {
     const cartSubtotalSpan = document.getElementById('cart-subtotal');
     const cartTotalSpan = document.getElementById('cart-total');
     const checkoutBtn = document.getElementById('checkout-btn');
+    
+    // Validate required DOM elements exist
+    if (!cartItemsDiv || !cartCountSpan || !cartSubtotalSpan || !cartTotalSpan) {
+        console.error('renderCart: Required DOM elements not found', {
+            cartItemsDiv: !!cartItemsDiv,
+            cartCountSpan: !!cartCountSpan,
+            cartSubtotalSpan: !!cartSubtotalSpan,
+            cartTotalSpan: !!cartTotalSpan
+        });
+        return;
+    }
     
     if (cartData.items && cartData.items.length > 0) {
         cartItemsDiv.innerHTML = cartData.items.map(item => {
@@ -1206,13 +1350,21 @@ function renderCart() {
         }).join('');
         
         const itemCount = cart.getItemCount();
-        cartCountSpan.textContent = itemCount;
+        if (cartCountSpan) {
+            cartCountSpan.textContent = itemCount;
+        }
         const headerBadge = document.getElementById('cart-count-badge');
         if (headerBadge) {
             headerBadge.textContent = itemCount;
             headerBadge.style.display = itemCount > 0 ? 'inline-block' : 'none';
         }
-        checkoutBtn.disabled = false;
+        // Also update cart icon count via cart manager
+        if (cart && typeof cart.updateCartIcon === 'function') {
+            cart.updateCartIcon();
+        }
+        if (checkoutBtn) {
+            checkoutBtn.disabled = false;
+        }
     } else {
         cartItemsDiv.innerHTML = `
             <div class="empty-cart">
@@ -1220,13 +1372,21 @@ function renderCart() {
                 <p>Your cart is empty</p>
             </div>
         `;
-        cartCountSpan.textContent = '0';
+        if (cartCountSpan) {
+            cartCountSpan.textContent = '0';
+        }
         const headerBadge = document.getElementById('cart-count-badge');
         if (headerBadge) {
             headerBadge.textContent = '0';
             headerBadge.style.display = 'none';
         }
-        checkoutBtn.disabled = true;
+        // Also update cart icon count via cart manager
+        if (cart && typeof cart.updateCartIcon === 'function') {
+            cart.updateCartIcon();
+        }
+        if (checkoutBtn) {
+            checkoutBtn.disabled = true;
+        }
     }
     
     cartSubtotalSpan.textContent = `$${cartData.subtotal.toFixed(2)}`;
@@ -1241,9 +1401,20 @@ function renderCart() {
 // Debounce timer for cart updates
 let cartUpdateTimer = null;
 let pendingCartUpdates = new Map();
+let updateQuantityInProgress = false;
+let pendingUpdateRequest = null; // AbortController for cancelling pending requests
 
 // INSTANT CART UPDATE - Frontend only
 async function updateQuantity(lineItemId, delta) {
+    // CRITICAL: Prevent concurrent updates to avoid race conditions and freezing
+    if (updateQuantityInProgress) {
+        console.log('Update already in progress, skipping...');
+        return;
+    }
+    
+    // Track user action timestamp to prevent unnecessary WebSocket reloads
+    lastUserActionTime = Date.now();
+    
     const cart = getCartManager();
     if (!cart) {
         console.error('Cart manager not initialized');
@@ -1285,54 +1456,103 @@ async function updateQuantity(lineItemId, delta) {
         return;
     }
 
+    // Render immediately for instant feedback
     renderCart();
 
-    // Sync to backend in real-time
-    let refreshedFromBackend = false;
+    // CRITICAL: Cancel any pending update request to prevent race conditions
+    if (pendingUpdateRequest) {
+        pendingUpdateRequest.abort();
+        pendingUpdateRequest = null;
+    }
 
-    if (item.line_item_id && !String(item.line_item_id).startsWith('temp_')) {
-        try {
-            const response = await fetch(`/api/portal/${cart.uuid}/cart/update`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    line_item_id: item.line_item_id,
-                    quantity: newQuantity
-                })
-            });
+    // Set flag to prevent concurrent updates
+    updateQuantityInProgress = true;
 
-            let data = {};
+    try {
+        // Sync to backend in real-time (only if item has real line_item_id)
+        if (item.line_item_id && !String(item.line_item_id).startsWith('temp_')) {
+            // Create AbortController for this request
+            const abortController = new AbortController();
+            pendingUpdateRequest = abortController;
+
             try {
-                data = await response.json();
-            } catch (parseError) {
-                console.error('Failed to parse update quantity response:', parseError);
-            }
+                const response = await fetch(`/api/portal/${cart.uuid}/cart/update`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        line_item_id: item.line_item_id,
+                        quantity: newQuantity
+                    }),
+                    signal: abortController.signal // Allow cancellation
+                });
 
-            if (!response.ok || !data.success) {
-                const errorMessage = data.error || data.details || data.message || 'Failed to update cart item';
-                throw new Error(errorMessage);
+                // Check if request was aborted
+                if (abortController.signal.aborted) {
+                    console.log('Update request was cancelled');
+                    return;
+                }
+
+                let data = {};
+                try {
+                    data = await response.json();
+                } catch (parseError) {
+                    console.error('Failed to parse update quantity response:', parseError);
+                }
+
+                if (!response.ok || !data.success) {
+                    const errorMessage = data.error || data.details || data.message || 'Failed to update cart item';
+                    throw new Error(errorMessage);
+                }
+
+                // Update frontend cart with backend response data
+                if (data.line_item) {
+                    const cartItem = cart.cart.items.find(i => String(i.batch_id) === String(item.batch_id));
+                    if (cartItem) {
+                        cartItem.line_item_id = data.line_item.id;
+                        cartItem.quantity = parseInt(data.line_item.quantity_ordered, 10) || cartItem.quantity;
+                        cartItem.unit_price = parseFloat(data.line_item.unit_price ?? cartItem.unit_price);
+                        cartItem.line_total = parseFloat(data.line_item.line_total ?? (cartItem.unit_price * cartItem.quantity));
+                        cartItem.quantity_allocated = parseInt(data.line_item.quantity_allocated ?? cartItem.quantity_allocated ?? 0, 10);
+                    }
+                }
+
+                // Update totals from backend response
+                if (data.totals) {
+                    cart.cart.subtotal = parseFloat(data.totals.subtotal ?? cart.cart.subtotal ?? 0);
+                    cart.cart.total = parseFloat(data.totals.total ?? cart.cart.total ?? 0);
+                }
+
+                cart.saveCart();
+                renderCart(); // Final render with backend data
+
+            } catch (err) {
+                // Ignore abort errors
+                if (err.name === 'AbortError') {
+                    console.log('Update request was aborted');
+                    return;
+                }
+
+                console.error('Error syncing quantity update:', err);
+                if (typeof showNotification !== 'undefined') {
+                    showNotification(err.message || 'Failed to update cart item. Reverting changes.', 'error');
+                }
+                // Reload from backend to get correct state
+                await cart.loadFromBackend();
+                renderCart();
+            } finally {
+                pendingUpdateRequest = null;
             }
-        } catch (err) {
-            console.error('Error syncing quantity update:', err);
-            if (typeof showNotification !== 'undefined') {
-                showNotification(err.message || 'Failed to update cart item. Reverting changes.', 'error');
-            }
+        } else {
+            // Item hasn't been fully synced yet; refresh from backend to grab real IDs/totals
             await cart.loadFromBackend();
             renderCart();
-            return;
         }
-    } else {
-        // Item hasn't been fully synced yet; refresh from backend to grab real IDs/totals
-        refreshedFromBackend = true;
-        await cart.loadFromBackend();
+    } finally {
+        // Always clear the flag
+        updateQuantityInProgress = false;
     }
-
-    if (!refreshedFromBackend) {
-        await cart.loadFromBackend();
-    }
-    renderCart();
 }
 
 async function syncCartUpdates() {
@@ -1378,6 +1598,54 @@ async function syncCartUpdates() {
     await loadCart();
 }
 
+// Function to enable/disable add-to-cart buttons
+function setAddToCartButtonsEnabled(enabled) {
+    const addButtons = document.querySelectorAll('.add-to-cart-btn, .table-add-btn, .btn-add-to-cart-modal');
+    addButtons.forEach(btn => {
+        btn.disabled = !enabled;
+        if (!enabled) {
+            btn.style.opacity = '0.5';
+            btn.style.cursor = 'not-allowed';
+        } else {
+            btn.style.opacity = '1';
+            btn.style.cursor = 'pointer';
+        }
+    });
+}
+
+// Function to show/hide cart operation loader
+function showCartOperationLoader(show) {
+    let loader = document.getElementById('cart-operation-loader');
+    
+    if (show) {
+        if (!loader) {
+            loader = document.createElement('div');
+            loader.id = 'cart-operation-loader';
+            loader.innerHTML = `
+                <style>
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                </style>
+                <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;">
+                    <div style="background: white; padding: 30px; border-radius: 8px; text-align: center; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);">
+                        <div class="spinner" style="width: 40px; height: 40px; border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; margin: 0 auto 15px;"></div>
+                        <p style="margin: 0; color: #333; font-size: 16px;">Removing items from cart...</p>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(loader);
+        } else {
+            loader.style.display = 'flex';
+        }
+    } else {
+        if (loader) {
+            loader.style.display = 'none';
+        }
+    }
+}
+
 // INSTANT CART REMOVE - Frontend only
 async function removeItem(lineItemId, batchId) {
     const cart = getCartManager();
@@ -1400,60 +1668,98 @@ async function removeItem(lineItemId, batchId) {
         return;
     }
     
+    // Check if this is the last item (cart will be empty after removal)
+    const willBeEmpty = cart.cart.items.length === 1;
+    
+    // Set loading state and disable add-to-cart buttons
+    cartOperationInProgress = true;
+    setAddToCartButtonsEnabled(false);
+    
+    // Show loader if this is the last item (cart will be empty)
+    if (willBeEmpty) {
+        showCartOperationLoader(true);
+    }
+    
+    // Track user action timestamp to prevent unnecessary WebSocket reloads
+    lastUserActionTime = Date.now();
+    
     // Remove instantly (frontend only) - use batch_id as that's what the cart manager uses
     cart.removeItem(batchId || item.batch_id);
     renderCart();
     
-    let refreshedFromBackend = false;
-    
-    // Sync to backend in real-time
-    if (lineItemId && !String(lineItemId).startsWith('temp_')) {
-        try {
-            const response = await fetch(`/api/portal/${cart.uuid}/cart/remove`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    line_item_id: lineItemId,
-                    batch_id: batchId || item.batch_id
-                })
-            });
-            
-            let data = {};
+    try {
+        // Sync to backend in real-time
+        if (lineItemId && !String(lineItemId).startsWith('temp_')) {
             try {
-                data = await response.json();
-            } catch (parseError) {
-                console.error('Failed to parse remove item response:', parseError);
+                const response = await fetch(`/api/portal/${cart.uuid}/cart/remove`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        line_item_id: lineItemId,
+                        batch_id: batchId || item.batch_id
+                    })
+                });
+                
+                let data = {};
+                try {
+                    data = await response.json();
+                } catch (parseError) {
+                    console.error('Failed to parse remove item response:', parseError);
+                }
+                
+                if (!response.ok || !data.success) {
+                    const errorMessage = data.error || data.details || data.message || 'Failed to remove item from cart';
+                    throw new Error(errorMessage);
+                }
+                
+                // CRITICAL: After successful backend removal, reload from backend to get accurate state
+                // Force reload (ignore the frontend-has-items check) since we just removed an item
+                await cart.loadFromBackend(true); // Pass true to force reload
+                renderCart();
+                
+                if (typeof showNotification !== 'undefined') {
+                    showNotification('Item removed from cart', 'success');
+                } else {
+                    console.log('Item removed from cart');
+                }
+            } catch (err) {
+                console.error('Error syncing item removal:', err);
+                // Revert frontend change on error
+                cart.addItem(item.batch_id, item.quantity, {
+                    product_id: item.product_id,
+                    batch_id: item.batch_id,
+                    product_name: item.product_name,
+                    batch_name: item.batch_name,
+                    brand_name: item.brand_name,
+                    cultivar_name: item.cultivar_name,
+                    category_name: item.category_name,
+                    product_type: item.product_type,
+                    unit_size: item.unit_size,
+                    unit_measurement_name: item.unit_measurement_name,
+                    units_per_case: item.units_per_case,
+                    unit_price: item.unit_price,
+                    quantity_available: item.quantity_available,
+                    image_url: item.image_url
+                });
+                renderCart();
+                
+                if (typeof showNotification !== 'undefined') {
+                    showNotification(err.message || 'Failed to remove cart item. Reverting changes.', 'error');
+                }
+                return;
             }
-            
-            if (!response.ok || !data.success) {
-                const errorMessage = data.error || data.details || data.message || 'Failed to remove item from cart';
-                throw new Error(errorMessage);
-            }
-        } catch (err) {
-            console.error('Error syncing item removal:', err);
-            if (typeof showNotification !== 'undefined') {
-                showNotification(err.message || 'Failed to remove cart item. Reverting changes.', 'error');
-            }
-            await cart.loadFromBackend();
+        } else {
+            // Item hasn't been fully synced yet; just refresh from backend
+            await cart.loadFromBackend(true); // Force reload
             renderCart();
-            return;
         }
-    } else {
-        refreshedFromBackend = true;
-        await cart.loadFromBackend();
-    }
-    
-    if (!refreshedFromBackend) {
-        await cart.loadFromBackend();
-    }
-    renderCart();
-    
-    if (typeof showNotification !== 'undefined') {
-        showNotification('Item removed from cart', 'success');
-    } else {
-        console.log('Item removed from cart');
+    } finally {
+        // Always clear loading state and re-enable buttons
+        cartOperationInProgress = false;
+        setAddToCartButtonsEnabled(true);
+        showCartOperationLoader(false);
     }
 }
 
@@ -1742,6 +2048,13 @@ function updateModalTotalCost() {
 }
 
 async function addToCartFromModal() {
+    // Prevent adding items while cart operations are in progress
+    if (cartOperationInProgress) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Please wait while cart items are being removed...', 'info');
+        }
+        return;
+    }
     const quantity = parseInt(document.getElementById('modal-quantity').value) || 1;
     
     if (!currentModalBatchId) {
@@ -1768,6 +2081,14 @@ async function addToCartFromModal() {
 }
 
 async function addToCartFromBatch(batchId, quantity) {
+    // Prevent adding items while cart operations are in progress
+    if (cartOperationInProgress) {
+        if (typeof showNotification !== 'undefined') {
+            showNotification('Please wait while cart items are being removed...', 'info');
+        }
+        return;
+    }
+    
     const uuid = '<%= uuid %>';
     const parsedQuantity = parseInt(quantity, 10);
     console.log('addToCartFromBatch - Sending:', { batchId, quantity, parsedQuantity });
@@ -1909,24 +2230,18 @@ let totalPages = 1;
 
 // Initialize products and pagination
 function initProducts() {
-    // Temporarily show both views to find all products (they might be hidden)
     const gridView = document.getElementById('grid-view');
     const tableView = document.getElementById('table-view');
-    const gridViewOriginalDisplay = gridView ? gridView.style.display : '';
-    const tableViewHasActive = tableView ? tableView.classList.contains('active') : false;
     
-    // Temporarily show both to find all products
-    if (gridView) {
-        gridView.style.display = 'grid';
-    }
-    if (tableView) {
-        tableView.classList.add('active');
-        tableView.style.display = 'block';
-    }
+    // Get the current view preference
+    const params = new URLSearchParams(window.location.search);
+    const paramView = params.get('view');
+    const savedView = paramView || localStorage.getItem('preferredView') || 'grid';
+    const currentViewType = savedView === 'table' ? 'table' : 'grid';
     
-    // Find all products (both grid and table views)
-    // Use a more specific selector to ensure we get all products
-    // Wait a bit for DOM to fully render
+    // Query products from both views WITHOUT showing them
+    // querySelector works on hidden elements, so we don't need to show both views
+    // This prevents the flickering/lag issue
     const gridProducts = Array.from(document.querySelectorAll('.product-card-clickable'));
     const tableProducts = Array.from(document.querySelectorAll('tbody .product-row'));
     
@@ -1937,9 +2252,8 @@ function initProducts() {
     // For table view, use table products
     // Since they represent the same data, we should use the appropriate one based on current view
     // But we need both to ensure pagination works in both views
-    const currentView = tableViewHasActive ? 'table' : 'grid';
     
-    if (currentView === 'table') {
+    if (currentViewType === 'table') {
         // In table view, use table products
         filteredProducts = tableProducts;
         console.log('initProducts: Using table products, count:', filteredProducts.length);
@@ -1949,40 +2263,80 @@ function initProducts() {
         console.log('initProducts: Using grid products, count:', filteredProducts.length);
     }
     
-    // If we have very few products, try to find them again after a longer delay
-    if (filteredProducts.length < 10) {
-        console.warn('initProducts: Found very few products, retrying...');
-        setTimeout(() => {
-            const retryGrid = Array.from(document.querySelectorAll('.product-card-clickable'));
-            const retryTable = Array.from(document.querySelectorAll('tbody .product-row'));
-            console.log('initProducts: Retry found', retryGrid.length, 'grid and', retryTable.length, 'table products');
-            
-            if (currentView === 'table' && retryTable.length > filteredProducts.length) {
-                filteredProducts = retryTable;
-                console.log('initProducts: Updated to', filteredProducts.length, 'table products');
-            } else if (currentView === 'grid' && retryGrid.length > filteredProducts.length) {
-                filteredProducts = retryGrid;
-                console.log('initProducts: Updated to', filteredProducts.length, 'grid products');
-            }
-            
-            // Re-initialize with updated products
-            if (filteredProducts.length > 0) {
+    // Only retry if we found 0 products initially (suggests batches are being promoted)
+    // If we found some products, proceed normally - they might just be the actual count
+    if (filteredProducts.length === 0) {
+        console.log('initProducts: Found 0 products, retrying to catch auto-promoted batches...');
+        
+        // Try multiple times with increasing delays to catch products that are being promoted
+        const retryDelays = [500, 1000, 2000];
+        let retryAttempt = 0;
+        
+        const retryFindProducts = () => {
+            if (retryAttempt >= retryDelays.length) {
+                // After all retries, if still 0, that's a real issue
+                if (filteredProducts.length === 0) {
+                    console.warn('initProducts: No products found after retries. Catalog may be empty or batches not yet promoted.');
+                } else {
+                    console.log('initProducts: Found', filteredProducts.length, 'products after retries');
+                }
                 initializeProductsData();
+                return;
             }
-        }, 500);
+            
+            setTimeout(() => {
+                const retryGrid = Array.from(document.querySelectorAll('.product-card-clickable'));
+                const retryTable = Array.from(document.querySelectorAll('tbody .product-row'));
+                
+                let updated = false;
+                if (currentViewType === 'table' && retryTable.length > filteredProducts.length) {
+                    filteredProducts = retryTable;
+                    updated = true;
+                    console.log('initProducts: Found', filteredProducts.length, 'table products on retry', retryAttempt + 1);
+                } else if (currentViewType === 'grid' && retryGrid.length > filteredProducts.length) {
+                    filteredProducts = retryGrid;
+                    updated = true;
+                    console.log('initProducts: Found', filteredProducts.length, 'grid products on retry', retryAttempt + 1);
+                }
+                
+                // If we found products, initialize immediately
+                if (updated && filteredProducts.length > 0) {
+                    initializeProductsData();
+                } else {
+                    // Still no products, try again
+                    retryAttempt++;
+                    retryFindProducts();
+                }
+            }, retryDelays[retryAttempt]);
+        };
+        
+        retryFindProducts();
     } else {
+        // Found products, proceed normally
+        console.log('initProducts: Found', filteredProducts.length, 'products, proceeding normally');
         initializeProductsData();
     }
     
     function initializeProductsData() {
     
-    // Restore original view display
-    if (gridView) gridView.style.display = gridViewOriginalDisplay || 'grid';
-    if (tableView) {
-        if (!tableViewHasActive) {
+    // Ensure correct view is displayed (should already be set, but double-check)
+    // This prevents any flickering by ensuring view state is correct
+    if (currentViewType === 'grid') {
+        // Show grid, hide table
+        if (gridView && gridView.style.display !== 'grid') {
+            gridView.style.display = 'grid';
+        }
+        if (tableView && tableView.style.display !== 'none') {
             tableView.classList.remove('active');
             tableView.style.display = 'none';
-        } else {
+        }
+    } else {
+        // Show table, hide grid
+        if (gridView && gridView.style.display !== 'none') {
+            gridView.style.display = 'none';
+        }
+        if (tableView && tableView.style.display !== 'block') {
+            tableView.classList.add('active');
             tableView.style.display = 'block';
         }
     }

@@ -97,6 +97,59 @@ class PortalController {
             const { uuid } = req.params;
             const portalAccess = req.session.portalAccess || {};
             
+            // Auto-promote On Deck batches for products with 0 sellable inventory
+            // This ensures batches are available when users view the catalog
+            // IMPORTANT: Wait for all promotions to complete before querying products
+            try {
+                const batchStatusService = require('../Services/batchStatusService');
+                
+                // Find all products that have On Deck batches but no sellable inventory
+                const productsNeedingPromotion = await query(`
+                    SELECT DISTINCT b.fk_master_product_id as product_id
+                    FROM "ORDERS-batches" b
+                    WHERE b.status = 'On Deck'
+                      AND b.fk_master_product_id IS NOT NULL
+                      AND (b.quantity - b.allocated_quantity) > 0
+                      AND b.full_package_count > 0
+                      AND NOT EXISTS (
+                          SELECT 1 FROM "ORDERS-batches" b2
+                          WHERE b2.fk_master_product_id = b.fk_master_product_id
+                          AND b2.status = 'Sellable'
+                          AND (b2.quantity - b2.allocated_quantity) > 0
+                          AND b2.full_package_count > 0
+                      )
+                `);
+                
+                // Auto-promote batches for each product - wait for all to complete
+                const promotionPromises = [];
+                for (const row of productsNeedingPromotion.rows) {
+                    const productId = row.product_id;
+                    const promotionPromise = (async () => {
+                        try {
+                            const isDepleted = await batchStatusService.isInventoryDepleted(productId);
+                            if (isDepleted) {
+                                console.log(`🔄 Auto-promoting On Deck batches for product ${productId} (catalog load)`);
+                                await batchStatusService.promoteBatchesToSellable(productId, null);
+                            }
+                        } catch (promoError) {
+                            console.error(`Error auto-promoting product ${productId}:`, promoError.message);
+                            // Continue with other products even if one fails
+                        }
+                    })();
+                    promotionPromises.push(promotionPromise);
+                }
+                
+                // Wait for all promotions to complete before proceeding
+                if (promotionPromises.length > 0) {
+                    console.log(`⏳ Waiting for ${promotionPromises.length} batch promotion(s) to complete...`);
+                    await Promise.allSettled(promotionPromises);
+                    console.log(`✅ All batch promotions completed`);
+                }
+            } catch (autoPromoError) {
+                console.error('Error during catalog auto-promotion check:', autoPromoError.message);
+                // Continue loading catalog even if auto-promotion check fails
+            }
+            
             // Fetch available products for this buyer's location
             const products = await query(`
                 SELECT 
@@ -126,6 +179,7 @@ class PortalController {
                     -- Get available batches for this product
                     -- CRITICAL: External portal only shows batches with full_package_count > 0
                     -- (per MODULE_4_REQUIREMENTS: "External Orders Cannot Use Partial Packages")
+                    -- Show Sellable batches always, and On Deck batches only if no Sellable batches exist
                     (
                         SELECT jsonb_agg(
                             jsonb_build_object(
@@ -142,7 +196,19 @@ class PortalController {
                         )
                         FROM "ORDERS-batches" b
                         WHERE b.fk_master_product_id = p.entry_id
-                        AND b.status IN ('Sellable', 'On Hold')  -- Include both Sellable and On Hold batches
+                        AND (
+                            -- Always show Sellable batches
+                            b.status = 'Sellable'
+                            OR
+                            -- Show On Deck batches only if no Sellable batches exist
+                            (b.status = 'On Deck' AND NOT EXISTS (
+                                SELECT 1 FROM "ORDERS-batches" b2
+                                WHERE b2.fk_master_product_id = p.entry_id
+                                AND b2.status = 'Sellable'
+                                AND (b2.quantity - b2.allocated_quantity) > 0
+                                AND b2.full_package_count > 0
+                            ))
+                        )
                         AND (b.quantity - b.allocated_quantity) > 0
                         AND b.full_package_count > 0  -- External portal only shows full packages
                     ) as available_batches
@@ -151,7 +217,19 @@ class PortalController {
                 AND EXISTS (
                     SELECT 1 FROM "ORDERS-batches" b
                     WHERE b.fk_master_product_id = p.entry_id
-                    AND b.status IN ('Sellable', 'On Hold')  -- Include both Sellable and On Hold batches
+                    AND (
+                        -- Always show products with Sellable batches
+                        b.status = 'Sellable'
+                        OR
+                        -- Show products with On Deck batches only if no Sellable batches exist
+                        (b.status = 'On Deck' AND NOT EXISTS (
+                            SELECT 1 FROM "ORDERS-batches" b2
+                            WHERE b2.fk_master_product_id = p.entry_id
+                            AND b2.status = 'Sellable'
+                            AND (b2.quantity - b2.allocated_quantity) > 0
+                            AND b2.full_package_count > 0
+                        ))
+                    )
                     AND (b.quantity - b.allocated_quantity) > 0
                     AND b.full_package_count > 0  -- External portal only shows full packages
                 )
@@ -352,18 +430,54 @@ class PortalController {
                 return res.status(401).json({ error: 'Not authenticated' });
             }
             
-            // Get batch availability for all batches in cart
+            // Get batch availability for all batches
+            // CRITICAL: For batches already in cart, we need to include their allocated quantity
+            // to show the correct available quantity for validation
             const batches = await query(`
                 SELECT 
                     b.id as batch_id,
-                    (b.quantity - b.allocated_quantity)::INTEGER as quantity_available
+                    b.quantity,
+                    b.allocated_quantity,
+                    (b.quantity - b.allocated_quantity)::INTEGER as quantity_available,
+                    -- Get quantity allocated to current cart for this batch
+                    COALESCE((
+                        SELECT SUM(li.quantity_allocated)
+                        FROM "ORDERS-invoice-line-items" li
+                        INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
+                        WHERE li.fk_batch_id = b.id
+                          AND i.fk_buyer_id = $1
+                          AND i.fk_location_id = $2
+                          AND i.status = 'Draft'
+                          AND i.source = 'External'
+                          AND (i.cart_expires_at IS NULL OR i.cart_expires_at > NOW())
+                    ), 0)::INTEGER as allocated_to_current_cart,
+                    -- Available quantity including what's already in this cart
+                    (b.quantity - b.allocated_quantity + COALESCE((
+                        SELECT SUM(li.quantity_allocated)
+                        FROM "ORDERS-invoice-line-items" li
+                        INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
+                        WHERE li.fk_batch_id = b.id
+                          AND i.fk_buyer_id = $1
+                          AND i.fk_location_id = $2
+                          AND i.status = 'Draft'
+                          AND i.source = 'External'
+                          AND (i.cart_expires_at IS NULL OR i.cart_expires_at > NOW())
+                    ), 0))::INTEGER as quantity_available_for_cart
                 FROM "ORDERS-batches" b
                 WHERE b.status = 'Sellable'
-            `);
+            `, [portalAccess.buyerId, portalAccess.locationId]);
+            
+            // Return quantity_available_for_cart for items in cart, quantity_available for others
+            const result = batches.rows.map(batch => ({
+                batch_id: batch.batch_id,
+                quantity_available: batch.allocated_to_current_cart > 0 
+                    ? batch.quantity_available_for_cart 
+                    : batch.quantity_available
+            }));
             
             res.json({
                 success: true,
-                batches: batches.rows
+                batches: result
             });
         } catch (error) {
             console.error('Error getting inventory:', error);
@@ -382,13 +496,30 @@ class PortalController {
                 return res.json({ items: [], subtotal: 0, total: 0 });
             }
 
-            // First, check if there's an expired draft cart lingering for this buyer/location
+            // First, check if there's an expired or cancelled draft cart lingering for this buyer/location
+            // CRITICAL: Also check for cancelled invoices (they have cart_expires_at set to NOW())
+            let statusCheck = '';
+            try {
+                const columnCheck = await query(`
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'ORDERS-invoices'
+                    AND column_name = 'status'
+                    LIMIT 1
+                `);
+                if (columnCheck.rows.length > 0) {
+                    statusCheck = `AND (status = 'Draft' OR status = 'Cancelled')`;
+                }
+            } catch (err) {
+                // Status column doesn't exist, skip status check
+            }
+            
             const expiredCart = await query(`
                 SELECT id, cart_expires_at
                 FROM "ORDERS-invoices"
                 WHERE fk_buyer_id = $1
                   AND fk_location_id = $2
-                  AND status = 'Draft'
+                  ${statusCheck}
                   AND source = 'External'
                   AND cart_expires_at IS NOT NULL
                   AND cart_expires_at <= NOW()
@@ -426,6 +557,7 @@ class PortalController {
                     WHERE i.fk_buyer_id = $1
                     AND i.fk_location_id = $2
                     AND i.status = 'Draft'
+                    AND i.status != 'Cancelled'
                     AND i.source = 'External'
                     GROUP BY li.fk_invoice_id, li.fk_batch_id, li.fk_master_product_id
                 )
@@ -450,7 +582,17 @@ class PortalController {
                             'quantity', lia.total_quantity::INTEGER,
                             'quantity_allocated', COALESCE(lia.total_allocated, 0)::INTEGER,
                             'unit_price', lia.unit_price,
-                            'line_total', lia.total_line_total
+                            'line_total', lia.total_line_total,
+                            'image_url', COALESCE(
+                                (SELECT '/public/' || file_path 
+                                 FROM "ORDERS-product-images" pi
+                                 WHERE pi.fk_product_id = p.entry_id
+                                   AND pi.is_deleted = false
+                                   AND pi.is_featured = true
+                                 ORDER BY pi.uploaded_at ASC
+                                 LIMIT 1),
+                                '/public/images/placeholder.jpg'
+                            )
                         ) ORDER BY lia.line_item_order
                     ) as items
                 FROM "ORDERS-invoices" i
@@ -460,6 +602,7 @@ class PortalController {
                 WHERE i.fk_buyer_id = $1
                 AND i.fk_location_id = $2
                 AND i.status = 'Draft'
+                AND i.status != 'Cancelled'
                 AND i.source = 'External'
                 GROUP BY i.id, i.subtotal, i.total
                 ORDER BY i.id DESC
@@ -493,40 +636,150 @@ class PortalController {
      * Add item to cart
      */
     static async addToCart(req, res) {
+        // Use transaction to ensure atomicity
+        const { pool } = require('../config/database');
+        const client = await pool.connect();
+        
         try {
+            await client.query('BEGIN');
+            
             const portalAccess = req.session.portalAccess;
             const { batch_id, quantity: quantityParam } = req.body;
             
             if (!portalAccess) {
+                await client.query('ROLLBACK');
+                client.release();
                 return res.status(401).json({ error: 'Not authenticated' });
             }
             
             // Parse and validate quantity - ensure it's an integer
             const quantity = parseInt(quantityParam, 10);
             if (!batch_id || !quantity || isNaN(quantity) || quantity <= 0) {
+                await client.query('ROLLBACK');
+                client.release();
                 return res.status(400).json({ error: 'Invalid batch_id or quantity' });
             }
             
             console.log('addToCart - Request:', { batch_id, quantity, original_quantity: quantityParam, quantity_type: typeof quantityParam });
             
             // Get batch information to find product and price
-            const batchResult = await query(`
+            // Use FOR UPDATE to lock the batch row and prevent race conditions
+            // This ensures availability check and allocation happen atomically
+            let batchResult = await client.query(`
                 SELECT 
                     b.id,
                     b.fk_master_product_id,
                     b.override_price,
                     b.quantity,
                     b.allocated_quantity,
+                    b.status,
                     p.default_price,
                     p.name as product_name
                 FROM "ORDERS-batches" b
                 INNER JOIN "ORDERS-products" p ON b.fk_master_product_id = p.entry_id
                 WHERE b.id = $1
                 AND b.status = 'Sellable'
+                FOR UPDATE
             `, [batch_id]);
             
+            // If not found as Sellable, check if batch exists with other status
             if (batchResult.rows.length === 0) {
-                return res.status(404).json({ error: 'Batch not found or not available' });
+                const batchCheck = await client.query(`
+                    SELECT 
+                        b.id,
+                        b.fk_master_product_id,
+                        b.status,
+                        b.quantity,
+                        b.allocated_quantity,
+                        p.name as product_name
+                    FROM "ORDERS-batches" b
+                    INNER JOIN "ORDERS-products" p ON b.fk_master_product_id = p.entry_id
+                    WHERE b.id = $1
+                `, [batch_id]);
+                
+                if (batchCheck.rows.length === 0) {
+                    return res.status(404).json({ error: 'Batch not found' });
+                }
+                
+                const batchInfo = batchCheck.rows[0];
+                const batchStatus = batchInfo.status;
+                const productId = batchInfo.fk_master_product_id;
+                
+                // If batch is 'On Hold', return clear error
+                if (batchStatus === 'On Hold') {
+                    return res.status(400).json({ 
+                        error: 'Batch is on hold and cannot be added to cart',
+                        batch_status: 'On Hold'
+                    });
+                }
+                
+                // If batch is 'On Deck', try to auto-promote if no sellable batches available
+                if (batchStatus === 'On Deck') {
+                    // Check if there are any sellable batches for this product
+                    const sellableCheck = await client.query(`
+                        SELECT SUM(quantity - allocated_quantity) as available
+                        FROM "ORDERS-batches"
+                        WHERE fk_master_product_id = $1
+                          AND status = 'Sellable'
+                    `, [productId]);
+                    
+                    const availableQty = parseInt(sellableCheck.rows[0].available || 0);
+                    
+                    // If no sellable inventory, auto-promote this On Deck batch
+                    if (availableQty === 0) {
+                        console.log(`Auto-promoting On Deck batch ${batch_id} to Sellable (no sellable inventory available)`);
+                        
+                        // Promote the batch to Sellable
+                        await client.query(`
+                            UPDATE "ORDERS-batches"
+                            SET status = 'Sellable', updated_at = NOW()
+                            WHERE id = $1
+                        `, [batch_id]);
+                        
+                        // Log to batch history
+                        await client.query(`
+                            INSERT INTO "ORDERS-batch-history" (
+                                batch_id, change_type, field_name,
+                                old_value, new_value, reason,
+                                changed_by_system
+                            ) VALUES ($1, 'status_changed', 'status', 'On Deck', 'Sellable', 
+                                      'Auto-promoted: No sellable inventory available, batch requested via portal', true)
+                        `, [batch_id]);
+                        
+                        // Now fetch the batch as Sellable with FOR UPDATE lock
+                        batchResult = await client.query(`
+                            SELECT 
+                                b.id,
+                                b.fk_master_product_id,
+                                b.override_price,
+                                b.quantity,
+                                b.allocated_quantity,
+                                b.status,
+                                p.default_price,
+                                p.name as product_name
+                            FROM "ORDERS-batches" b
+                            INNER JOIN "ORDERS-products" p ON b.fk_master_product_id = p.entry_id
+                            WHERE b.id = $1
+                            AND b.status = 'Sellable'
+                            FOR UPDATE
+                        `, [batch_id]);
+                    } else {
+                        // There are sellable batches available, so don't auto-promote
+                        return res.status(400).json({ 
+                            error: 'Batch is not yet available for sale. Please select an available batch.',
+                            batch_status: 'On Deck',
+                            message: 'Sellable batches are still available for this product'
+                        });
+                    }
+                }
+                
+                // If still not found after promotion attempt, return error
+                if (batchResult.rows.length === 0) {
+                    return res.status(404).json({ 
+                        error: 'Batch not found or not available',
+                        batch_status: batchStatus
+                    });
+                }
             }
             
             const batch = batchResult.rows[0];
@@ -534,6 +787,8 @@ class PortalController {
             // Check availability
             const available = batch.quantity - batch.allocated_quantity;
             if (quantity > available) {
+                await client.query('ROLLBACK');
+                client.release();
                 return res.status(400).json({ error: `Only ${available} cases available` });
             }
             
@@ -542,12 +797,13 @@ class PortalController {
             // and we'll create a new Draft invoice for the next cart session
             let invoiceResult;
             try {
-                invoiceResult = await query(`
+                invoiceResult = await client.query(`
                     SELECT id, invoice_number, status
                     FROM "ORDERS-invoices"
                     WHERE fk_buyer_id = $1
                     AND fk_location_id = $2
                     AND status = 'Draft'
+                    AND (status IS NULL OR status != 'Cancelled')
                     AND source = 'External'
                     AND (cart_expires_at IS NULL OR cart_expires_at > NOW())
                     ORDER BY created_at DESC
@@ -557,7 +813,7 @@ class PortalController {
                 // Fallback if 'source' column doesn't exist - check by invoice_number pattern
                 if (err.code === '42703') {
                     console.log('Source column not found, using invoice_number pattern fallback');
-                    invoiceResult = await query(`
+                    invoiceResult = await client.query(`
                         SELECT id, invoice_number, status
                         FROM "ORDERS-invoices"
                         WHERE fk_buyer_id = $1
@@ -585,7 +841,7 @@ class PortalController {
                 
                 try {
                     // First try: optimized MAX with simple string replacement
-                    const maxNumberResult = await query(`
+                    const maxNumberResult = await client.query(`
                         SELECT COALESCE(MAX(
                             CAST(
                                 SUBSTRING(invoice_number FROM LENGTH($1) + 1) AS INTEGER
@@ -601,7 +857,7 @@ class PortalController {
                     // Fallback: simple count if regex/SUBSTRING fails
                     console.log('Using fallback invoice number generation:', err.message);
                     try {
-                        const countResult = await query(`
+                        const countResult = await client.query(`
                             SELECT COUNT(*)::INTEGER as count 
                             FROM "ORDERS-invoices"
                             WHERE invoice_number LIKE $1 || '%'
@@ -619,7 +875,7 @@ class PortalController {
                 // Get location license number - OPTIMIZED: Single query
                 let locationLicense = 'UNKNOWN';
                 try {
-                    const locationResult = await query(`
+                    const locationResult = await client.query(`
                         SELECT state_license 
                         FROM "ORDERS-buyer_locations"
                         WHERE entry_id = $1
@@ -639,7 +895,7 @@ class PortalController {
                 const cartExpiresAt = new Date();
                 cartExpiresAt.setHours(cartExpiresAt.getHours() + 24);
                 
-                const newInvoiceResult = await query(`
+                const newInvoiceResult = await client.query(`
                     INSERT INTO "ORDERS-invoices" (
                         invoice_number, fk_buyer_id, fk_location_id, location_license_number,
                         source, created_by_user_id, status, cart_created_at, cart_expires_at
@@ -656,7 +912,7 @@ class PortalController {
             }
             
             // Check if line item already exists for this batch - OPTIMIZED: Single query
-            const existingLineItem = await query(`
+            const existingLineItem = await client.query(`
                 SELECT id, quantity_ordered, quantity_allocated
                 FROM "ORDERS-invoice-line-items"
                 WHERE fk_invoice_id = $1 AND fk_batch_id = $2
@@ -683,7 +939,7 @@ class PortalController {
                 lineItemId = existingLineItem.rows[0].id;
                 
                 // Update line item (allocation will happen separately)
-                await query(`
+                await client.query(`
                     UPDATE "ORDERS-invoice-line-items"
                     SET quantity_ordered = $1,
                         unit_price = $2,
@@ -696,7 +952,7 @@ class PortalController {
                 quantityToAllocate = newQuantity - currentAllocated;
             } else {
                 // Create new line item (without allocation initially)
-                const lineItemOrderResult = await query(`
+                const lineItemOrderResult = await client.query(`
                     SELECT COALESCE(MAX(line_item_order), 0) + 1 as next_order
                     FROM "ORDERS-invoice-line-items"
                     WHERE fk_invoice_id = $1
@@ -705,7 +961,7 @@ class PortalController {
                 
                 const insertQuantity = parseInt(quantity);
                 console.log('addToCart - Creating new line item:', { quantity: insertQuantity, unitPrice, lineTotal });
-                const lineItemResult = await query(`
+                const lineItemResult = await client.query(`
                     INSERT INTO "ORDERS-invoice-line-items" (
                         fk_invoice_id, fk_master_product_id, fk_batch_id,
                         quantity_ordered, quantity_allocated, unit_price, line_total, line_item_order
@@ -719,36 +975,21 @@ class PortalController {
             
             // CRITICAL: Allocate inventory according to Module 4 requirements
             // This prevents overselling and updates allocated_quantity immediately
+            // Pass the client to use the same transaction
             if (quantityToAllocate > 0) {
                 const allocationService = require('../Services/allocationService');
                 const allocationResult = await allocationService.allocateBatchToInvoice(
                     batch_id,
                     quantityToAllocate,
                     invoiceId,
-                    lineItemId
+                    lineItemId,
+                    client // Pass client to use same transaction
                 );
                 
                 if (!allocationResult.success) {
-                    // Allocation failed - rollback line item changes
-                    if (existingLineItem.rows.length > 0) {
-                        // Revert quantity_ordered
-                        const currentQty = parseInt(existingLineItem.rows[0].quantity_ordered, 10);
-                        const revertQty = currentQty - quantityToAllocate;
-                        await query(`
-                            UPDATE "ORDERS-invoice-line-items"
-                            SET quantity_ordered = $1,
-                                line_total = $1 * unit_price,
-                                updated_at = NOW()
-                            WHERE id = $2
-                        `, [revertQty, lineItemId]);
-                    } else {
-                        // Delete the line item we just created
-                        await query(`
-                            DELETE FROM "ORDERS-invoice-line-items"
-                            WHERE id = $1
-                        `, [lineItemId]);
-                    }
-                    
+                    // Allocation failed - rollback entire transaction
+                    await client.query('ROLLBACK');
+                    client.release();
                     return res.status(400).json({ 
                         error: allocationResult.error || 'Failed to allocate inventory',
                         available: allocationResult.available,
@@ -764,7 +1005,7 @@ class PortalController {
             }
             
             // Recalculate invoice totals - OPTIMIZED: Single UPDATE with subquery instead of two queries
-            const updateResult = await query(`
+            const updateResult = await client.query(`
                 UPDATE "ORDERS-invoices"
                 SET subtotal = (
                     SELECT COALESCE(SUM(line_total), 0)
@@ -785,7 +1026,7 @@ class PortalController {
             const total = subtotal;
             
             // Fetch latest line item data for response
-            const lineItemDataResult = await query(`
+            const lineItemDataResult = await client.query(`
                 SELECT 
                     id,
                     fk_batch_id,
@@ -818,10 +1059,14 @@ class PortalController {
                 total
             });
             
+            // Only broadcast to OTHER sessions (internal dashboard, other browser tabs)
+            // External portal doesn't need to reload after its own actions
             const eventType = isNewLineItem ? 'line_item_added' : 'line_item_updated';
             websocketService.broadcastInvoiceEvent(invoiceId, eventType, {
                 buyer_id: portalAccess.buyerId,
                 location_id: portalAccess.locationId,
+                triggered_by: 'external_portal', // Mark as external portal action
+                exclude_session: req.sessionID, // Don't send to the session that triggered it
                 line_item: {
                     id: lineItemData.id,
                     batch_id: lineItemData.fk_batch_id,
@@ -838,6 +1083,10 @@ class PortalController {
                 console.error('WebSocket broadcast error (cart add):', err.message);
             });
 
+            // Commit transaction
+            await client.query('COMMIT');
+            client.release();
+            
             res.json({ 
                 success: true, 
                 message: 'Item added to cart',
@@ -860,6 +1109,15 @@ class PortalController {
             });
         } catch (error) {
             console.error('Error adding to cart:', error);
+            
+            // Rollback transaction on any error
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                console.error('Error rolling back transaction:', rollbackError);
+            }
+            client.release();
+            
             res.status(500).json({ error: 'Failed to add item to cart', details: error.message });
         }
     }
@@ -880,10 +1138,12 @@ class PortalController {
                 return res.status(400).json({ error: 'Invalid line_item_id' });
             }
             
-            // Get the invoice ID, batch ID, and allocated quantity from the line item
+            // Get the invoice ID, batch ID, allocated quantity, and invoice status
             const lineItemResult = await query(`
-                SELECT li.fk_invoice_id, li.fk_batch_id, li.quantity_allocated
+                SELECT li.fk_invoice_id, li.fk_batch_id, li.quantity_allocated,
+                       i.status, i.cart_expires_at
                 FROM "ORDERS-invoice-line-items" li
+                INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
                 WHERE li.id = $1
             `, [line_item_id]);
             
@@ -894,7 +1154,22 @@ class PortalController {
             const invoiceId = lineItemResult.rows[0].fk_invoice_id;
             const actualBatchId = lineItemResult.rows[0].fk_batch_id;
             const allocatedQuantity = parseInt(lineItemResult.rows[0].quantity_allocated || 0, 10);
+            const invoiceStatus = lineItemResult.rows[0].status;
+            const cartExpiresAt = lineItemResult.rows[0].cart_expires_at;
             const batchIdToDelete = batch_id || actualBatchId; // Use provided batch_id or the one from the line item
+            
+            // CRITICAL: Verify invoice is still valid (not cancelled or expired)
+            if (invoiceStatus === 'Cancelled') {
+                return res.status(400).json({ 
+                    error: 'This cart has been cancelled. Please refresh your cart.' 
+                });
+            }
+            
+            if (cartExpiresAt && new Date(cartExpiresAt) <= new Date()) {
+                return res.status(400).json({ 
+                    error: 'This cart has expired. Please refresh your cart.' 
+                });
+            }
             
             // Verify invoice belongs to this buyer/location
             const invoiceCheck = await query(`
@@ -902,7 +1177,7 @@ class PortalController {
                 WHERE id = $1
                 AND fk_buyer_id = $2
                 AND fk_location_id = $3
-                AND status = 'Draft'
+                AND (status = 'Draft' OR status IS NULL)
                 AND source = 'External'
             `, [invoiceId, portalAccess.buyerId, portalAccess.locationId]);
             
@@ -1027,6 +1302,8 @@ class PortalController {
                 websocketService.broadcastInvoiceEvent(invoiceId, 'invoice_deleted', {
                     buyer_id: portalAccess.buyerId,
                     location_id: portalAccess.locationId,
+                    triggered_by: 'external_portal',
+                    exclude_session: req.sessionID,
                     removed_line_item_ids: removedLineItemIds,
                     cleared: true
                 }).catch(err => {
@@ -1036,6 +1313,8 @@ class PortalController {
                 websocketService.broadcastInvoiceEvent(invoiceId, 'line_item_removed', {
                     buyer_id: portalAccess.buyerId,
                     location_id: portalAccess.locationId,
+                    triggered_by: 'external_portal',
+                    exclude_session: req.sessionID,
                     removed_line_item_ids: removedLineItemIds,
                     totals: {
                         subtotal,
@@ -1072,11 +1351,11 @@ class PortalController {
                 return res.status(400).json({ error: 'Invalid line_item_id or quantity' });
             }
             
-            // Get the line item and verify it belongs to this buyer
+            // Get the line item and verify it belongs to this buyer and invoice is still valid
             const lineItemResult = await query(`
                 SELECT li.id, li.fk_invoice_id, li.unit_price, li.fk_batch_id, li.fk_master_product_id,
                        li.quantity_ordered, li.quantity_allocated,
-                       i.fk_buyer_id, i.fk_location_id
+                       i.fk_buyer_id, i.fk_location_id, i.status, i.cart_expires_at
                 FROM "ORDERS-invoice-line-items" li
                 INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
                 WHERE li.id = $1
@@ -1092,6 +1371,19 @@ class PortalController {
             if (lineItem.fk_buyer_id !== portalAccess.buyerId || 
                 lineItem.fk_location_id !== portalAccess.locationId) {
                 return res.status(403).json({ error: 'Unauthorized' });
+            }
+            
+            // CRITICAL: Verify invoice is still valid (not cancelled or expired)
+            if (lineItem.status === 'Cancelled') {
+                return res.status(400).json({ 
+                    error: 'This cart has been cancelled. Please refresh your cart.' 
+                });
+            }
+            
+            if (lineItem.cart_expires_at && new Date(lineItem.cart_expires_at) <= new Date()) {
+                return res.status(400).json({ 
+                    error: 'This cart has expired. Please refresh your cart.' 
+                });
             }
             
             // Check batch availability
@@ -1284,6 +1576,8 @@ class PortalController {
             websocketService.broadcastInvoiceEvent(lineItem.fk_invoice_id, 'line_item_updated', {
                 buyer_id: portalAccess.buyerId,
                 location_id: portalAccess.locationId,
+                triggered_by: 'external_portal',
+                exclude_session: req.sessionID,
                 line_item: {
                     id: line_item_id,
                     batch_id: lineItem.fk_batch_id,
@@ -1323,49 +1617,12 @@ class PortalController {
             // Get cart items for display
             const cartData = await PortalController.getCartData(portalAccess);
             
-            // Get ALL locations for this buyer (for dropdown)
-            const allLocations = await query(`
-                SELECT 
-                    l.entry_id as location_id,
-                    l.name,
-                    l.line_one,
-                    l.line_two,
-                    l.city,
-                    l.state,
-                    l.zip,
-                    l.state_license
-                FROM "ORDERS-buyer_locations" l
-                WHERE l.orders_buyer_id = $1
-                ORDER BY l.name
-            `, [portalAccess.buyerId]);
-            
-            // Get the current location data for shipping address pre-fill
-            const locationData = await query(`
-                SELECT 
-                    l.name,
-                    l.line_one as address,
-                    l.line_two,
-                    l.city,
-                    l.state,
-                    l.zip as zip_code
-                FROM "ORDERS-buyer_locations" l
-                WHERE l.entry_id = $1
-            `, [portalAccess.locationId]);
-            
-            const shippingAddress = locationData.rows[0] || {};
-            
-            console.log('Checkout - Cart data:', {
-                buyerId: portalAccess.buyerId,
-                locationId: portalAccess.locationId,
-                itemCount: cartData.items ? cartData.items.length : 0,
-                subtotal: cartData.subtotal,
-                total: cartData.total,
-                locationsFound: allLocations.rows.length
-            });
-            
-            // Get buyer name and info for header
+            // Get buyer name and all locations for this buyer (same format as store page)
             let buyerName = 'Buyer';
+            let buyerLocations = [];
             let buyerInfo = null;
+            let currentLocationName = portalAccess.locationName || null;
+            
             if (portalAccess.buyerId) {
                 try {
                     const buyerResult = await query(`
@@ -1382,10 +1639,152 @@ class PortalController {
                         buyerInfo = buyerResult.rows[0];
                         buyerName = buyerInfo.name || 'Buyer';
                     }
+                    
+                    // Get all locations for this buyer (same logic as store page)
+                    const locationsResult = await query(`
+                        SELECT 
+                            entry_id,
+                            name,
+                            line_one,
+                            line_two,
+                            city,
+                            state,
+                            zip,
+                            state_license
+                        FROM "ORDERS-buyer_locations"
+                        WHERE orders_buyer_id = $1
+                        ORDER BY name
+                    `, [portalAccess.buyerId]);
+                    
+                    const portalAccessResult = await query(`
+                        SELECT 
+                            fk_location_id,
+                            access_uuid,
+                            is_active,
+                            created_at
+                        FROM "ORDERS-portal-access"
+                        WHERE fk_buyer_id = $1
+                        ORDER BY fk_location_id, created_at DESC
+                    `, [portalAccess.buyerId]);
+                    
+                    const anyAccessByLocation = new Map();
+                    const activeAccessByLocation = new Map();
+                    
+                    for (const row of portalAccessResult.rows) {
+                        if (!anyAccessByLocation.has(row.fk_location_id)) {
+                            anyAccessByLocation.set(row.fk_location_id, []);
+                        }
+                        anyAccessByLocation.get(row.fk_location_id).push(row);
+                        
+                        if (row.is_active && !activeAccessByLocation.has(row.fk_location_id)) {
+                            activeAccessByLocation.set(row.fk_location_id, row);
+                        }
+                    }
+                    
+                    let systemUserIdForAccess = null;
+                    
+                    buyerLocations = [];
+                    
+                    for (const rawLocation of locationsResult.rows || []) {
+                        const locationId = rawLocation.entry_id;
+                        const hasAnyAccess = anyAccessByLocation.has(locationId);
+                        let accessInfo = activeAccessByLocation.get(locationId);
+                        
+                        if (!hasAnyAccess) {
+                            if (systemUserIdForAccess === null) {
+                                systemUserIdForAccess = await PortalController.getSystemUserId();
+                            }
+                            
+                            try {
+                                const newAccess = await query(`
+                                    INSERT INTO "ORDERS-portal-access" (
+                                        fk_buyer_id,
+                                        fk_location_id,
+                                        is_active,
+                                        created_by
+                                    ) VALUES ($1, $2, true, $3)
+                                    RETURNING access_uuid, is_active
+                                `, [portalAccess.buyerId, locationId, systemUserIdForAccess]);
+                                
+                                accessInfo = {
+                                    fk_location_id: locationId,
+                                    access_uuid: newAccess.rows[0].access_uuid,
+                                    is_active: newAccess.rows[0].is_active
+                                };
+                                
+                                activeAccessByLocation.set(locationId, accessInfo);
+                                anyAccessByLocation.set(locationId, [accessInfo]);
+                            } catch (createErr) {
+                                console.error(`Error creating portal access for location ${locationId}:`, createErr);
+                            }
+                        }
+                        
+                        const portalUrl = accessInfo && accessInfo.is_active
+                            ? `/external/store/${accessInfo.access_uuid}`
+                            : null;
+                        
+                        const isCurrentLocation = locationId === portalAccess.locationId;
+
+                        const locationData = {
+                            ...rawLocation,
+                            access_uuid: accessInfo ? accessInfo.access_uuid : null,
+                            portal_is_active: !!(accessInfo && accessInfo.is_active),
+                            portal_url: portalUrl,
+                            portal_restricted: !portalUrl && (anyAccessByLocation.has(locationId) || hasAnyAccess),
+                            is_current: isCurrentLocation
+                        };
+                        
+                        buyerLocations.push(locationData);
+                        
+                        if (isCurrentLocation && rawLocation.name) {
+                            currentLocationName = rawLocation.name;
+                        }
+                    }
+                    
+                    if (!currentLocationName && buyerLocations.length > 0) {
+                        const currentLocation = buyerLocations.find(loc => loc.entry_id === portalAccess.locationId);
+                        currentLocationName = currentLocation?.name || buyerLocations[0].name || currentLocationName;
+                    }
                 } catch (err) {
                     console.error('Error fetching buyer info in checkout:', err);
                 }
             }
+            
+            // Get the current location data for shipping address pre-fill
+            const locationData = await query(`
+                SELECT 
+                    l.name,
+                    l.line_one as address,
+                    l.line_two,
+                    l.city,
+                    l.state,
+                    l.zip as zip_code
+                FROM "ORDERS-buyer_locations" l
+                WHERE l.entry_id = $1
+            `, [portalAccess.locationId]);
+            
+            const shippingAddress = locationData.rows[0] || {};
+            
+            // Get locations for checkout form dropdown (simplified format)
+            const allLocations = buyerLocations.map(loc => ({
+                location_id: loc.entry_id,
+                name: loc.name,
+                line_one: loc.line_one,
+                line_two: loc.line_two,
+                city: loc.city,
+                state: loc.state,
+                zip: loc.zip,
+                state_license: loc.state_license
+            }));
+            
+            console.log('Checkout - Cart data:', {
+                buyerId: portalAccess.buyerId,
+                locationId: portalAccess.locationId,
+                itemCount: cartData.items ? cartData.items.length : 0,
+                subtotal: cartData.subtotal,
+                total: cartData.total,
+                locationsFound: buyerLocations.length
+            });
             
             res.render('external/checkout', {
                 title: 'Checkout',
@@ -1394,9 +1793,11 @@ class PortalController {
                 portalAccess: portalAccess,
                 uuid: uuid,
                 shippingAddress: shippingAddress,
-                locations: allLocations.rows,
+                locations: allLocations,
                 buyerName: buyerName,
-                buyerInfo: buyerInfo
+                buyerInfo: buyerInfo,
+                buyerLocations: buyerLocations,
+                currentLocationName: currentLocationName
             });
         } catch (error) {
             console.error('Error loading checkout:', error);
@@ -1525,16 +1926,40 @@ class PortalController {
                 return { items: [], subtotal: 0, total: 0, invoice_id: null };
             }
             
+            // First, check if status column exists in ORDERS-invoices table
+            let hasStatusColumn = false;
+            try {
+                const columnCheck = await query(`
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'ORDERS-invoices'
+                    AND column_name = 'status'
+                    LIMIT 1
+                `);
+                hasStatusColumn = columnCheck.rows.length > 0;
+            } catch (checkError) {
+                console.warn('Could not check for status column:', checkError.message);
+                // Assume it doesn't exist if check fails
+                hasStatusColumn = false;
+            }
+            
+            // Build query conditionally based on whether status column exists
             // Get active draft invoice for this buyer/location
             // OPTIMIZED: Simplified query structure - filter invoice first, then join
-            const draftInvoice = await query(`
+            let queryStr = `
                 WITH invoice_base AS (
                     SELECT id, subtotal, total
                     FROM "ORDERS-invoices"
                     WHERE fk_buyer_id = $1
                     AND fk_location_id = $2
-                    AND status = 'Draft'
-                    AND source = 'External'
+            `;
+            
+            if (hasStatusColumn) {
+                // CRITICAL: Only get Draft invoices that are NOT cancelled
+                queryStr += ` AND status = 'Draft' AND source = 'External' AND status != 'Cancelled'`;
+            }
+            
+            queryStr += `
                     AND (cart_expires_at IS NULL OR cart_expires_at > NOW())
                     ORDER BY created_at DESC
                     LIMIT 1
@@ -1545,6 +1970,7 @@ class PortalController {
                         li.fk_batch_id,
                         li.fk_master_product_id,
                         SUM(li.quantity_ordered)::INTEGER as total_quantity,
+                        SUM(li.quantity_allocated)::INTEGER as total_allocated,
                         AVG(li.unit_price) as unit_price,
                         SUM(li.line_total) as total_line_total,
                         MAX(li.id) as line_item_id,
@@ -1571,12 +1997,23 @@ class PortalController {
                                 'units_per_case', p.units_per_case,
                                 'unit_size', p.unit_size,
                                 'unit_measurement_name', p.unit_measurement_name,
-                                'batch_name', b.batch_name,
-                                'quantity', lia.total_quantity,
-                                'unit_price', lia.unit_price,
-                                'line_total', lia.total_line_total,
-                                'quantity_available', (b.quantity - b.allocated_quantity)::INTEGER
-                            ) ORDER BY lia.line_item_order
+                            'batch_name', b.batch_name,
+                            'quantity', lia.total_quantity,
+                            'quantity_allocated', COALESCE(lia.total_allocated, 0),
+                            'unit_price', lia.unit_price,
+                            'line_total', lia.total_line_total,
+                            'quantity_available', (b.quantity - b.allocated_quantity + COALESCE(lia.total_allocated, 0))::INTEGER,
+                            'image_url', COALESCE(
+                                (SELECT '/public/' || file_path 
+                                 FROM "ORDERS-product-images" pi
+                                 WHERE pi.fk_product_id = p.entry_id
+                                   AND pi.is_deleted = false
+                                   AND pi.is_featured = true
+                                 ORDER BY pi.uploaded_at ASC
+                                 LIMIT 1),
+                                '/public/images/placeholder.jpg'
+                            )
+                        ) ORDER BY lia.line_item_order
                         ),
                         '[]'::jsonb
                     ) as items
@@ -1585,7 +2022,9 @@ class PortalController {
                 LEFT JOIN "ORDERS-products" p ON lia.fk_master_product_id = p.entry_id
                 LEFT JOIN "ORDERS-batches" b ON lia.fk_batch_id = b.id
                 GROUP BY ib.id, ib.subtotal, ib.total
-            `, [portalAccess.buyerId, portalAccess.locationId]);
+            `;
+            
+            const draftInvoice = await query(queryStr, [portalAccess.buyerId, portalAccess.locationId]);
             
             if (draftInvoice.rows.length === 0) {
                 console.log('getCartData - No draft invoice found', {
@@ -1687,25 +2126,28 @@ class PortalController {
                 return res.status(401).json({ error: 'Not authenticated' });
             }
             
-            // First, find the draft invoice for this buyer (regardless of current location)
-            // Then update location if provided, then get cart data
-            const draftInvoice = await query(`
-                SELECT id, fk_location_id 
-                FROM "ORDERS-invoices"
-                WHERE fk_buyer_id = $1
-                AND status = 'Draft'
-                AND source = 'External'
-                AND (cart_expires_at IS NULL OR cart_expires_at > NOW())
-                ORDER BY created_at DESC
-                LIMIT 1
-            `, [portalAccess.buyerId]);
+            // CRITICAL: Get existing cart data first - DO NOT create new cart
+            // Use getCartData which only retrieves existing carts, never creates them
+            const cartData = await PortalController.getCartData(portalAccess);
             
-            if (draftInvoice.rows.length === 0) {
-                return res.status(400).json({ error: 'No active cart found' });
+            if (!cartData.invoice_id) {
+                return res.status(400).json({ error: 'No active cart found. Please add items to your cart first.' });
             }
             
-            const invoiceId = draftInvoice.rows[0].id;
-            const currentLocationId = draftInvoice.rows[0].fk_location_id;
+            const invoiceId = cartData.invoice_id;
+            
+            // Get current invoice location
+            const currentInvoice = await query(`
+                SELECT fk_location_id 
+                FROM "ORDERS-invoices"
+                WHERE id = $1 AND status = 'Draft'
+            `, [invoiceId]);
+            
+            if (currentInvoice.rows.length === 0) {
+                return res.status(404).json({ error: 'Cart invoice not found or no longer in Draft status' });
+            }
+            
+            const currentLocationId = currentInvoice.rows[0].fk_location_id;
             
             // Update location if provided and different from current
             if (location_id && location_id !== currentLocationId) {
@@ -1744,14 +2186,15 @@ class PortalController {
                 req.session.portalAccess.locationId = location_id;
             }
             
-            // Get cart data (now with correct location in session and invoice)
-            const cartData = await PortalController.getCartData(portalAccess);
+            // Re-fetch cart data after location update (if location changed)
+            // This ensures we have the latest cart state
+            const finalCartData = await PortalController.getCartData(portalAccess);
             
-            if (!cartData.invoice_id) {
-                return res.status(400).json({ error: 'No active cart found' });
+            if (!finalCartData.invoice_id || finalCartData.invoice_id !== invoiceId) {
+                return res.status(400).json({ error: 'Cart invoice mismatch. Please refresh and try again.' });
             }
             
-            if (!cartData.items || cartData.items.length === 0) {
+            if (!finalCartData.items || finalCartData.items.length === 0) {
                 return res.status(400).json({ error: 'Cart is empty' });
             }
             
@@ -1761,12 +2204,12 @@ class PortalController {
                     UPDATE "ORDERS-invoices"
                     SET customer_notes = $1
                     WHERE id = $2
-                `, [notes, cartData.invoice_id]);
+                `, [notes, invoiceId]);
             }
             
             // Apply available credits to invoice
             const accountCreditService = require('../Services/accountCreditService');
-            const creditResult = await accountCreditService.applyCreditsToInvoice(cartData.invoice_id);
+            const creditResult = await accountCreditService.applyCreditsToInvoice(invoiceId);
             console.log('Credit application result:', creditResult);
             
             // Note: Purchase limit validation happens inside state machine transition
@@ -1776,9 +2219,10 @@ class PortalController {
             // Note: For external portal orders, there's no logged-in user, so pass null for userId
             // The system will record this as a system change
             console.log('Starting state machine transition to Pending_Approval...');
+            console.log('Using existing cart invoice:', invoiceId);
             const invoiceStateMachine = require('../Services/invoiceStateMachineService');
             const result = await invoiceStateMachine.transitionTo(
-                cartData.invoice_id,
+                invoiceId,
                 'Pending_Approval',
                 null, // No user ID for external portal orders - system change
                 'External order submitted'
@@ -1795,13 +2239,13 @@ class PortalController {
                 });
             }
             
-            console.log(`✅ Invoice ${cartData.invoice_id} successfully transitioned to Pending_Approval`);
+            console.log(`✅ Invoice ${invoiceId} successfully transitioned to Pending_Approval`);
             
             // Return JSON with invoice_id for client redirect
             res.json({ 
                 success: true, 
                 message: 'Order submitted successfully and pending approval',
-                invoice_id: cartData.invoice_id,
+                invoice_id: invoiceId,
                 credit_applied: creditResult.applied || 0
             });
         } catch (error) {

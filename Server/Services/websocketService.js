@@ -41,17 +41,47 @@ class WebSocketService {
             return;
         }
 
-        this.wss = new WebSocket.Server({ 
-            port: this.port,
-            perMessageDeflate: false 
-        });
+        try {
+            this.wss = new WebSocket.Server({ 
+                port: this.port,
+                perMessageDeflate: false,
+                clientTracking: true
+            });
 
-        this.wss.on('connection', (ws, req) => {
-            this.handleConnection(ws, req);
-        });
+            // Handle server errors
+            this.wss.on('error', (error) => {
+                console.error('❌ WebSocket server error:', error.message);
+                if (error.code === 'EADDRINUSE') {
+                    console.error(`❌ Port ${this.port} is already in use. Please free the port or change WEBSOCKET_PORT in your .env file.`);
+                }
+                this.isRunning = false;
+            });
 
-        this.isRunning = true;
-        console.log(`🔌 WebSocket server started on port ${this.port}`);
+            this.wss.on('connection', (ws, req) => {
+                this.handleConnection(ws, req);
+            });
+
+            // WebSocket.Server starts immediately, so mark as running
+            // The 'listening' event doesn't exist for WebSocket.Server
+            this.isRunning = true;
+            console.log(`🔌 WebSocket server started successfully on port ${this.port}`);
+            
+            // Verify server is actually listening
+            this.wss.on('error', (error) => {
+                if (error.code === 'EADDRINUSE') {
+                    console.error(`❌ Port ${this.port} is already in use. Please free the port or change WEBSOCKET_PORT in your .env file.`);
+                    this.isRunning = false;
+                }
+            });
+
+        } catch (error) {
+            console.error('❌ Failed to start WebSocket server:', error.message);
+            if (error.code === 'EADDRINUSE') {
+                console.error(`❌ Port ${this.port} is already in use. Please free the port or change WEBSOCKET_PORT in your .env file.`);
+            }
+            this.isRunning = false;
+            throw error;
+        }
     }
 
     /**
@@ -61,15 +91,19 @@ class WebSocketService {
         // Extract user info from request (if using auth)
         const userId = this.extractUserIdFromRequest(req);
         const userType = this.extractUserTypeFromRequest(req);
+        
+        // Extract session ID from cookies or query params for external portal
+        const sessionId = this.extractSessionIdFromRequest(req);
 
         ws.userId = userId;
         ws.userType = userType;
+        ws.sessionId = sessionId; // Store session ID to filter self-broadcasts
 
         if (userId) {
             this.userConnections.set(userId, ws);
         }
 
-        console.log(`🔌 ${userType} user ${userId || 'anonymous'} connected`);
+        console.log(`🔌 ${userType} user ${userId || 'anonymous'} connected (session: ${sessionId || 'none'})`);
 
         // Handle incoming messages
         ws.on('message', (message) => {
@@ -375,21 +409,67 @@ class WebSocketService {
     }
 
     /**
+     * Extract session ID from request (for filtering self-broadcasts)
+     */
+    extractSessionIdFromRequest(req) {
+        // Try to get session ID from cookies
+        if (req.headers.cookie) {
+            const cookies = req.headers.cookie.split(';').reduce((acc, cookie) => {
+                const [key, value] = cookie.trim().split('=');
+                acc[key] = value;
+                return acc;
+            }, {});
+            
+            // Common session cookie names
+            if (cookies['connect.sid']) {
+                return cookies['connect.sid'].replace('s:', '').split('.')[0];
+            }
+            if (cookies['sessionId']) {
+                return cookies['sessionId'];
+            }
+        }
+        
+        // Try query parameter
+        if (req.url) {
+            const url = new URL(req.url, `http://${req.headers.host}`);
+            if (url.searchParams.get('sessionId')) {
+                return url.searchParams.get('sessionId');
+            }
+        }
+        
+        return null;
+    }
+
+    /**
      * Broadcast JSON payload to all connected clients
      * @param {Object} payload 
+     * @param {string} excludeSessionId - Optional: Don't send to this session (prevents self-broadcasts)
      */
-    broadcastJson(payload) {
+    broadcastJson(payload, excludeSessionId = null) {
         if (!this.wss || !payload) {
             return;
         }
 
         const message = JSON.stringify(payload);
+        let sentCount = 0;
+        let skippedCount = 0;
 
         this.wss.clients.forEach(client => {
             if (client.readyState === WebSocket.OPEN) {
+                // Skip if this is the session that triggered the event
+                if (excludeSessionId && client.sessionId === excludeSessionId) {
+                    skippedCount++;
+                    return;
+                }
+                
                 client.send(message);
+                sentCount++;
             }
         });
+
+        if (excludeSessionId) {
+            console.log(`📡 Broadcasted to ${sentCount} clients (skipped ${skippedCount} self-broadcast)`);
+        }
     }
 
     /**
@@ -466,11 +546,14 @@ class WebSocketService {
             invoice: invoiceRecord,
             buyer_id: metadata.buyer_id ?? null,
             location_id: metadata.location_id ?? null,
+            triggered_by: metadata.triggered_by || null, // Track who triggered this
             metadata,
             timestamp: new Date().toISOString()
         };
 
-        this.broadcastJson(payload);
+        // Exclude the session that triggered this event (prevents self-broadcasts)
+        const excludeSessionId = metadata.exclude_session || null;
+        this.broadcastJson(payload, excludeSessionId);
     }
 }
 

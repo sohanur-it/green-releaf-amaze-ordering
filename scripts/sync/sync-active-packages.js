@@ -720,6 +720,57 @@ async function syncActivePackagesEnhanced() {
     let batchId = null;
     let scriptOutput = '';
     let scriptError = '';
+    let cleanupCalled = false;
+    
+    // Cleanup function to update sync history on termination
+    const cleanup = async (signal) => {
+        if (cleanupCalled) return;
+        cleanupCalled = true;
+        
+        try {
+            const duration = Date.now() - startTime;
+            const errorMsg = signal ? `Process terminated by ${signal}` : 'Process terminated unexpectedly';
+            
+            console.error(`⚠️ Cleanup triggered: ${errorMsg}`);
+            
+            // Try to update sync history if we have a historyId
+            if (historyId) {
+                try {
+                    const cleanupClient = await pool.connect();
+                    await updateSyncHistory(cleanupClient, historyId, 'failed', duration, scriptOutput, errorMsg);
+                    cleanupClient.release();
+                } catch (cleanupError) {
+                    console.error('❌ Error updating sync history during cleanup:', cleanupError.message);
+                }
+            }
+            
+            // Release client if still connected
+            if (client && !client._ending) {
+                try {
+                    await client.query('ROLLBACK');
+                } catch (rollbackError) {
+                    // Ignore rollback errors during cleanup
+                }
+                client.release();
+            }
+        } catch (error) {
+            console.error('❌ Error during cleanup:', error.message);
+        }
+    };
+    
+    // Register signal handlers for graceful shutdown
+    process.on('SIGTERM', () => cleanup('SIGTERM'));
+    process.on('SIGINT', () => cleanup('SIGINT'));
+    process.on('uncaughtException', (error) => {
+        console.error('❌ Uncaught exception:', error);
+        cleanup('uncaughtException');
+        process.exit(1);
+    });
+    process.on('unhandledRejection', (reason, promise) => {
+        console.error('❌ Unhandled rejection:', reason);
+        cleanup('unhandledRejection');
+        process.exit(1);
+    });
     
     try {
         console.log('🔄 Starting enhanced active packages sync (Full Mirror)...');
@@ -850,7 +901,15 @@ async function syncActivePackagesEnhanced() {
         
         throw error;
     } finally {
-        client.release();
+        // Remove signal handlers to prevent double cleanup
+        process.removeAllListeners('SIGTERM');
+        process.removeAllListeners('SIGINT');
+        process.removeAllListeners('uncaughtException');
+        process.removeAllListeners('unhandledRejection');
+        
+        if (client && !client._ending) {
+            client.release();
+        }
     }
 }
 

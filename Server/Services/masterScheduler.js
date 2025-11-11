@@ -11,6 +11,7 @@ const { promisify } = require('util');
 const auditLogger = require('./auditLogger');
 const cartCleanupService = require('./cartCleanupService');
 const dealFlowAutomationService = require('./dealFlowAutomationService');
+const batchStatusService = require('./batchStatusService');
 
 const execAsync = promisify(exec);
 
@@ -131,8 +132,8 @@ class MasterScheduler {
             }
         }
 
-        // Schedule cart cleanup job (every 10 minutes, 24/7)
-        const cartCleanupJob = cron.schedule('*/10 * * * *', async () => {
+        // Schedule cart cleanup job (every hour, 24/7)
+        const cartCleanupJob = cron.schedule('0 * * * *', async () => {
             try {
                 console.log('🧹 Running cart cleanup job...');
                 const result = await cartCleanupService.cleanupExpiredCarts();
@@ -175,8 +176,87 @@ class MasterScheduler {
         scheduledCount++;
         console.log('📅 Scheduled deal flow automation job (daily at 2 AM)');
 
+        // Schedule batch auto-promotion job (every 15 minutes during business hours)
+        const batchPromotionJob = cron.schedule('*/15 8-18 * * 1-5', async () => {
+            try {
+                console.log('🔄 [SCHEDULER] Running scheduled batch auto-promotion job...');
+                console.log('🔄 [SCHEDULER] Current time:', new Date().toISOString());
+                const result = await batchStatusService.checkAndPromoteAllProducts();
+                if (result.success) {
+                    console.log(`✅ [SCHEDULER] Batch auto-promotion completed: ${result.totalBatchesPromoted} batches promoted across ${result.productsProcessed} products`);
+                    console.log(`📊 [SCHEDULER] Promotion details:`, {
+                        totalProducts: result.totalProducts,
+                        productsProcessed: result.productsProcessed,
+                        totalBatchesPromoted: result.totalBatchesPromoted
+                    });
+                } else {
+                    console.error('❌ [SCHEDULER] Batch auto-promotion job failed:', result.error);
+                }
+            } catch (error) {
+                console.error('❌ [SCHEDULER] Batch auto-promotion job error:', error.message);
+                console.error('❌ [SCHEDULER] Error stack:', error.stack);
+            }
+        }, {
+            scheduled: true,
+            timezone: process.env.SYNC_TIMEZONE || 'America/Chicago'
+        });
+
+        this.jobs.set('batchAutoPromotion', batchPromotionJob);
+        scheduledCount++;
+        console.log('📅 Scheduled batch auto-promotion job (every 15 minutes during business hours)');
+
+        // Run batch promotion immediately on startup
+        try {
+            console.log('🚀 [SCHEDULER] Running initial batch promotion check on startup...');
+            console.log('🚀 [SCHEDULER] Startup time:', new Date().toISOString());
+            const initialResult = await batchStatusService.checkAndPromoteAllProducts();
+            if (initialResult.success) {
+                if (initialResult.totalBatchesPromoted > 0) {
+                    console.log(`✅ [SCHEDULER] Initial batch promotion completed: ${initialResult.totalBatchesPromoted} batches promoted across ${initialResult.productsProcessed} products`);
+                    console.log(`📊 [SCHEDULER] Initial promotion details:`, {
+                        totalProducts: initialResult.totalProducts,
+                        productsProcessed: initialResult.productsProcessed,
+                        totalBatchesPromoted: initialResult.totalBatchesPromoted
+                    });
+                } else {
+                    console.log(`ℹ️ [SCHEDULER] Initial batch promotion: No batches needed promotion (${initialResult.totalProducts} products checked)`);
+                }
+            } else {
+                console.log(`ℹ️ [SCHEDULER] Initial batch promotion: ${initialResult.error || 'No batches needed promotion'}`);
+            }
+        } catch (startupError) {
+            console.error('⚠️ [SCHEDULER] Error during initial batch promotion on startup:', startupError.message);
+            console.error('⚠️ [SCHEDULER] Error stack:', startupError.stack);
+            // Don't fail startup if promotion fails
+        }
+
+        // Run all sync jobs immediately on startup (don't wait for cron schedules)
+        console.log('🚀 [SCHEDULER] Running all sync jobs immediately on startup...');
+        const startupSyncPromises = [];
+        for (const job of this.syncJobs) {
+            if (job.enabled) {
+                console.log(`🚀 [SCHEDULER] Starting immediate sync: ${job.name} - ${job.description}`);
+                // Run each sync job asynchronously (don't block startup)
+                startupSyncPromises.push(
+                    this.executeJob(job).catch(error => {
+                        console.error(`❌ [SCHEDULER] Startup sync failed for ${job.name}:`, error.message);
+                        // Don't fail startup if individual syncs fail
+                    })
+                );
+            }
+        }
+        
+        // Wait for all startup syncs to complete (but don't block if they take too long)
+        Promise.allSettled(startupSyncPromises).then(results => {
+            const successful = results.filter(r => r.status === 'fulfilled').length;
+            const failed = results.filter(r => r.status === 'rejected').length;
+            console.log(`✅ [SCHEDULER] Startup syncs completed: ${successful} successful, ${failed} failed`);
+        }).catch(error => {
+            console.error('⚠️ [SCHEDULER] Error waiting for startup syncs:', error.message);
+        });
+
         this.isRunning = true;
-        console.log(`✅ Master Scheduler started successfully (${scheduledCount} jobs scheduled)`);
+        console.log(`✅ Master Scheduler started successfully (${scheduledCount} jobs scheduled, ${this.syncJobs.filter(j => j.enabled).length} syncs triggered on startup)`);
         
         // Log system action
         await auditLogger.logSystemAction(
@@ -286,9 +366,22 @@ class MasterScheduler {
         console.log(`   Execution time (${timezone}): ${executeTime}`);
         
         try {
-            // Execute the sync script
+            // Execute the sync script with appropriate timeout based on sync type
+            // Active packages and transferred packages can process thousands of records
+            const timeoutMap = {
+                'sync:active:prod': 900000,      // 15 minutes for active packages (can be 5000+ records)
+                'sync:transferred:prod': 1800000, // 30 minutes for transferred packages (can be very large)
+                'sync:intransit:prod': 600000,   // 10 minutes for in-transit packages
+                'sync:outgoing:prod': 600000,     // 10 minutes for outgoing transfers
+                'sync:items:prod': 600000,        // 10 minutes for items
+                'sync:strains:prod': 600000,     // 10 minutes for strains
+                'sync:batches:prod': 900000       // 15 minutes for batches
+            };
+            
+            const timeout = timeoutMap[job.script] || 600000; // Default 10 minutes
+            
             const { stdout, stderr } = await execAsync(`npm run ${job.script}`, {
-                timeout: 300000, // 5 minute timeout
+                timeout: timeout,
                 cwd: process.cwd()
             });
 

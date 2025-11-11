@@ -9,6 +9,7 @@ const { query } = require('../config/database');
 const { Pool } = require('pg');
 const path = require('path');
 const websocketService = require('./websocketService');
+const purchaseLimitService = require('./purchaseLimitService');
 
 class InvoiceStateMachineService {
     constructor() {
@@ -171,9 +172,20 @@ class InvoiceStateMachineService {
         try {
             // Draft -> Pending_Approval (External order submitted)
             if (from === 'Draft' && to === 'Pending_Approval') {
-                const validation = await this.validatePurchaseLimits(invoiceId, client);
-                if (!validation.success) {
-                    return validation;
+                try {
+                    await purchaseLimitService.validatePurchaseLimits(invoiceId, client);
+                } catch (error) {
+                    // PurchaseLimitError contains detailed violations
+                    if (error.violations) {
+                        const errorMessages = error.violations.map(v => v.message).join('; ');
+                        return {
+                            success: false,
+                            error: errorMessages,
+                            violations: error.violations
+                        };
+                    }
+                    // Re-throw if it's not a PurchaseLimitError
+                    throw error;
                 }
                 // Notification will be sent in postTransitionEffects
             }
@@ -336,45 +348,23 @@ class InvoiceStateMachineService {
 
     /**
      * Validate purchase limits for external orders
+     * NOTE: This method is deprecated - use purchaseLimitService.validatePurchaseLimits directly
+     * Kept for backward compatibility but delegates to the full service
      */
     async validatePurchaseLimits(invoiceId, client) {
         try {
-            const invoice = await client.query(`
-                SELECT fk_location_id, fk_buyer_id, total
-                FROM "ORDERS-invoices"
-                WHERE id = $1
-            `, [invoiceId]);
-            
-            if (invoice.rows.length === 0) {
-                return { success: false, error: 'Invoice not found' };
-            }
-            
-            const locationId = invoice.rows[0].fk_location_id;
-            const buyerId = invoice.rows[0].fk_buyer_id;
-            const total = parseFloat(invoice.rows[0].total || 0);
-            
-            // Get purchase limits for this location
-            const limits = await client.query(`
-                SELECT max_order_total, max_unshipped_orders, max_unpaid_invoices
-                FROM "ORDERS-purchase-limits"
-                WHERE fk_location_id = $1
-            `, [locationId]);
-            
-            const maxOrderTotal = parseFloat(limits.rows[0]?.max_order_total || 20000.00);
-            
-            // Validate order total
-            if (total > maxOrderTotal) {
-                return {
-                    success: false,
-                    error: `Order total $${total} exceeds maximum of $${maxOrderTotal}`
-                };
-            }
-            
-            // TODO: Add validation for unshipped orders and unpaid invoices counts
-            // This requires checking existing invoices in the database
-            
+            await purchaseLimitService.validatePurchaseLimits(invoiceId, client);
             return { success: true };
         } catch (error) {
+            // PurchaseLimitError contains detailed violations
+            if (error.violations) {
+                const errorMessages = error.violations.map(v => v.message).join('; ');
+                return {
+                    success: false,
+                    error: errorMessages,
+                    violations: error.violations
+                };
+            }
             console.error('Error validating purchase limits:', error);
             return { success: false, error: error.message };
         }

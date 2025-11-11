@@ -49,11 +49,14 @@ class InternalInvoiceService {
         try {
             await client.query('BEGIN');
             
-            // Validate sales rep access (placeholder - implement proper RBAC check)
-            // const canCreate = await this.validateSalesRepAccess(salesRepId, invoiceData.fk_buyer_id, client);
-            // if (!canCreate) {
-            //     throw new Error('Sales rep not authorized for this buyer');
-            // }
+            // Validate sales rep access to buyer/location
+            // Note: This is a basic check - full authorization is also validated in the controller
+            // This provides an additional layer of security at the service level
+            const canCreate = await this.validateSalesRepAccess(salesRepId, invoiceData.fk_buyer_id, invoiceData.fk_location_id, client);
+            if (!canCreate) {
+                await client.query('ROLLBACK');
+                throw new Error('Sales rep not authorized for this buyer/location');
+            }
             
             // Generate invoice number
             const invoiceNumber = await this.generateInvoiceNumber(client);
@@ -94,6 +97,22 @@ class InternalInvoiceService {
             
             // Calculate totals
             await this.recalculateTotals(invoiceId, client);
+            
+            // Validate purchase limits (Module 4 requirement)
+            // Internal orders also need limit validation, though they rarely hit limits
+            try {
+                const purchaseLimitService = require('./purchaseLimitService');
+                await purchaseLimitService.validatePurchaseLimits(invoiceId, client);
+            } catch (limitError) {
+                // If purchase limits are exceeded, rollback and return clear error
+                if (limitError.violations) {
+                    const errorMessages = limitError.violations.map(v => v.message).join('; ');
+                    await client.query('ROLLBACK');
+                    throw new Error(`Purchase limit validation failed: ${errorMessages}`);
+                }
+                // Re-throw if it's not a PurchaseLimitError
+                throw limitError;
+            }
             
             // Log history
             await client.query(`
@@ -272,8 +291,10 @@ class InternalInvoiceService {
 
     /**
      * Recalculate invoice totals
+     * Applies account credits if available (Module 4 requirement)
      */
     async recalculateTotals(invoiceId, client) {
+        // Calculate subtotal from line items
         const totals = await client.query(`
             SELECT 
                 COALESCE(SUM(line_total), 0) as subtotal
@@ -283,11 +304,47 @@ class InternalInvoiceService {
         
         const subtotal = parseFloat(totals.rows[0].subtotal);
         
+        // Get invoice location for credit check
+        const invoiceResult = await client.query(`
+            SELECT fk_location_id, credit_applied
+            FROM "ORDERS-invoices"
+            WHERE id = $1
+        `, [invoiceId]);
+        
+        if (invoiceResult.rows.length === 0) {
+            throw new Error('Invoice not found');
+        }
+        
+        const locationId = invoiceResult.rows[0].fk_location_id;
+        const existingCreditApplied = parseFloat(invoiceResult.rows[0].credit_applied || 0);
+        
+        // Check for available account credits and apply if not already applied
+        // Only auto-apply if credits haven't been manually applied yet
+        let creditApplied = existingCreditApplied;
+        if (existingCreditApplied === 0 && subtotal > 0) {
+            try {
+                const accountCreditService = require('./accountCreditService');
+                const creditResult = await accountCreditService.applyCreditsToInvoice(invoiceId, client);
+                if (creditResult.success) {
+                    creditApplied = parseFloat(creditResult.applied || 0);
+                }
+            } catch (creditError) {
+                // If credit application fails, continue without credits
+                // This ensures invoice totals are still calculated correctly
+                console.warn(`Could not apply account credits to invoice ${invoiceId}:`, creditError.message);
+            }
+        }
+        
+        // Calculate final total (subtotal minus credits)
+        const total = subtotal - creditApplied;
+        
         await client.query(`
             UPDATE "ORDERS-invoices"
-            SET subtotal = $1, total = $1
-            WHERE id = $2
-        `, [subtotal, invoiceId]);
+            SET subtotal = $1, 
+                credit_applied = $2,
+                total = $3
+            WHERE id = $4
+        `, [subtotal, creditApplied, total, invoiceId]);
     }
 
     /**
@@ -316,6 +373,97 @@ class InternalInvoiceService {
             userId, 
             'Internal order submitted'
         );
+    }
+
+    /**
+     * Validate sales rep access to buyer/location
+     * Module 4 requirement: Authorization check at service level
+     * @param {number} salesRepId - Sales rep user ID
+     * @param {number} buyerId - Buyer ID
+     * @param {number} locationId - Location ID
+     * @param {Object} client - Database client
+     * @returns {Promise<boolean>} - True if authorized
+     */
+    async validateSalesRepAccess(salesRepId, buyerId, locationId, client) {
+        try {
+            // Check if user is admin/superuser (admins can create for any buyer)
+            const userCheck = await client.query(`
+                SELECT id, username
+                FROM users
+                WHERE id = $1
+            `, [salesRepId]);
+            
+            if (userCheck.rows.length === 0) {
+                return false;
+            }
+            
+            // Check if user is superuser (bypass authorization)
+            const UserModel = require('../Models/userModel');
+            const isSuperuser = await UserModel.isSuperuser(salesRepId);
+            if (isSuperuser) {
+                return true;
+            }
+            
+            // Check user roles
+            const userRoles = await UserModel.getUserRoles(salesRepId);
+            const userRoleNames = userRoles.map(r => r.name || r.role_name).filter(Boolean);
+            const isAdmin = userRoleNames.some(r => r.toLowerCase() === 'administrator');
+            const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
+            
+            // Admins and Sales Admins can create for any buyer
+            if (isAdmin || isSalesAdmin) {
+                return true;
+            }
+            
+            // For Sales Reps, check if they have access to this buyer/location
+            // Check if assigned_sales_rep_id column exists on buyer_locations table
+            let hasLocationSalesRepColumn = false;
+            try {
+                const columnCheck = await client.query(`
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'ORDERS-buyer_locations' 
+                    AND column_name = 'assigned_sales_rep_id'
+                `);
+                hasLocationSalesRepColumn = columnCheck.rows.length > 0;
+            } catch (err) {
+                // Column might not exist, use fallback
+                console.warn('Could not check for assigned_sales_rep_id column:', err.message);
+            }
+            
+            if (hasLocationSalesRepColumn) {
+                // Check if location is assigned to this sales rep OR buyer is assigned to this sales rep
+                const accessCheck = await client.query(`
+                    SELECT 
+                        l.entry_id,
+                        l.assigned_sales_rep_id,
+                        ba.fk_sales_rep_id
+                    FROM "ORDERS-buyer_locations" l
+                    LEFT JOIN "ORDERS-buyer_sales_rep_assignments" ba ON l.orders_buyer_id = ba.fk_buyer_id
+                    LEFT JOIN "ORDERS-sales_reps" sr ON ba.fk_sales_rep_id = sr.entry_id
+                    WHERE l.entry_id = $1
+                      AND (
+                          l.assigned_sales_rep_id = $2
+                          OR sr.email = (SELECT email FROM users WHERE id = $2)
+                      )
+                `, [locationId, salesRepId]);
+                return accessCheck.rows.length > 0;
+            } else {
+                // Fallback: check buyer assignments only
+                const accessCheck = await client.query(`
+                    SELECT ba.entry_id
+                    FROM "ORDERS-buyer_sales_rep_assignments" ba
+                    INNER JOIN "ORDERS-sales_reps" sr ON ba.fk_sales_rep_id = sr.entry_id
+                    WHERE ba.fk_buyer_id = $1
+                      AND sr.email = (SELECT email FROM users WHERE id = $2)
+                `, [buyerId, salesRepId]);
+                return accessCheck.rows.length > 0;
+            }
+        } catch (error) {
+            console.error('Error validating sales rep access:', error);
+            // Fail secure: deny access on error
+            return false;
+        }
     }
 
     /**

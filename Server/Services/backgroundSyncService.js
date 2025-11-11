@@ -129,8 +129,24 @@ class BackgroundSyncService {
 
       logger.info(`🔄 Starting background sync: ${job.serviceName} (Job ID: ${job.id})`);
 
+      // Set appropriate timeout based on service type
+      const timeoutMap = {
+        'sync:active:prod': 900000,      // 15 minutes for active packages
+        'sync:transferred:prod': 1800000, // 30 minutes for transferred packages
+        'sync:intransit:prod': 600000,   // 10 minutes for in-transit packages
+        'sync:outgoing:prod': 600000,     // 10 minutes for outgoing transfers
+        'sync:items:prod': 600000,        // 10 minutes for items
+        'sync:strains:prod': 600000,      // 10 minutes for strains
+        'sync:batches:prod': 900000       // 15 minutes for batches
+      };
+      
+      // Extract script name from full command (e.g., "npm run sync:active:prod" -> "sync:active:prod")
+      const scriptMatch = script.match(/sync:\w+:prod/);
+      const scriptKey = scriptMatch ? scriptMatch[0] : null;
+      const timeout = scriptKey && timeoutMap[scriptKey] ? timeoutMap[scriptKey] : 600000; // Default 10 minutes
+      
       const { stdout, stderr } = await execAsync(script, { 
-        timeout: 300000, // 5 minutes timeout
+        timeout: timeout,
         env: { 
           ...process.env, 
           SYNC_USER_ID: job.userInfo.userIdString !== 'SYSTEM' ? job.userInfo.userIdString : undefined 

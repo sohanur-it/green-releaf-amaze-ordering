@@ -2,7 +2,7 @@
  * Cart Cleanup Service
  * 
  * Handles automatic cleanup of expired shopping carts
- * Runs as a cron job every 10 minutes
+ * Runs as a cron job every hour
  */
 
 const { query } = require('../config/database');

@@ -44,13 +44,17 @@ class AllocationService {
      * @param {number} quantity - Requested quantity
      * @param {number} invoiceId - Invoice ID
      * @param {number} lineItemId - Line item ID (optional, will be created if not provided)
+     * @param {Object} existingClient - Optional: Existing database client to use (for transactions)
      * @returns {Promise<Object>} - Allocation result
      */
-    async allocateBatchToInvoice(batchId, quantity, invoiceId, lineItemId = null) {
-        const client = await this.pool.connect();
+    async allocateBatchToInvoice(batchId, quantity, invoiceId, lineItemId = null, existingClient = null) {
+        const useExistingClient = existingClient !== null;
+        const client = useExistingClient ? existingClient : await this.pool.connect();
         
         try {
-            await client.query('BEGIN');
+            if (!useExistingClient) {
+                await client.query('BEGIN');
+            }
 
             // Lock the batch row FOR UPDATE to prevent race conditions
             const batch = await client.query(`
@@ -63,7 +67,10 @@ class AllocationService {
             `, [batchId]);
 
             if (batch.rows.length === 0) {
-                await client.query('ROLLBACK');
+                if (!useExistingClient) {
+                    await client.query('ROLLBACK');
+                    client.release();
+                }
                 return {
                     success: false,
                     error: 'Batch not found'
@@ -75,7 +82,10 @@ class AllocationService {
 
             // Check if sufficient inventory available
             if (available < quantity) {
-                await client.query('ROLLBACK');
+                if (!useExistingClient) {
+                    await client.query('ROLLBACK');
+                    client.release();
+                }
                 return {
                     success: false,
                     error: 'insufficient_inventory',
@@ -119,29 +129,36 @@ class AllocationService {
                 invoiceId
             ]);
 
-            await client.query('COMMIT');
+            // Only commit if we created our own transaction
+            if (!useExistingClient) {
+                await client.query('COMMIT');
+            }
 
             console.log(`✅ Allocated ${quantity} units from batch ${batchId} to invoice ${invoiceId}`);
 
-            // Check if this allocation should trigger auto-promotion
-            try {
-                const batchStatusService = require('./batchStatusService');
-                const isDepleted = await batchStatusService.isInventoryDepleted(batchData.fk_master_product_id);
-                
-                if (isDepleted) {
-                    console.log(`⚠️ Product ${batchData.fk_master_product_id} depleted! Triggering auto-promotion...`);
-                    await batchStatusService.promoteBatchesToSellable(batchData.fk_master_product_id);
+            // Check if this allocation should trigger auto-promotion (only if not in existing transaction)
+            if (!useExistingClient) {
+                try {
+                    const batchStatusService = require('./batchStatusService');
+                    const isDepleted = await batchStatusService.isInventoryDepleted(batchData.fk_master_product_id);
+                    
+                    if (isDepleted) {
+                        console.log(`⚠️ Product ${batchData.fk_master_product_id} depleted! Triggering auto-promotion...`);
+                        await batchStatusService.promoteBatchesToSellable(batchData.fk_master_product_id);
+                    }
+                } catch (promotionError) {
+                    console.error('❌ Error during auto-promotion after allocation:', promotionError.message);
+                    // Don't fail the allocation if promotion fails
                 }
-            } catch (promotionError) {
-                console.error('❌ Error during auto-promotion after allocation:', promotionError.message);
-                // Don't fail the allocation if promotion fails
             }
 
-            // Broadcast inventory update via WebSocket
-            try {
-                await this.broadcastInventoryUpdate(batchId, available - quantity);
-            } catch (wsError) {
-                console.error('WebSocket broadcast error (non-critical):', wsError.message);
+            // Broadcast inventory update via WebSocket (only if not in existing transaction)
+            if (!useExistingClient) {
+                try {
+                    await this.broadcastInventoryUpdate(batchId, available - quantity);
+                } catch (wsError) {
+                    console.error('WebSocket broadcast error (non-critical):', wsError.message);
+                }
             }
 
             return {
@@ -153,7 +170,10 @@ class AllocationService {
             };
 
         } catch (error) {
-            await client.query('ROLLBACK');
+            // Only rollback if we created our own transaction
+            if (!useExistingClient) {
+                await client.query('ROLLBACK');
+            }
             console.error('❌ Error allocating batch to invoice:', error.message);
             
             return {
@@ -161,7 +181,10 @@ class AllocationService {
                 error: error.message
             };
         } finally {
-            client.release();
+            // Only release if we created our own client
+            if (!useExistingClient) {
+                client.release();
+            }
         }
     }
 

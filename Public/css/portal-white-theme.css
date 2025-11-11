@@ -45,7 +45,7 @@ body {
     top: 0;
     right: 0;
     left: 0;
-    z-index: 100;
+    z-index: 1000;
     box-shadow: 0 2px 4px rgba(0,0,0,0.05);
 }
 
@@ -57,6 +57,9 @@ body {
     font-size: 14px;
     color: var(--text-dark);
     font-weight: 500;
+    position: relative;
+    z-index: 1001;
+    pointer-events: auto;
 }
 
 .header-dropdown {
@@ -84,6 +87,9 @@ body {
     justify-content: center;
     border-radius: var(--border-radius);
     transition: all 0.2s;
+    position: relative;
+    z-index: 1001;
+    pointer-events: auto;
 }
 
 .header-icon:hover {
@@ -95,6 +101,9 @@ body {
     display: flex;
     align-items: center;
     gap: 12px;
+    position: relative;
+    z-index: 1001;
+    pointer-events: auto;
 }
 
 /* AMAZE Header Section */
@@ -2161,6 +2170,9 @@ body {
     max-width: 1400px;
     margin: 0 auto;
     padding: 24px;
+    /* CRITICAL: Ensure checkout content doesn't block header clicks */
+    position: relative;
+    z-index: 1;
 }
 
 .checkout-header {

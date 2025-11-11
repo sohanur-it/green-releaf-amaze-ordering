@@ -195,6 +195,33 @@ class BatchSyncService {
     }
 
     /**
+     * Find product ID that has this metrc_item_name in its metrc_linked_items
+     * Returns null if no product matches
+     */
+    async findProductForMetrcItem(metrcItemName, client) {
+        try {
+            const result = await client.query(`
+                SELECT entry_id, name
+                FROM "ORDERS-products"
+                WHERE metrc_linked_items @> $1::jsonb
+                  AND is_archived = false
+                LIMIT 1
+            `, [JSON.stringify([metrcItemName])]);
+            
+            if (result.rows.length > 0) {
+                return {
+                    product_id: result.rows[0].entry_id,
+                    product_name: result.rows[0].name
+                };
+            }
+            return null;
+        } catch (error) {
+            console.error(`   ⚠️ Error finding product for metrc_item_name "${metrcItemName}":`, error.message);
+            return null;
+        }
+    }
+
+    /**
      * Apply changes with full history tracking
      */
     async applyChangesWithHistory(changes) {
@@ -311,6 +338,30 @@ class BatchSyncService {
                     initialStatus
                 ]);
 
+                    const newBatchId = result.rows[0].id;
+                    
+                    // AUTO-LINK: Find product that has this metrc_item_name in metrc_linked_items
+                    const productMatch = await this.findProductForMetrcItem(batch.name, client);
+                    if (productMatch) {
+                        // Link the batch to the product
+                        await client.query(`
+                            UPDATE "ORDERS-batches"
+                            SET fk_master_product_id = $1
+                            WHERE id = $2
+                        `, [productMatch.product_id, newBatchId]);
+                        
+                        // Log the auto-linking
+                        await client.query(`
+                            INSERT INTO "ORDERS-batch-history" (
+                                batch_id, change_type, reason,
+                                changed_by_system
+                            ) VALUES ($1, 'master_product_linked', 
+                                      'Auto-linked to product "${productMatch.product_name}" during batch sync', true)
+                        `, [newBatchId]);
+                        
+                        console.log(`   🔗 Auto-linked batch "${batch.batch_name}" to product "${productMatch.product_name}" (ID: ${productMatch.product_id})`);
+                    }
+
                     // Log creation
                     const reason = initialStatus === 'Sellable' 
                         ? 'Discovered in METRC sync - Auto-promoted as first batch for product'
@@ -321,7 +372,7 @@ class BatchSyncService {
                             batch_id, change_type, field_name, new_value, reason, 
                             changed_by_system, timestamp
                         ) VALUES ($1, 'batch_created', 'status', $2, $3, true, NOW())
-                    `, [result.rows[0].id, initialStatus, reason]);
+                    `, [newBatchId, initialStatus, reason]);
                 } catch (error) {
                     console.error(`   ❌ CRITICAL: Failed to create batch "${batch.batch_name}": ${error.message}`);
                     console.error(`   ❌ Error details:`, JSON.stringify(batch, null, 2));
@@ -345,7 +396,26 @@ class BatchSyncService {
                         continue;
                     }
 
-                    // Update the batch (preserving the status)
+                    // Check if batch is already linked to a product
+                    const currentBatch = await client.query(`
+                        SELECT fk_master_product_id, metrc_item_name
+                        FROM "ORDERS-batches"
+                        WHERE id = $1
+                    `, [batchId]);
+                    
+                    const isLinked = currentBatch.rows[0]?.fk_master_product_id !== null;
+                    const metrcItemName = currentBatch.rows[0]?.metrc_item_name;
+                    
+                    // AUTO-LINK: If batch is not linked, try to find matching product
+                    let productMatch = null;
+                    if (!isLinked && metrcItemName) {
+                        productMatch = await this.findProductForMetrcItem(metrcItemName, client);
+                        if (productMatch) {
+                            console.log(`   🔗 Auto-linking unlinked batch "${change.batch_name}" to product "${productMatch.product_name}" (ID: ${productMatch.product_id})`);
+                        }
+                    }
+
+                    // Update the batch (preserving the status, and auto-linking if needed)
                     await client.query(`
                         UPDATE "ORDERS-batches"
                         SET 
@@ -358,8 +428,9 @@ class BatchSyncService {
                             partial_package_details = $7,
                             thc_percentage = $8,
                             last_modified = $9,
-                            last_synced = NOW()
-                        WHERE id = $10
+                            last_synced = NOW(),
+                            fk_master_product_id = COALESCE($10, fk_master_product_id)
+                        WHERE id = $11
                     `, [
                         change.full_fresh_data.quantity,
                         change.full_fresh_data.package_count,
@@ -370,8 +441,20 @@ class BatchSyncService {
                         JSON.stringify(change.full_fresh_data.partial_package_details),
                         change.full_fresh_data.thc_percentage,
                         change.full_fresh_data.last_modified,
+                        productMatch ? productMatch.product_id : null,
                         batchId
                     ]);
+                    
+                    // Log auto-linking if it happened
+                    if (productMatch) {
+                        await client.query(`
+                            INSERT INTO "ORDERS-batch-history" (
+                                batch_id, change_type, reason,
+                                changed_by_system
+                            ) VALUES ($1, 'master_product_linked', 
+                                      'Auto-linked to product "${productMatch.product_name}" during batch sync update', true)
+                        `, [batchId]);
+                    }
 
                     // Log each field change
                     for (const [field, values] of Object.entries(change.updates || {})) {
@@ -574,6 +657,71 @@ class BatchSyncService {
             }
 
             await client.query('COMMIT');
+
+            // Log to audit trail (after commit to ensure data is saved)
+            try {
+                const auditLogger = require('./auditLogger');
+                
+                // Get product name for better logging
+                const productInfo = await client.query(`
+                    SELECT name FROM "ORDERS-products"
+                    WHERE entry_id = $1
+                `, [masterProductId]);
+                
+                const productName = productInfo.rows[0]?.name || `Product ID ${masterProductId}`;
+                
+                // Log summary promotion action
+                await auditLogger.logAction({
+                    userId: null, // System action
+                    action: 'batch_promotion_auto',
+                    resourceType: 'Product',
+                    resourceId: masterProductId.toString(),
+                    details: {
+                        message: `System automatically promoted ${promotionResult.rows.length} batch(es) to Sellable for ${productName} (Product ID ${masterProductId}) due to inventory depletion during batch sync`,
+                        batch_count: promotionResult.rows.length,
+                        batch_names: promotionResult.rows.map(row => row.batch_name).join(', '),
+                        batch_ids: promotionResult.rows.map(row => row.id),
+                        new_status: 'Sellable',
+                        product_id: masterProductId,
+                        product_name: productName,
+                        promotion_reason: 'Auto-promoted: Sellable inventory depleted',
+                        promotion_type: 'automatic',
+                        triggered_by: 'batch_sync'
+                    },
+                    status: 'success',
+                    sourceIp: null
+                });
+                
+                // Also log individual batch status updates for each batch
+                for (const batch of promotionResult.rows) {
+                    await auditLogger.logAction({
+                        userId: null, // System action
+                        action: 'batch_status_update',
+                        resourceType: 'Batch',
+                        resourceId: batch.id.toString(),
+                        details: {
+                            message: `System automatically updated Batch "${batch.batch_name}" (ID: ${batch.id}) status from "On Deck" to "Sellable" during batch sync`,
+                            batch_id: batch.id,
+                            batch_name: batch.batch_name,
+                            old_status: 'On Deck',
+                            new_status: 'Sellable',
+                            product_id: masterProductId,
+                            product_name: productName,
+                            reason: 'Auto-promoted: Sellable inventory depleted',
+                            update_type: 'automatic_promotion',
+                            triggered_by: 'batch_sync',
+                            changed: true
+                        },
+                        status: 'success',
+                        sourceIp: null
+                    });
+                }
+                
+                console.log(`📝 Logged ${promotionResult.rows.length} batch promotion(s) to audit trail for product ${masterProductId}`);
+            } catch (auditError) {
+                // Don't fail the promotion if audit logging fails
+                console.error('⚠️ Failed to log batch promotion to audit trail:', auditError.message);
+            }
 
             return {
                 promoted: true,

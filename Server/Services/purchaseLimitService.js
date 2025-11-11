@@ -91,6 +91,7 @@ class PurchaseLimitService {
             
             // Check 3: Unpaid invoices
             // Note: No FOR UPDATE needed - advisory lock already provides concurrency protection
+            // Unpaid invoices are those that have been delivered but not yet paid
             const unpaid = await queryFunc(`
                 SELECT COUNT(*) as count
                 FROM "ORDERS-invoices"

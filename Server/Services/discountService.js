@@ -158,6 +158,7 @@ class DiscountService {
 
     /**
      * Remove manual discount from a line item
+     * Preserves standing discounts (Module 4 requirement)
      */
     async removeManualDiscount(lineItemId, userId, client = null) {
         const queryFunc = client ? client.query.bind(client) : query;
@@ -166,7 +167,8 @@ class DiscountService {
             const lineItemResult = await queryFunc(`
                 SELECT 
                     li.*,
-                    i.status
+                    i.status,
+                    i.fk_location_id
                 FROM "ORDERS-invoice-line-items" li
                 INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
                 WHERE li.id = $1
@@ -183,21 +185,56 @@ class DiscountService {
                 return { success: false, error: 'No manual discount applied to this line item' };
             }
             
-            // Calculate manual discount portion (all of line_discount_amount)
-            // Note: In a more complex system, we'd track standing vs manual separately
-            const discountToRemove = parseFloat(lineItem.line_discount_amount || 0);
+            // Calculate current total discount amount
+            const currentTotalDiscount = parseFloat(lineItem.line_discount_amount || 0);
             
-            // Remove manual discount
+            // Calculate manual discount amount by recalculating standing discount
+            // and subtracting it from total discount
+            let standingDiscountAmount = 0;
+            if (lineItem.standing_discount_applied && lineItem.standing_discount_id) {
+                // Recalculate standing discount to get its current amount
+                const standingDiscount = await queryFunc(`
+                    SELECT *
+                    FROM "orders-standing-discounts"
+                    WHERE id = $1
+                      AND is_active = true
+                      AND (valid_from IS NULL OR valid_from <= CURRENT_DATE)
+                      AND (valid_until IS NULL OR valid_until >= CURRENT_DATE)
+                `, [lineItem.standing_discount_id]);
+                
+                if (standingDiscount.rows.length > 0) {
+                    const unitPrice = parseFloat(lineItem.unit_price);
+                    const quantity = parseInt(lineItem.quantity_ordered);
+                    standingDiscountAmount = this.calculateDiscount(
+                        standingDiscount.rows[0],
+                        unitPrice,
+                        quantity
+                    );
+                }
+            }
+            
+            // Manual discount is the difference between total and standing
+            const manualDiscountAmount = currentTotalDiscount - standingDiscountAmount;
+            
+            if (manualDiscountAmount <= 0) {
+                // No manual discount to remove (only standing discount exists)
+                return { success: false, error: 'No manual discount found. Only standing discount is applied.' };
+            }
+            
+            // Update line item: keep standing discount, remove manual discount
+            const newLineDiscountAmount = standingDiscountAmount;
+            const newLineTotal = parseFloat(lineItem.line_total) + manualDiscountAmount;
+            
             await queryFunc(`
                 UPDATE "ORDERS-invoice-line-items"
                 SET 
-                    line_discount_amount = 0,
-                    line_total = line_total + $1,
+                    line_discount_amount = $1,
+                    line_total = $2,
                     manual_discount_applied = false,
                     manual_discount_reason = NULL,
                     updated_at = NOW()
-                WHERE id = $2
-            `, [discountToRemove, lineItemId]);
+                WHERE id = $3
+            `, [newLineDiscountAmount, newLineTotal, lineItemId]);
             
             // Recalculate invoice totals
             await this.recalculateInvoiceTotals(lineItem.fk_invoice_id, client);
@@ -208,10 +245,11 @@ class DiscountService {
                     fk_invoice_id, modification_type, field_name,
                     old_value, new_value, reason, changed_by_user_id
                 ) VALUES ($1, 'discount_removed', 'manual_discount', 
-                          $2, '0', 'Manual discount removed', $3)
+                          $2, $3, 'Manual discount removed (standing discount preserved)', $4)
             `, [
                 lineItem.fk_invoice_id,
-                lineItem.line_discount_amount.toString(),
+                currentTotalDiscount.toString(),
+                newLineDiscountAmount.toString(),
                 userId
             ]);
             

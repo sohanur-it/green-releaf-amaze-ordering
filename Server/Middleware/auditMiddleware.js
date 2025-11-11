@@ -87,6 +87,17 @@ function extractActionFromPath(req) {
     const method = req.method.toLowerCase();
     const path = req.path.toLowerCase();
     
+    // Special handling for batch promotion routes
+    if (path.includes('/batches') && path.includes('/promote')) {
+        return 'batch_promotion_manual';
+    }
+    if (path.includes('/batches') && path.includes('/status')) {
+        return 'batch_status_update';
+    }
+    if (path.includes('/batches') && path.includes('/force-check')) {
+        return 'batch_force_check';
+    }
+    
     // Extract resource from path
     let resource = 'unknown';
     if (path.includes('/orders')) resource = 'order';

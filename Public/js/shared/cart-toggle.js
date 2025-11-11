@@ -11,7 +11,7 @@ function initCartToggle() {
     const cartEl = document.querySelector('.portal-cart');
     
     if (!cartEl) {
-        // Cart sidebar doesn't exist on this page (e.g., checkout page)
+        // Cart sidebar doesn't exist on this page
         // Just ensure the cart icon is still functional for showing count
         return;
     }

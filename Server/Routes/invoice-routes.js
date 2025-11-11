@@ -7,7 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const invoiceController = require('../Controllers/invoiceController');
-const { requireAuth: auth } = require('../Middleware/auth');
+const { requireAuth: auth, requireRole } = require('../Middleware/auth');
 const { auditMiddleware } = require('../Middleware/auditMiddleware');
 const discountService = require('../Services/discountService');
 
@@ -160,8 +160,9 @@ router.post('/internal', auth, auditMiddleware, invoiceController.createInternal
 /**
  * Apply manual discount to a line item
  * POST /api/v1/invoices/:invoiceId/line-items/:lineItemId/discount
+ * Requires Sales Admin or Administrator permission
  */
-router.post('/:invoiceId/line-items/:lineItemId/discount', auth, auditMiddleware, async (req, res) => {
+router.post('/:invoiceId/line-items/:lineItemId/discount', auth, requireRole('Sales Admin', 'Administrator'), auditMiddleware, async (req, res) => {
     try {
         const { invoiceId, lineItemId } = req.params;
         const { discount_amount, reason } = req.body;
@@ -195,8 +196,9 @@ router.post('/:invoiceId/line-items/:lineItemId/discount', auth, auditMiddleware
 /**
  * Remove manual discount from a line item
  * DELETE /api/v1/invoices/:invoiceId/line-items/:lineItemId/discount
+ * Requires Sales Admin or Administrator permission
  */
-router.delete('/:invoiceId/line-items/:lineItemId/discount', auth, auditMiddleware, async (req, res) => {
+router.delete('/:invoiceId/line-items/:lineItemId/discount', auth, requireRole('Sales Admin', 'Administrator'), auditMiddleware, async (req, res) => {
     try {
         const { invoiceId, lineItemId } = req.params;
         const userId = req.session.userId || req.user?.id;
