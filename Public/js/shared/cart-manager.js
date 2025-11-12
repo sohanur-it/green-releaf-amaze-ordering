@@ -8,6 +8,7 @@ class CartManager {
         this.storageKey = `portal_cart_${uuid}`;
         this.cart = this.loadCart();
         this.inventoryCache = {}; // Cache inventory data from backend
+        this.lastBackendSyncAt = 0;
     }
 
     // Load cart from localStorage
@@ -334,6 +335,14 @@ class CartManager {
     // @param {boolean} force - If true, always overwrite frontend cart with backend data (for removals)
     // @param {number} lastActionTime - Timestamp of last user action (to detect if items were just added)
     async loadFromBackend(force = false, lastActionTime = 0) {
+        const socketConnected = typeof window !== 'undefined' && typeof window.portalWebSocketConnected !== 'undefined'
+            ? window.portalWebSocketConnected
+            : true;
+
+        if (!socketConnected && !force) {
+            console.log('loadFromBackend skipped: WebSocket offline and force=false');
+            return false;
+        }
         try {
             const response = await fetch(`/api/portal/${this.uuid}/cart`);
             if (response.ok) {
@@ -356,11 +365,10 @@ class CartManager {
                 // 4. Not forcing a reload
                 const timeSinceLastAction = Date.now() - lastActionTime;
                 const recentlyAddedItems = lastActionTime > 0 && timeSinceLastAction < 5000; // 5 seconds
-                const shouldKeepFrontendCart = !force && 
-                                               !backendHasInvoice && 
-                                               frontendHasItems && 
-                                               !backendHasItems && 
-                                               recentlyAddedItems;
+                const shouldKeepFrontendCart = !force &&
+                                               frontendHasItems &&
+                                               !backendHasItems &&
+                                               (!backendHasInvoice || recentlyAddedItems);
                 
                 if (shouldKeepFrontendCart) {
                     // Backend hasn't synced yet (no invoice) and items were just added - keep frontend cart temporarily
@@ -373,6 +381,7 @@ class CartManager {
                         this.cart.total = data.total;
                     }
                     this.saveCart();
+                    this.lastBackendSyncAt = Date.now();
                 } else {
                     // CRITICAL: Always use backend data as source of truth
                     // This ensures frontend cart matches backend state
@@ -397,6 +406,7 @@ class CartManager {
                         total: data.total || 0
                     };
                     this.saveCart();
+                    this.lastBackendSyncAt = Date.now();
                     
                     if (frontendHasItems && !backendHasItems && !recentlyAddedItems) {
                         console.log('⚠️ Frontend cart had items but backend is empty - cleared frontend cart to match backend');

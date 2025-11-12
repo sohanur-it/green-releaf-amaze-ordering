@@ -1036,6 +1036,7 @@ let portalWebSocketConnected = false;
 let portalWebSocketEverConnected = false;
 let cartInteractionsEnabled = false;
 let cartOfflineClearApplied = false;
+window.portalWebSocketConnected = portalWebSocketConnected;
 
 function getPortalWebSocketUrl() {
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
@@ -1122,6 +1123,7 @@ function setCartControlsEnabled(enabled) {
 
 function handlePortalSocketConnected() {
     portalWebSocketConnected = true;
+    window.portalWebSocketConnected = portalWebSocketConnected;
     portalWebSocketEverConnected = true;
     cartOfflineClearApplied = false;
 
@@ -1158,6 +1160,7 @@ function handlePortalSocketDisconnected(reason) {
     }
 
     portalWebSocketConnected = false;
+    window.portalWebSocketConnected = portalWebSocketConnected;
     setCartConnectionStatus('offline', { reason });
     setCartControlsEnabled(false);
 
