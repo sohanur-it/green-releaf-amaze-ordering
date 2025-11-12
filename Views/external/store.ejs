@@ -849,6 +849,7 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(() => {
         initProducts();
         updateProductCount();
+        subscribeToVisibleBatches();
     }, 200);
 
     initPortalWebSocket();
@@ -1028,6 +1029,8 @@ const portalClientSessionId = (() => {
 })();
 
 const outOfStockTimers = new Map();
+const subscribedBatchIds = new Set();
+const pendingBatchSubscriptions = new Set();
 
 let portalWebSocket = null;
 let portalWebSocketReconnectTimer = null;
@@ -1129,6 +1132,8 @@ function handlePortalSocketConnected() {
 
     setCartConnectionStatus('online');
     setCartControlsEnabled(false);
+    flushPendingBatchSubscriptions();
+    subscribeToVisibleBatches();
 
     const cart = getCartManager();
     if (cart) {
@@ -1163,6 +1168,9 @@ function handlePortalSocketDisconnected(reason) {
     window.portalWebSocketConnected = portalWebSocketConnected;
     setCartConnectionStatus('offline', { reason });
     setCartControlsEnabled(false);
+    subscribedBatchIds.clear();
+    pendingBatchSubscriptions.clear();
+    collectVisibleBatchIds().forEach(batchId => pendingBatchSubscriptions.add(String(batchId)));
 
     const cart = getCartManager();
     if (cart && !cartOfflineClearApplied) {
@@ -1188,23 +1196,68 @@ function ensureCartOnline(actionDescription) {
     return true;
 }
 
-function updateProductCount() {
-    const productCountEl = document.getElementById('product-count');
-    if (!productCountEl) {
+function collectVisibleBatchIds() {
+    const nodes = document.querySelectorAll('.product-card[data-batch-id], .product-row[data-batch-id]');
+    const ids = new Set();
+    nodes.forEach(node => {
+        const datasetId = node.dataset.batchId || node.getAttribute('data-batch-id');
+        if (datasetId !== undefined && datasetId !== null && datasetId !== '') {
+            ids.add(String(datasetId));
+        }
+    });
+    return Array.from(ids);
+}
+
+function queueBatchSubscription(batchId) {
+    if (batchId === undefined || batchId === null) {
         return;
     }
 
-    const visibleCards = Array.from(document.querySelectorAll('.product-card[data-batch-id]')).filter(card => {
-        if (card.dataset.hiddenDueToStock === 'true') {
-            return false;
-        }
-        if (card.classList.contains('out-of-stock-hidden')) {
-            return false;
-        }
-        return card.style.display !== 'none';
-    });
+    const normalized = String(batchId);
+    if (!normalized) {
+        return;
+    }
 
-    productCountEl.textContent = visibleCards.length;
+    if (subscribedBatchIds.has(normalized)) {
+        return;
+    }
+
+    if (portalWebSocket && portalWebSocket.readyState === WebSocket.OPEN) {
+        try {
+            const numericBatchId = parseInt(normalized, 10);
+            const payloadBatchId = Number.isNaN(numericBatchId) ? normalized : numericBatchId;
+            portalWebSocket.send(JSON.stringify({
+                type: 'subscribe_batch',
+                batch_id: payloadBatchId
+            }));
+            subscribedBatchIds.add(normalized);
+        } catch (error) {
+            console.error('Failed to subscribe to batch via WebSocket:', normalized, error);
+            if (!pendingBatchSubscriptions.has(normalized)) {
+                pendingBatchSubscriptions.add(normalized);
+            }
+        }
+    } else if (!pendingBatchSubscriptions.has(normalized)) {
+        pendingBatchSubscriptions.add(normalized);
+    }
+}
+
+function flushPendingBatchSubscriptions() {
+    if (!portalWebSocket || portalWebSocket.readyState !== WebSocket.OPEN) {
+        return;
+    }
+    const pending = Array.from(pendingBatchSubscriptions);
+    pendingBatchSubscriptions.clear();
+    pending.forEach(batchId => {
+        subscribedBatchIds.delete(batchId);
+        queueBatchSubscription(batchId);
+    });
+}
+
+function subscribeToVisibleBatches() {
+    const batchIds = collectVisibleBatchIds();
+    batchIds.forEach(queueBatchSubscription);
+    flushPendingBatchSubscriptions();
 }
 
 function updateProductAvailability(batchId, quantityAvailable) {
@@ -1383,6 +1436,31 @@ function handlePortalWebSocketMessage(event) {
         payload = JSON.parse(event.data);
     } catch (error) {
         console.error('Failed to parse WebSocket message:', error);
+        return;
+    }
+
+    if (payload.type === 'batch_inventory_update') {
+        if (payload.batch_id !== undefined && payload.available_quantity !== undefined) {
+            updateProductAvailability(payload.batch_id, payload.available_quantity);
+        }
+        return;
+    }
+
+    if (payload.type === 'batch_current_state') {
+        if (payload.batch_id !== undefined && payload.available_quantity !== undefined) {
+            updateProductAvailability(payload.batch_id, payload.available_quantity);
+        }
+        return;
+    }
+
+    if (payload.type === 'new_inventory_available') {
+        if (payload.data && Array.isArray(payload.data.batches)) {
+            payload.data.batches.forEach(batch => {
+                if (batch && batch.id !== undefined) {
+                    queueBatchSubscription(batch.id);
+                }
+            });
+        }
         return;
     }
 
@@ -3113,6 +3191,7 @@ function applyFilters() {
     
     // Update product count - show total filtered products, not just visible on current page
     updateProductCount(visibleProducts.length);
+    subscribeToVisibleBatches();
     
     // Re-setup hover previews after filtering (in case new products were shown)
     if (document.getElementById('table-view')?.classList.contains('active')) {
@@ -3165,9 +3244,25 @@ function showPageFiltered(page, visibleProducts) {
 
 function updateProductCount(count) {
     const countElement = document.getElementById('product-count');
-    if (countElement) {
-        countElement.textContent = count;
+    if (!countElement) {
+        return;
     }
+
+    let value = count;
+    if (value === undefined || value === null) {
+        const visibleCards = Array.from(document.querySelectorAll('.product-card[data-batch-id]')).filter(card => {
+            if (card.dataset.hiddenDueToStock === 'true') {
+                return false;
+            }
+            if (card.classList.contains('out-of-stock-hidden')) {
+                return false;
+            }
+            return card.style.display !== 'none';
+        });
+        value = visibleCards.length;
+    }
+
+    countElement.textContent = value;
 }
 
 function showPage(page) {
