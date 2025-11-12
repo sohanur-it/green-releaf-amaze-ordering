@@ -226,10 +226,6 @@ class WebSocketService {
      * Called after any allocation/deallocation
      */
     async broadcastInventoryUpdate(batchId, newAvailableQuantity) {
-        if (!this.batchSubscriptions.has(batchId) || this.batchSubscriptions.get(batchId).size === 0) {
-            return; // No subscribers
-        }
-
         const message = JSON.stringify({
             type: 'batch_inventory_update',
             batch_id: batchId,
@@ -237,17 +233,36 @@ class WebSocketService {
             timestamp: new Date().toISOString()
         });
 
-        const subscribers = this.batchSubscriptions.get(batchId);
-        let sentCount = 0;
+        const targets = new Set();
 
-        for (const client of subscribers) {
-            if (client.readyState === WebSocket.OPEN) {
-                client.send(message);
-                sentCount++;
+        if (this.wss) {
+            this.wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    targets.add(client);
+                }
+            });
+        }
+
+        if (this.batchSubscriptions.has(batchId)) {
+            const subscribers = this.batchSubscriptions.get(batchId);
+            for (const client of subscribers) {
+                if (client.readyState === WebSocket.OPEN) {
+                    targets.add(client);
+                }
             }
         }
 
-        console.log(`📡 Broadcasted inventory update for batch ${batchId} to ${sentCount} subscribers`);
+        let sentCount = 0;
+        targets.forEach(client => {
+            try {
+                client.send(message);
+                sentCount++;
+            } catch (error) {
+                console.error('❌ Failed to send inventory update:', error.message);
+            }
+        });
+
+        console.log(`📡 Broadcasted inventory update for batch ${batchId} to ${sentCount} clients`);
     }
 
     /**

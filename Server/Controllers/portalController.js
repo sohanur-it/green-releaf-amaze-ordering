@@ -1107,6 +1107,15 @@ class PortalController {
             // Commit transaction
             await client.query('COMMIT');
             client.release();
+
+            if (affectedBatch && Number.isFinite(affectedBatch.quantity_available)) {
+                websocketService.broadcastInventoryUpdate(
+                    affectedBatch.batch_id,
+                    affectedBatch.quantity_available
+                ).catch(err => {
+                    console.error('WebSocket inventory broadcast error (cart add):', err.message);
+                });
+            }
             
             res.json({ 
                 success: true, 
@@ -1377,6 +1386,24 @@ class PortalController {
             }
 
             res.json(responsePayload);
+
+            if (affectedBatch && Number.isFinite(affectedBatch.quantity_available)) {
+                websocketService.broadcastInventoryUpdate(
+                    affectedBatch.batch_id,
+                    affectedBatch.quantity_available
+                ).catch(err => {
+                    console.error('WebSocket inventory broadcast error (cart update):', err.message);
+                });
+            }
+
+            if (affectedBatch && Number.isFinite(affectedBatch.quantity_available)) {
+                websocketService.broadcastInventoryUpdate(
+                    affectedBatch.batch_id,
+                    affectedBatch.quantity_available
+                ).catch(err => {
+                    console.error('WebSocket inventory broadcast error (cart remove):', err.message);
+                });
+            }
         } catch (error) {
             console.error('Error removing from cart:', error);
             res.status(500).json({ error: 'Failed to remove item from cart', details: error.message });
