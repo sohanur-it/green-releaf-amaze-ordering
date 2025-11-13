@@ -10,6 +10,7 @@ const { Pool } = require('pg');
 const path = require('path');
 const allocationService = require('./allocationService');
 const discountService = require('./discountService');
+const lineItemHistoryService = require('./lineItemHistoryService');
 
 class InternalInvoiceService {
     constructor() {
@@ -241,6 +242,23 @@ class InternalInvoiceService {
             standingDiscountId,
             specificLabels ? JSON.stringify(specificLabels) : null
         ]);
+        
+        await lineItemHistoryService.addLineItemHistoryEntry({
+            client,
+            lineItemId: lineItem.rows[0].id,
+            modificationType: 'created',
+            fieldChanged: null,
+            oldValue: null,
+            newValue: JSON.stringify({
+                quantity_ordered: itemData.quantity,
+                unit_price: unitPrice,
+                line_discount_amount: discountAmount,
+                line_total: lineTotal
+            }),
+            reason: 'Line item added to invoice',
+            changedByUserId: userId,
+            changedBySystem: !userId
+        });
         
         // Allocate from batch (using allocation service for proper WebSocket broadcasts)
         const allocationService = require('./allocationService');

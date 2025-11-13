@@ -34,6 +34,7 @@ const alertRoutes = require('./Routes/alertRoutes');
 const module3Routes = require('./Routes/module3-routes');
 const portalRoutes = require('./Routes/portal-routes');
 const invoiceRoutes = require('./Routes/invoice-routes');
+const notificationRoutes = require('./Routes/notification-routes');
 
 //import services
 const masterScheduler = require('./Services/masterScheduler');
@@ -120,6 +121,7 @@ app.use('/api/v1', module3Routes); // Module 3: Product & Inventory Management A
 app.use('/api/v1/invoices', invoiceRoutes); // Module 4: Invoice management API routes
 app.use('/api/v1/discounts', require('./Routes/discount-routes')); // Module 4: Discount management API routes
 app.use('/api/v1/credits', require('./Routes/credit-routes')); // Module 4: Credit management API routes
+app.use('/api/v1/notifications', notificationRoutes); // Module 4: Notification management API routes
 app.use('/api/alerts', alertRoutes); // sync failure alert API routes
 app.use('/', portalRoutes); // External buyer portal routes
 

@@ -8,6 +8,7 @@ const invoiceStateMachine = require('../Services/invoiceStateMachineService');
 const { query } = require('../config/database');
 const websocketService = require('../Services/websocketService');
 const auditLogger = require('../Services/auditLogger');
+const lineItemHistoryService = require('../Services/lineItemHistoryService');
 
 class InvoiceController {
     /**
@@ -1616,6 +1617,18 @@ class InvoiceController {
                         updated_at = NOW()
                     WHERE id = $6
                 `, [newQuantity, newLineTotal, originalQuantity, modReason, userId, lineItemId]);
+
+                await lineItemHistoryService.addLineItemHistoryEntry({
+                    client,
+                    lineItemId: parseInt(lineItemId, 10),
+                    modificationType: 'quantity_changed',
+                    fieldChanged: 'quantity_ordered',
+                    oldValue: currentQuantity.toString(),
+                    newValue: newQuantity.toString(),
+                    reason: modReason,
+                    changedByUserId: userId,
+                    changedBySystem: false
+                });
 
                 // Recalculate invoice totals
                 await internalInvoiceService.recalculateTotals(parseInt(id), client);

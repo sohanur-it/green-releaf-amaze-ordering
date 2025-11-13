@@ -22,6 +22,7 @@ if (process.env.NODE_ENV === 'production') {
 
 // Get database connection
 const { pool } = require('../config/database');
+const notificationStore = require('./notificationStoreService');
 
 class WebSocketService {
     constructor() {
@@ -369,16 +370,7 @@ class WebSocketService {
         const userId = ws.userId;
 
         try {
-            const client = await pool.connect();
-            await client.query(`
-                UPDATE user_notifications
-                SET 
-                    acknowledged = true,
-                    acknowledged_at = NOW()
-                WHERE id = $1 AND user_id = $2
-            `, [notificationId, userId]);
-
-            client.release();
+            await notificationStore.markNotificationAcknowledged(notificationId, userId);
             console.log(`✓ Notification ${notificationId} acknowledged by user ${userId}`);
         } catch (error) {
             console.error('❌ Error acknowledging notification:', error.message);

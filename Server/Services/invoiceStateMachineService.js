@@ -47,9 +47,10 @@ class InvoiceStateMachineService {
         'Draft': ['Pending_Approval', 'Approved', 'Cancelled'],
         'Pending_Approval': ['Approved', 'Cancelled'],
         'Approved': ['Fulfillment_Accepted', 'Cancelled'],
-        'Fulfillment_Accepted': ['Fulfillment_Issue', 'Manifested', 'Cancelled'],
+        'Fulfillment_Accepted': ['Fulfillment_Issue', 'Manifested', 'Partially_Manifested', 'Cancelled'],
         'Fulfillment_Issue': ['Approved'], // sales fixes, re-submits
-        'Manifested': ['Shipped'],
+        'Partially_Manifested': ['Manifested', 'Fulfillment_Issue'],
+        'Manifested': ['Shipped', 'Fulfillment_Issue'],
         'Shipped': ['Delivered', 'Cancelled_After_Ship'],
         'Delivered': ['Partially_Rejected', 'Fully_Rejected', 'Issue_After_Shipped', 'Paid'],
         'Partially_Rejected': ['Paid'],

@@ -15,6 +15,7 @@ DO $$ BEGIN
         'Fulfillment_Accepted',     -- Fulfillment team claimed it
         'Fulfillment_Issue',        -- Problem reported by fulfillment
         'Manifested',               -- METRC manifest created
+        'Partially_Manifested',     -- Partial manifest created (remaining items pending)
         'Shipped',                  -- In transit
         'Delivered',                -- Received by customer
         'Partially_Rejected',       -- Some items rejected by customer
@@ -73,7 +74,7 @@ CREATE TABLE IF NOT EXISTS "ORDERS-invoices" (
     
     -- Customer Information
     fk_buyer_id INTEGER NOT NULL REFERENCES "ORDERS-buyers"(entry_id),
-    fk_location_id INTEGER NOT NULL,     -- Which dispensary location
+    fk_location_id INTEGER NOT NULL REFERENCES "ORDERS-buyer_locations"(entry_id),     -- Which dispensary location
     location_license_number VARCHAR(50) NOT NULL, -- For METRC manifest
     
     -- Source & Ownership
@@ -126,7 +127,16 @@ CREATE TABLE IF NOT EXISTS "ORDERS-invoices" (
     internal_notes TEXT,
     customer_notes TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT orders_invoices_financials_nonnegative CHECK (
+        subtotal >= 0 AND
+        discount_amount >= 0 AND
+        credit_applied >= 0 AND
+        total >= 0
+    ),
+    CONSTRAINT orders_invoices_total_consistency CHECK (
+        total = subtotal - discount_amount - credit_applied
+    )
 );
 
 -- Critical indexes
@@ -253,6 +263,29 @@ CREATE TRIGGER update_line_items_updated_at BEFORE UPDATE ON "ORDERS-invoice-lin
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- =====================================================
+-- 4a. Create Invoice Line Items History Table
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS "ORDERS-invoice-line-items-history" (
+    id BIGSERIAL PRIMARY KEY,
+    line_item_id INTEGER NOT NULL REFERENCES "ORDERS-invoice-line-items"(id) ON DELETE CASCADE,
+    modification_type VARCHAR(50) NOT NULL,
+    field_changed VARCHAR(50),
+    old_value TEXT,
+    new_value TEXT,
+    reason TEXT,
+    changed_by_user_id INTEGER REFERENCES users(id),
+    changed_by_system BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoice_line_items_history_item 
+    ON "ORDERS-invoice-line-items-history"(line_item_id);
+
+CREATE INDEX IF NOT EXISTS idx_invoice_line_items_history_ts 
+    ON "ORDERS-invoice-line-items-history"(created_at DESC);
+
+-- =====================================================
 -- 5. Create Account Credits Table
 -- =====================================================
 
@@ -276,13 +309,38 @@ CREATE TABLE IF NOT EXISTS "ORDERS-account-credits" (
     
     -- Status
     is_fully_used BOOLEAN DEFAULT false,
-    fully_used_at TIMESTAMPTZ
+    fully_used_at TIMESTAMPTZ,
+    
+    -- Voiding
+    is_voided BOOLEAN DEFAULT false,
+    voided_at TIMESTAMPTZ,
+    voided_by INTEGER REFERENCES users(id),
+    void_reason TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_credits_location ON "ORDERS-account-credits"(fk_location_id);
 CREATE INDEX IF NOT EXISTS idx_credits_active ON "ORDERS-account-credits"(remaining_balance, is_expired, is_fully_used) 
     WHERE remaining_balance > 0 AND is_expired = false AND is_fully_used = false;
 CREATE INDEX IF NOT EXISTS idx_credits_issued_at ON "ORDERS-account-credits"(issued_at ASC);
+
+-- Credit history table (auditing voids, corrections, applications)
+CREATE TABLE IF NOT EXISTS "orders-account-credit-history" (
+    id BIGSERIAL PRIMARY KEY,
+    fk_credit_id INTEGER NOT NULL REFERENCES "ORDERS-account-credits"(id) ON DELETE CASCADE,
+    action_type VARCHAR(50) NOT NULL,
+    amount_change NUMERIC(10, 2),
+    balance_before NUMERIC(10, 2),
+    balance_after NUMERIC(10, 2),
+    related_invoice_id INTEGER REFERENCES "ORDERS-invoices"(id),
+    reason TEXT,
+    metadata JSONB,
+    changed_by_user_id INTEGER REFERENCES users(id),
+    changed_by_system BOOLEAN DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_credit_history_credit ON "orders-account-credit-history"(fk_credit_id);
+CREATE INDEX IF NOT EXISTS idx_credit_history_created_at ON "orders-account-credit-history"(created_at DESC);
 
 -- =====================================================
 -- 6. Create Credit Applications Table (Audit Trail)
@@ -293,14 +351,63 @@ CREATE TABLE IF NOT EXISTS "orders-credit-applications" (
     fk_credit_id INTEGER NOT NULL REFERENCES "ORDERS-account-credits"(id),
     fk_invoice_id INTEGER NOT NULL REFERENCES "ORDERS-invoices"(id),
     amount_applied NUMERIC(10, 2) NOT NULL,
-    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    is_reversed BOOLEAN NOT NULL DEFAULT false,
+    reversed_at TIMESTAMPTZ,
+    reversed_by_user_id INTEGER REFERENCES users(id),
+    reversal_reason TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_credit_apps_invoice ON "orders-credit-applications"(fk_invoice_id);
 CREATE INDEX IF NOT EXISTS idx_credit_apps_credit ON "orders-credit-applications"(fk_credit_id);
 
 -- =====================================================
--- 7. Create Purchase Limits Table
+-- 7. Create User Notification Tables
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS user_notifications (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    notification_type VARCHAR(100) NOT NULL,
+    title TEXT,
+    message TEXT,
+    payload JSONB,
+    priority VARCHAR(20) DEFAULT 'normal',
+    requires_ack BOOLEAN DEFAULT false,
+    is_read BOOLEAN DEFAULT false,
+    read_at TIMESTAMPTZ,
+    acknowledged BOOLEAN DEFAULT false,
+    acknowledged_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_notifications_user_created
+    ON user_notifications (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_user_notifications_unread
+    ON user_notifications (user_id, is_read)
+    WHERE is_read = false;
+
+CREATE INDEX IF NOT EXISTS idx_user_notifications_unack
+    ON user_notifications (user_id, acknowledged)
+    WHERE requires_ack = true AND acknowledged = false;
+
+CREATE TABLE IF NOT EXISTS user_notification_preferences (
+    id BIGSERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    notification_type VARCHAR(100) NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    send_email BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(user_id, notification_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_notification_preferences_user
+    ON user_notification_preferences (user_id);
+
+-- =====================================================
+-- 8. Create Purchase Limits Table
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS "ORDERS-purchase-limits" (

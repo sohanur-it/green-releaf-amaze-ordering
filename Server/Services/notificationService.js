@@ -7,6 +7,7 @@
 
 const { query } = require('../config/database');
 const websocketService = require('./websocketService');
+const notificationStore = require('./notificationStoreService');
 
 class NotificationService {
     /**
@@ -44,7 +45,11 @@ class NotificationService {
                 return { success: true, skipped: true, reason: 'no_sales_rep' };
             }
 
-            // Send WebSocket notification
+            const isEnabled = await notificationStore.isNotificationEnabled(salesRepId, 'invoice_pending_approval');
+            if (!isEnabled) {
+                return { success: true, skipped: true, reason: 'preference_disabled' };
+            }
+
             const notification = {
                 type: 'invoice_pending_approval',
                 title: 'New Order Pending Approval',
@@ -56,7 +61,20 @@ class NotificationService {
                 priority: 'high'
             };
 
-            await websocketService.sendPersistentNotification(salesRepId, notification);
+            const record = await notificationStore.createNotification({
+                userId: salesRepId,
+                type: notification.type,
+                title: notification.title,
+                message: notification.message,
+                payload: notification,
+                priority: notification.priority,
+                requiresAck: true
+            });
+
+            await websocketService.sendPersistentNotification(salesRepId, {
+                ...notification,
+                id: record.id
+            });
 
             console.log(`✅ Sales rep ${salesRepId} notified of pending approval for invoice ${invoiceId}`);
             
@@ -127,9 +145,26 @@ class NotificationService {
                 priority: 'medium'
             };
 
-            // Send to all fulfillment team members via WebSocket
             for (const user of fulfillmentUsers.rows) {
-                await websocketService.sendPersistentNotification(user.id, notification);
+                const enabled = await notificationStore.isNotificationEnabled(user.id, 'invoice_approved');
+                if (!enabled) {
+                    continue;
+                }
+
+                const record = await notificationStore.createNotification({
+                    userId: user.id,
+                    type: notification.type,
+                    title: notification.title,
+                    message: notification.message,
+                    payload: notification,
+                    priority: notification.priority,
+                    requiresAck: false
+                });
+
+                await websocketService.sendPersistentNotification(user.id, {
+                    ...notification,
+                    id: record.id
+                });
             }
 
             // Also broadcast to all fulfillment connections

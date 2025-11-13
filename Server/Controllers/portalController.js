@@ -3,6 +3,7 @@
 const { query } = require('../config/database');
 const cartCleanupService = require('../Services/cartCleanupService');
 const websocketService = require('../Services/websocketService');
+const lineItemHistoryService = require('../Services/lineItemHistoryService');
 
 // Cache for system user ID (avoids repeated queries)
 let cachedSystemUserId = null;
@@ -396,7 +397,7 @@ class PortalController {
             }
             
             const websocketPort = process.env.WEBSOCKET_PORT || 8080;
-
+            
             res.render('external/store', {
                 title: 'Product Catalog',
                 layout: 'layouts/portal',
@@ -652,6 +653,8 @@ class PortalController {
                 client.release();
                 return res.status(401).json({ error: 'Not authenticated' });
             }
+
+            const systemUserId = await PortalController.getSystemUserId();
             
             // Parse and validate quantity - ensure it's an integer
             const quantity = parseInt(quantityParam, 10);
@@ -951,6 +954,18 @@ class PortalController {
                 
                 // Calculate how much additional allocation is needed
                 quantityToAllocate = newQuantity - currentAllocated;
+
+                await lineItemHistoryService.addLineItemHistoryEntry({
+                    client,
+                    lineItemId,
+                    modificationType: 'quantity_changed',
+                    fieldChanged: 'quantity_ordered',
+                    oldValue: currentQty.toString(),
+                    newValue: newQuantity.toString(),
+                    reason: 'Quantity increased via external cart add',
+                    changedByUserId: systemUserId,
+                    changedBySystem: true
+                });
             } else {
                 // Create new line item (without allocation initially)
                 const lineItemOrderResult = await client.query(`
@@ -972,6 +987,22 @@ class PortalController {
                 
                 lineItemId = lineItemResult.rows[0].id;
                 isNewLineItem = true;
+
+                await lineItemHistoryService.addLineItemHistoryEntry({
+                    client,
+                    lineItemId,
+                    modificationType: 'created',
+                    fieldChanged: null,
+                    oldValue: null,
+                    newValue: JSON.stringify({
+                        quantity_ordered: insertQuantity,
+                        unit_price: unitPrice,
+                        line_total: lineTotal
+                    }),
+                    reason: 'Line item added via external cart',
+                    changedByUserId: systemUserId,
+                    changedBySystem: true
+                });
             }
             
             // CRITICAL: Allocate inventory according to Module 4 requirements
@@ -1377,7 +1408,7 @@ class PortalController {
             }
             
             const responsePayload = {
-                success: true,
+                success: true, 
                 message: 'Item removed from cart'
             };
 
@@ -1449,6 +1480,9 @@ class PortalController {
                 return res.status(403).json({ error: 'Unauthorized' });
             }
             
+            const systemUserId = await PortalController.getSystemUserId();
+            let activeLineItemId = parseInt(line_item_id, 10);
+            
             // CRITICAL: Verify invoice is still valid (not cancelled or expired)
             if (lineItem.status === 'Cancelled') {
                 return res.status(400).json({ 
@@ -1517,19 +1551,33 @@ class PortalController {
                 const unitPrice = lineItem.unit_price;
                 const lineTotal = unitPrice * quantity;
                 
-                await query(`
+                const insertedLineItem = await query(`
                     INSERT INTO "ORDERS-invoice-line-items" (
                         fk_invoice_id, fk_master_product_id, fk_batch_id,
                         quantity_ordered, unit_price, line_total, line_item_order
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    RETURNING id
                 `, [lineItem.fk_invoice_id, lineItem.fk_master_product_id, 
                      lineItem.fk_batch_id, quantity, unitPrice, lineTotal, lineItemOrder]);
+                
+                activeLineItemId = insertedLineItem.rows[0].id;
                 
                 console.log('updateCartItem - Merged duplicates and created new item:', {
                     invoice_id: lineItem.fk_invoice_id,
                     batch_id: lineItem.fk_batch_id,
                     quantity,
                     deleted_duplicates: duplicateCount
+                });
+                
+                await lineItemHistoryService.addLineItemHistoryEntry({
+                    lineItemId: activeLineItemId,
+                    modificationType: 'quantity_changed',
+                    fieldChanged: 'quantity_ordered',
+                    oldValue: currentQuantity.toString(),
+                    newValue: quantity.toString(),
+                    reason: 'Quantity updated via external cart (duplicate merged)',
+                    changedByUserId: systemUserId,
+                    changedBySystem: true
                 });
             } else {
                 // Update the single line item
@@ -1542,11 +1590,22 @@ class PortalController {
                         line_total = $2,
                         updated_at = NOW()
                     WHERE id = $3
-                `, [quantity, lineTotal, line_item_id]);
+                `, [quantity, lineTotal, activeLineItemId]);
                 
                 console.log('updateCartItem - Updated line item:', {
-                    line_item_id,
+                    line_item_id: activeLineItemId,
                     quantity
+                });
+
+                await lineItemHistoryService.addLineItemHistoryEntry({
+                    lineItemId: activeLineItemId,
+                    modificationType: 'quantity_changed',
+                    fieldChanged: 'quantity_ordered',
+                    oldValue: currentQuantity.toString(),
+                    newValue: quantity.toString(),
+                    reason: 'Quantity updated via external cart',
+                    changedByUserId: systemUserId,
+                    changedBySystem: true
                 });
             }
             
@@ -1593,10 +1652,10 @@ class PortalController {
                                 UPDATE "ORDERS-invoice-line-items"
                                 SET quantity_allocated = $1
                                 WHERE id = $2
-                            `, [newAllocated, line_item_id]);
+                            `, [newAllocated, activeLineItemId]);
                             
                             finalAllocated = newAllocated;
-
+                            
                             console.log('updateCartItem - Deallocated:', {
                                 batch_id: lineItem.fk_batch_id,
                                 quantity: quantityToDeallocate
@@ -1609,7 +1668,7 @@ class PortalController {
                             lineItem.fk_batch_id,
                             quantityToAllocate,
                             lineItem.fk_invoice_id,
-                            line_item_id
+                            activeLineItemId
                         );
                         
                         if (!allocationResult.success) {
@@ -1621,7 +1680,7 @@ class PortalController {
                                     line_total = $1 * unit_price,
                                     updated_at = NOW()
                                 WHERE id = $2
-                            `, [currentQuantity, line_item_id]);
+                            `, [currentQuantity, activeLineItemId]);
                             
                             return res.status(400).json({ 
                                 error: allocationResult.error || 'Failed to allocate inventory' 
@@ -1633,10 +1692,10 @@ class PortalController {
                                 UPDATE "ORDERS-invoice-line-items"
                                 SET quantity_allocated = $1
                                 WHERE id = $2
-                            `, [newAllocated, line_item_id]);
+                            `, [newAllocated, activeLineItemId]);
                             
                             finalAllocated = newAllocated;
-
+                            
                             console.log('updateCartItem - Allocated:', {
                                 batch_id: lineItem.fk_batch_id,
                                 quantity: quantityToAllocate
@@ -1649,13 +1708,38 @@ class PortalController {
                 }
             }
             
+            const refreshedLineItemResult = await query(`
+                SELECT 
+                    id,
+                    fk_batch_id,
+                    quantity_ordered,
+                    quantity_allocated,
+                    unit_price,
+                    line_total
+                FROM "ORDERS-invoice-line-items"
+                WHERE id = $1
+            `, [activeLineItemId]);
+
+            const refreshedLineItem = refreshedLineItemResult.rows[0];
+
             const lineItemPayload = {
-                id: line_item_id,
-                batch_id: lineItem.fk_batch_id,
-                quantity_ordered: parseInt(quantity, 10),
-                quantity_allocated: finalAllocated,
-                unit_price: parseFloat(lineItem.unit_price || 0),
-                line_total: parseFloat(lineItem.unit_price || 0) * parseInt(quantity, 10)
+                id: activeLineItemId,
+                batch_id: refreshedLineItem ? refreshedLineItem.fk_batch_id : lineItem.fk_batch_id,
+                quantity_ordered: parseInt(
+                    refreshedLineItem ? refreshedLineItem.quantity_ordered : quantity,
+                    10
+                ),
+                quantity_allocated: parseInt(
+                    refreshedLineItem ? refreshedLineItem.quantity_allocated : finalAllocated || 0,
+                    10
+                ),
+                unit_price: parseFloat(
+                    refreshedLineItem ? refreshedLineItem.unit_price : lineItem.unit_price || 0
+                ),
+                line_total: parseFloat(
+                    refreshedLineItem ? refreshedLineItem.line_total :
+                        (lineItem.unit_price || 0) * parseInt(quantity, 10)
+                )
             };
 
             const availabilitySnapshot = await query(`
@@ -1663,11 +1747,11 @@ class PortalController {
                     (quantity - allocated_quantity)::INTEGER AS quantity_available
                 FROM "ORDERS-batches"
                 WHERE id = $1
-            `, [lineItem.fk_batch_id]);
+            `, [lineItemPayload.batch_id]);
 
             const affectedBatch = availabilitySnapshot.rows.length > 0
                 ? {
-                    batch_id: parseInt(lineItem.fk_batch_id, 10),
+                    batch_id: parseInt(lineItemPayload.batch_id, 10),
                     quantity_available: parseInt(availabilitySnapshot.rows[0].quantity_available || 0, 10)
                 }
                 : null;
@@ -1689,7 +1773,7 @@ class PortalController {
             });
 
             const responsePayload = {
-                success: true,
+                success: true, 
                 message: 'Quantity updated',
                 subtotal,
                 total,
@@ -1731,14 +1815,14 @@ class PortalController {
             if (portalAccess.buyerId) {
                 try {
                     const buyerResult = await query(`
-                        SELECT 
+                SELECT 
                             b.entry_id,
                             b.name,
                             b.website_url,
                             b.buyer_type
                         FROM "ORDERS-buyers" b
                         WHERE b.entry_id = $1
-                    `, [portalAccess.buyerId]);
+            `, [portalAccess.buyerId]);
                     
                     if (buyerResult.rows.length > 0) {
                         buyerInfo = buyerResult.rows[0];
@@ -2102,11 +2186,11 @@ class PortalController {
                                 'units_per_case', p.units_per_case,
                                 'unit_size', p.unit_size,
                                 'unit_measurement_name', p.unit_measurement_name,
-                            'batch_name', b.batch_name,
-                            'quantity', lia.total_quantity,
+                                'batch_name', b.batch_name,
+                                'quantity', lia.total_quantity,
                             'quantity_allocated', COALESCE(lia.total_allocated, 0),
-                            'unit_price', lia.unit_price,
-                            'line_total', lia.total_line_total,
+                                'unit_price', lia.unit_price,
+                                'line_total', lia.total_line_total,
                             'quantity_available', (b.quantity - b.allocated_quantity + COALESCE(lia.total_allocated, 0))::INTEGER,
                             'image_url', COALESCE(
                                 (SELECT '/public/' || file_path 
@@ -2118,7 +2202,7 @@ class PortalController {
                                  LIMIT 1),
                                 '/public/images/placeholder.jpg'
                             )
-                        ) ORDER BY lia.line_item_order
+                            ) ORDER BY lia.line_item_order
                         ),
                         '[]'::jsonb
                     ) as items
