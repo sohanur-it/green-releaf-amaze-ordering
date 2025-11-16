@@ -14,7 +14,14 @@ async function checkAdminUser() {
         
         // Check admin user
         const adminUser = await client.query(`
-            SELECT id, username, first_name, last_name, email, is_active, is_admin
+            SELECT 
+                id, 
+                username, 
+                first_name, 
+                last_name, 
+                email, 
+                is_active, 
+                COALESCE(is_superadmin, is_admin, false) as is_superadmin
             FROM users 
             WHERE username = 'admin'
         `);
@@ -31,7 +38,7 @@ async function checkAdminUser() {
         console.log(`   Name: ${user.first_name} ${user.last_name}`);
         console.log(`   Email: ${user.email}`);
         console.log(`   Is Active: ${user.is_active}`);
-        console.log(`   Is Admin: ${user.is_admin}`);
+        console.log(`   Is Superadmin: ${user.is_superadmin}`);
         
         // Check if user is active
         if (!user.is_active) {
@@ -45,11 +52,11 @@ async function checkAdminUser() {
         }
         
         // Check if user is admin
-        if (!user.is_admin) {
-            console.log('⚠️ Admin user is not admin. Making admin...');
+        if (!user.is_superadmin) {
+            console.log('⚠️ Admin user is not superadmin. Granting superadmin flag...');
             await client.query(`
                 UPDATE users 
-                SET is_admin = true, updated_at = NOW()
+                SET is_admin = true, is_superadmin = true, updated_at = NOW()
                 WHERE id = $1
             `, [user.id]);
             console.log('✅ Admin user made admin');

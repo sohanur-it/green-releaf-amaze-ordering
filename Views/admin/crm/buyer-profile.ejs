@@ -1,5 +1,15 @@
 <!-- Views/admin/crm/buyer-profile.ejs -->
 
+<%
+const hasRole = (roleName) => {
+    if (!Array.isArray(userRoles)) return false;
+    return userRoles.includes(roleName);
+};
+const isAdmin = isSuperuser || hasRole('Administrator');
+const isSalesAdmin = hasRole('Sales Admin');
+const canManagePurchaseLimits = isAdmin || isSalesAdmin;
+%>
+
 <div class="profile-header">
     <div class="profile-title">
         <!-- A back button to return to the main CRM list -->
@@ -105,7 +115,7 @@
                             <td><%= location.state_license || 'N/A' %></td>
                             <td><code><%= location.access_code %></code></td>
                             <td class="table-actions">
-                                <button class="action-btn" data-action="edit-location"
+                                <button type="button" class="action-btn action-btn--primary" data-action="edit-location"
                                         data-location-id="<%= location.entry_id %>"
                                         data-location-name="<%= location.name %>"
                                         data-location-line_one="<%= location.line_one %>"
@@ -116,7 +126,14 @@
                                         data-location-state_license="<%= location.state_license || '' %>">
                                     Edit
                                 </button>
-                                <button class="action-btn" data-action="delete-location"
+                                <% if (canManagePurchaseLimits) { %>
+                                <button type="button" class="action-btn action-btn--secondary always-visible" data-action="manage-limits"
+                                        data-location-id="<%= location.entry_id %>"
+                                        data-location-name="<%= location.name %>">
+                                    Limits
+                                </button>
+                                <% } %>
+                                <button type="button" class="action-btn action-btn--danger" data-action="delete-location"
                                         data-location-id="<%= location.entry_id %>"
                                         data-location-name="<%= location.name %>">
                                     Delete
@@ -184,14 +201,6 @@
     <div class="info-card">
         <div class="card-header">
             <h3>Sales Reps</h3>
-            <% 
-            // Only show Assign Rep button for Sales Admin or Administrator
-            const hasRole = (roleName) => {
-                return userRoles && userRoles.includes(roleName);
-            };
-            const isAdmin = isSuperuser || hasRole('Administrator');
-            const isSalesAdmin = hasRole('Sales Admin');
-            %>
             <% if (isAdmin || isSalesAdmin) { %>
                 <button class="btn btn-secondary btn-sm" id="assignRepBtn" data-buyer-id="<%= buyer.details.entry_id %>">
                     Assign Rep
@@ -312,5 +321,49 @@
 <!-- Include the new tag modal partial -->
 <%- include('../../partials/tag-modal') %>
 
+<!-- Purchase Limit Modal -->
+<div class="modal-overlay" id="purchaseLimitModal" aria-hidden="true" onclick="handleModalOverlayClick(event)">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="purchaseLimitModalTitle" onclick="event.stopPropagation()">
+        <form id="purchaseLimitForm" class="styled-form" novalidate>
+            <div class="modal-header">
+                <h3 class="modal-title" id="purchaseLimitModalTitle">Purchase Limits</h3>
+                <button type="button" class="modal-close-btn" data-close-modal aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="purchaseLimitLocationId" name="location_id">
+                <div class="form-group">
+                    <label class="form-label">Location</label>
+                    <div id="purchaseLimitLocationName" class="input-readonly">—</div>
+                </div>
+                <div class="form-group">
+                    <label for="limitOrderTotal" class="form-label">Max Order Total ($)</label>
+                    <input type="number" step="1" min="0" id="limitOrderTotal" name="max_order_total" class="form-input-modern" placeholder="Default $20,000" inputmode="numeric">
+                    <small class="form-text text-muted" id="limitOrderDefaultText">Leave blank to use system default.</small>
+                </div>
+                <div class="form-group">
+                    <label for="limitUnshipped" class="form-label">Max Unshipped Orders</label>
+                    <input type="number" min="0" step="1" id="limitUnshipped" name="max_unshipped_orders" class="form-input-modern" placeholder="Default 3" inputmode="numeric">
+                    <small class="form-text text-muted" id="limitUnshippedDefaultText">Leave blank to use system default.</small>
+                </div>
+                <div class="form-group">
+                    <label for="limitUnpaid" class="form-label">Max Unpaid Invoices</label>
+                    <input type="number" min="0" step="1" id="limitUnpaid" name="max_unpaid_invoices" class="form-input-modern" placeholder="Default 6" inputmode="numeric">
+                    <small class="form-text text-muted" id="limitUnpaidDefaultText">Leave blank to use system default.</small>
+                </div>
+                <div class="alert alert-danger" id="purchaseLimitError" style="display:none;"></div>
+                <div class="alert alert-success" id="purchaseLimitSuccess" style="display:none;"></div>
+                <p class="text-muted" id="purchaseLimitMeta">Last updated: —</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="resetPurchaseLimitBtn">Reset to Defaults</button>
+                <button type="submit" class="btn btn-primary">Save Limits</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+window.canManagePurchaseLimits = <%= canManagePurchaseLimits ? 'true' : 'false' %>;
+</script>
 <!-- Include the profile page's specific javascript -->
 <script src="/public/js/admin/buyer-profile.js"></script>

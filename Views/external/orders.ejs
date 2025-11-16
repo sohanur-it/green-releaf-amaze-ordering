@@ -1,0 +1,439 @@
+<!-- Views/external/orders.ejs -->
+<style>
+.portal-orders-container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 24px;
+    color: var(--text-color, #111827);
+}
+
+.orders-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+}
+
+.orders-header h1 {
+    margin: 0;
+    font-size: 26px;
+    font-weight: 700;
+}
+
+.orders-filters {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 20px;
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.orders-filters select,
+.orders-filters input {
+    padding: 10px;
+    border: 1px solid var(--border-color, #d1d5db);
+    border-radius: 8px;
+    min-width: 200px;
+    background: var(--input-bg, #fff);
+    color: inherit;
+}
+
+.orders-table-card {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: var(--card-shadow, 0 8px 25px rgba(15, 23, 42, 0.08));
+}
+
+.orders-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.orders-table thead {
+    background: var(--bg-color, #f9fafb);
+}
+
+.orders-table th,
+.orders-table td {
+    padding: 14px 18px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color, #f1f5f9);
+}
+
+.orders-table tbody tr:hover {
+    background: rgba(59, 130, 246, 0.05);
+    cursor: pointer;
+}
+
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+.status-pill.draft { background: rgba(59,130,246,0.15); color: #1d4ed8; }
+.status-pill.pending_approval { background: rgba(251,191,36,0.15); color: #b45309; }
+.status-pill.approved { background: rgba(16,185,129,0.15); color: #047857; }
+.status-pill.fulfillment_issue,
+.status-pill.rejected { background: rgba(239,68,68,0.15); color: #b91c1c; }
+.status-pill.delivered { background: rgba(59,130,246,0.1); color: #1d4ed8; }
+.status-pill.paid { background: rgba(34,197,94,0.12); color: #15803d; }
+
+.order-detail-panel {
+    margin-top: 20px;
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 16px;
+    padding: 20px;
+    background: var(--card-bg, #fff);
+    box-shadow: var(--card-shadow, 0 8px 25px rgba(0,0,0,0.05));
+}
+
+.order-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.detail-item {
+    background: var(--bg-color, #f9fafb);
+    border-radius: 12px;
+    padding: 16px;
+}
+
+.detail-item h4 {
+    margin: 0 0 6px;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    color: var(--text-light, #6b7280);
+}
+
+.detail-item p {
+    margin: 0;
+    font-weight: 600;
+}
+
+.line-items-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.line-items-table th,
+.line-items-table td {
+    padding: 12px;
+    border-bottom: 1px solid var(--border-color, #f1f5f9);
+}
+
+.order-breakdown {
+    margin-top: 12px;
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 12px;
+    padding: 16px;
+    background: var(--bg-color, #f9fafb);
+}
+
+.breakdown-row {
+    display: flex;
+    justify-content: space-between;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--text-color, #111827);
+}
+
+.breakdown-row.total {
+    font-size: 1.1rem;
+}
+
+.breakdown-divider {
+    border-top: 1px dashed var(--border-color, #d1d5db);
+    margin: 10px 0;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 50px 20px;
+    color: var(--text-light, #6b7280);
+}
+</style>
+
+<div class="portal-orders-container">
+    <div class="orders-header">
+        <div>
+            <h1>Your Orders</h1>
+            <p style="margin: 4px 0; color: var(--text-light, #6b7280);">Review past, pending, and completed invoices.</p>
+        </div>
+        <a href="/external/store/<%= portalAccess.uuid %>" class="btn btn-secondary">
+            Back to Store
+        </a>
+    </div>
+
+    <div class="orders-filters">
+        <div class="filter-group">
+            <label>Status</label>
+            <select id="statusFilter">
+                <option value="">All statuses</option>
+                <option value="Draft">Draft</option>
+                <option value="Pending_Approval">Pending Approval</option>
+                <option value="Approved">Approved</option>
+                <option value="Shipped">Shipped</option>
+                <option value="Delivered">Delivered</option>
+                <option value="Paid">Paid</option>
+                <option value="Fully_Rejected">Rejected</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>Date Range</label>
+            <input type="month" id="monthFilter">
+        </div>
+        <div class="filter-group">
+            <label>Invoice #</label>
+            <input type="text" id="searchFilter" placeholder="Search by invoice #">
+        </div>
+        <button class="btn btn-secondary" id="clearFilters">Clear Filters</button>
+    </div>
+
+    <div class="orders-table-card">
+        <table class="orders-table">
+            <thead>
+                <tr>
+                    <th>Invoice</th>
+                    <th>Status</th>
+                    <th>Total</th>
+                    <th>Created</th>
+                    <th>Source</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="ordersTableBody">
+                <tr>
+                    <td colspan="6" class="empty-state">
+                        Loading your invoices...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div id="orderDetailPanel" class="order-detail-panel" style="display:none;">
+        <div style="display:flex; justify-content: space-between; align-items:center; margin-bottom:16px;">
+            <h3 style="margin:0;">Invoice Details</h3>
+            <button class="btn btn-secondary" id="closeDetail">Close</button>
+        </div>
+        <div id="orderDetailContent">
+            <p style="color: var(--text-light);">Select an invoice to view details.</p>
+        </div>
+    </div>
+</div>
+
+<script>
+const ordersState = {
+    invoices: [],
+    filters: {
+        status: '',
+        month: '',
+        search: ''
+    }
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadInvoices();
+    document.getElementById('statusFilter').addEventListener('change', (e) => {
+        ordersState.filters.status = e.target.value;
+        renderInvoices();
+    });
+    document.getElementById('monthFilter').addEventListener('change', (e) => {
+        ordersState.filters.month = e.target.value;
+        renderInvoices();
+    });
+    document.getElementById('searchFilter').addEventListener('input', (e) => {
+        ordersState.filters.search = e.target.value.trim();
+        renderInvoices();
+    });
+    document.getElementById('clearFilters').addEventListener('click', () => {
+        ordersState.filters = { status: '', month: '', search: '' };
+        document.getElementById('statusFilter').value = '';
+        document.getElementById('monthFilter').value = '';
+        document.getElementById('searchFilter').value = '';
+        renderInvoices();
+    });
+    document.getElementById('closeDetail').addEventListener('click', () => {
+        document.getElementById('orderDetailPanel').style.display = 'none';
+    });
+});
+
+async function loadInvoices() {
+    const tableBody = document.getElementById('ordersTableBody');
+    try {
+        const res = await fetch('/api/portal/<%= portalAccess.uuid %>/orders');
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || 'Failed to load invoices');
+        ordersState.invoices = data.invoices || [];
+        renderInvoices();
+    } catch (err) {
+        console.error('Error loading invoices:', err);
+        tableBody.innerHTML = `
+            <tr><td colspan="6" class="empty-state">
+                Unable to load invoices. Please try again later.
+            </td></tr>
+        `;
+    }
+}
+
+function renderInvoices() {
+    const tableBody = document.getElementById('ordersTableBody');
+    let filtered = ordersState.invoices;
+    const { status, month, search } = ordersState.filters;
+
+    if (status) {
+        filtered = filtered.filter(inv => inv.status === status);
+    }
+    if (month) {
+        const [year, monthNum] = month.split('-').map(Number);
+        filtered = filtered.filter(inv => {
+            const created = new Date(inv.created_at);
+            return created.getFullYear() === year && (created.getMonth() + 1) === monthNum;
+        });
+    }
+    if (search) {
+        filtered = filtered.filter(inv =>
+            (inv.invoice_number || '').toLowerCase().includes(search.toLowerCase()) ||
+            String(inv.id).includes(search)
+        );
+    }
+
+    if (filtered.length === 0) {
+        tableBody.innerHTML = `
+            <tr><td colspan="6" class="empty-state">
+                No invoices found for the selected filters.
+            </td></tr>
+        `;
+        return;
+    }
+
+    tableBody.innerHTML = filtered.map(inv => `
+        <tr data-invoice-id="${inv.id}">
+            <td>#${inv.invoice_number || inv.id}</td>
+            <td><span class="status-pill ${inv.status ? inv.status.toLowerCase() : ''}">
+                ${inv.status ? inv.status.replace(/_/g, ' ') : 'Unknown'}
+            </span></td>
+            <td>$${parseFloat(inv.total || 0).toFixed(2)}</td>
+            <td>${inv.created_at ? new Date(inv.created_at).toLocaleDateString() : '—'}</td>
+            <td>${inv.source || 'Internal'}</td>
+            <td><button class="btn btn-secondary" data-view-invoice="${inv.id}">View</button></td>
+        </tr>
+    `).join('');
+
+    tableBody.querySelectorAll('[data-view-invoice]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const invoiceId = parseInt(btn.dataset.viewInvoice, 10);
+            const invoice = ordersState.invoices.find(inv => inv.id === invoiceId);
+            if (invoice) {
+                renderInvoiceDetail(invoice);
+            }
+        });
+    });
+}
+
+function renderInvoiceDetail(inv) {
+    const panel = document.getElementById('orderDetailPanel');
+    const content = document.getElementById('orderDetailContent');
+    const lineItems = (inv.line_items || []);
+
+    content.innerHTML = `
+        <div class="order-detail-grid">
+            <div class="detail-item">
+                <h4>Invoice Number</h4>
+                <p>#${inv.invoice_number || inv.id}</p>
+            </div>
+            <div class="detail-item">
+                <h4>Status</h4>
+                <p>${inv.status ? inv.status.replace(/_/g, ' ') : 'Unknown'}</p>
+            </div>
+            <div class="detail-item">
+                <h4>Subtotal</h4>
+                <p>$${parseFloat(inv.subtotal || inv.total || 0).toFixed(2)}</p>
+            </div>
+            <div class="detail-item">
+                <h4>Created</h4>
+                <p>${inv.created_at ? new Date(inv.created_at).toLocaleString() : '—'}</p>
+            </div>
+            <div class="detail-item">
+                <h4>Discounts</h4>
+                <p style="color: #10b981;">${parseFloat(inv.discount_amount || 0) > 0 ? '-$' + parseFloat(inv.discount_amount).toFixed(2) : '$0.00'}</p>
+            </div>
+            <div class="detail-item">
+                <h4>Credits Applied</h4>
+                <p style="color: #10b981;">${parseFloat(inv.credit_applied || 0) > 0 ? '-$' + parseFloat(inv.credit_applied).toFixed(2) : '$0.00'}</p>
+            </div>
+            <div class="detail-item">
+                <h4>Total Due</h4>
+                <p>$${parseFloat(inv.total || 0).toFixed(2)}</p>
+            </div>
+        </div>
+        <div class="order-breakdown">
+            <div class="breakdown-row">
+                <span>Subtotal</span>
+                <span>$${parseFloat(inv.subtotal || inv.total || 0).toFixed(2)}</span>
+            </div>
+            ${parseFloat(inv.discount_amount || 0) > 0 ? `
+            <div class="breakdown-row">
+                <span>Discounts</span>
+                <span style="color: #10b981;">-$${parseFloat(inv.discount_amount).toFixed(2)}</span>
+            </div>
+            ` : ''}
+            ${parseFloat(inv.credit_applied || 0) > 0 ? `
+            <div class="breakdown-row">
+                <span>Credits Applied</span>
+                <span style="color: #10b981;">-$${parseFloat(inv.credit_applied).toFixed(2)}</span>
+            </div>
+            ` : ''}
+            <div class="breakdown-divider"></div>
+            <div class="breakdown-row total">
+                <span>Total</span>
+                <span>$${parseFloat(inv.total || 0).toFixed(2)}</span>
+            </div>
+        </div>
+        <h4 style="margin-top: 20px;">Line Items</h4>
+        <table class="line-items-table">
+            <thead>
+                <tr>
+                    <th>Product</th>
+                    <th>Batch</th>
+                    <th>Qty</th>
+                    <th>Unit Price</th>
+                    <th>Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${lineItems.length ? lineItems.map(item => {
+                    const lineTotal = parseFloat(item.line_total || 0);
+                    const originalTotal = parseFloat(item.unit_price || 0) * parseFloat(item.quantity || 0);
+                    const hasDiscount = lineTotal < originalTotal && lineTotal > 0;
+                    return `
+                    <tr>
+                        <td>${item.product_name || '—'}</td>
+                        <td>${item.batch_name || '—'}</td>
+                        <td>${item.quantity || 0}</td>
+                        <td>$${parseFloat(item.unit_price || 0).toFixed(2)}</td>
+                        <td>${hasDiscount ? `<span class="price-strike" style="color: #9ca3af; text-decoration: line-through;">$${originalTotal.toFixed(2)}</span> <span style="color: #10b981; font-weight: 600;">$${lineTotal.toFixed(2)}</span>` : `$${lineTotal.toFixed(2)}`}</td>
+                    </tr>
+                `;
+                }).join('') : `
+                    <tr><td colspan="5" class="empty-state" style="padding: 20px;">No line items.</td></tr>
+                `}
+            </tbody>
+        </table>
+    `;
+
+    panel.style.display = 'block';
+    panel.scrollIntoView({ behavior: 'smooth' });
+}
+</script>
+

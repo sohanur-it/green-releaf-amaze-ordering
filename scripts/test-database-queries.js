@@ -22,7 +22,17 @@ async function testDatabaseQueries() {
         
         // Test 2: Check if admin user exists
         console.log('\n👤 Testing admin user...');
-        const adminUser = await query('SELECT id, username, first_name, last_name, is_active, is_admin FROM users WHERE username = $1', ['admin']);
+        const adminUser = await query(`
+            SELECT 
+                id, 
+                username, 
+                first_name, 
+                last_name, 
+                is_active, 
+                COALESCE(is_superadmin, is_admin, false) as is_superadmin
+            FROM users 
+            WHERE username = $1
+        `, ['admin']);
         console.log('Admin user:', adminUser.rows[0] || 'Not found');
         
         // Test 3: Test UserModel.getAll() query
@@ -35,7 +45,7 @@ async function testDatabaseQueries() {
                 last_name as lastname, 
                 email, 
                 CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status,
-                is_admin as is_superuser, 
+                COALESCE(is_superadmin, is_admin, false) as is_superuser, 
                 created_at, 
                 last_login 
             FROM users

@@ -54,6 +54,17 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Ensure modern privilege columns exist
+ALTER TABLE users
+    ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true,
+    ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS is_superadmin BOOLEAN NOT NULL DEFAULT false;
+
+-- Keep superadmin flag aligned with legacy admin column
+UPDATE users
+SET is_superadmin = true
+WHERE is_admin = true;
+
 -- Create user_roles table
 CREATE TABLE IF NOT EXISTS user_roles (
     id SERIAL PRIMARY KEY,

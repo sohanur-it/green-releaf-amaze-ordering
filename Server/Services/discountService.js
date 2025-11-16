@@ -17,7 +17,7 @@ class DiscountService {
         try {
             const result = await queryFunc(`
                 SELECT *
-                FROM "orders-standing-discounts"
+                FROM "ORDERS-standing-discounts"
                 WHERE fk_location_id = $1
                   AND fk_master_product_id = $2
                   AND is_active = true
@@ -195,7 +195,7 @@ class DiscountService {
                 // Recalculate standing discount to get its current amount
                 const standingDiscount = await queryFunc(`
                     SELECT *
-                    FROM "orders-standing-discounts"
+                    FROM "ORDERS-standing-discounts"
                     WHERE id = $1
                       AND is_active = true
                       AND (valid_from IS NULL OR valid_from <= CURRENT_DATE)
@@ -269,14 +269,18 @@ class DiscountService {
         try {
             const totals = await queryFunc(`
                 SELECT 
-                    COALESCE(SUM(line_total), 0) as subtotal,
+                    COALESCE(SUM(line_total), 0) as discounted_subtotal,
                     COALESCE(SUM(line_discount_amount), 0) as total_discounts
                 FROM "ORDERS-invoice-line-items"
                 WHERE fk_invoice_id = $1
             `, [invoiceId]);
             
-            const subtotal = parseFloat(totals.rows[0].subtotal);
+            // line_total already has discounts applied, so discounted_subtotal is the sum after discounts
+            const discountedSubtotal = parseFloat(totals.rows[0].discounted_subtotal);
             const totalDiscounts = parseFloat(totals.rows[0].total_discounts);
+            
+            // Original subtotal (before discounts) = discounted_subtotal + total_discounts
+            const originalSubtotal = discountedSubtotal + totalDiscounts;
             
             // Get existing credit applied if any
             const invoiceResult = await queryFunc(`
@@ -286,7 +290,9 @@ class DiscountService {
             `, [invoiceId]);
             
             const creditApplied = parseFloat(invoiceResult.rows[0]?.credit_applied || 0);
-            const total = subtotal - creditApplied;
+            // Total = Original Subtotal - Discounts - Credits
+            // OR equivalently: Total = Discounted Subtotal - Credits (since discounts already in line_total)
+            const total = discountedSubtotal - creditApplied;
             
             await queryFunc(`
                 UPDATE "ORDERS-invoices"
@@ -296,7 +302,7 @@ class DiscountService {
                     total = $3,
                     updated_at = NOW()
                 WHERE id = $4
-            `, [subtotal, totalDiscounts, total, invoiceId]);
+            `, [originalSubtotal, totalDiscounts, total, invoiceId]);
             
             return { success: true };
         } catch (error) {
@@ -315,7 +321,7 @@ class DiscountService {
                     sd.*,
                     p.name as product_name,
                     p.brand_name
-                FROM "orders-standing-discounts" sd
+                FROM "ORDERS-standing-discounts" sd
                 INNER JOIN "ORDERS-products" p ON sd.fk_master_product_id = p.entry_id
                 WHERE sd.fk_location_id = $1
                 ORDER BY sd.created_at DESC
@@ -334,7 +340,7 @@ class DiscountService {
     async createStandingDiscount(discountData, userId) {
         try {
             const result = await query(`
-                INSERT INTO "orders-standing-discounts" (
+                INSERT INTO "ORDERS-standing-discounts" (
                     fk_location_id, fk_master_product_id, discount_type,
                     discount_value, bogo_buy_quantity, bogo_get_quantity,
                     bogo_discount_percent, valid_from, valid_until,
@@ -369,7 +375,7 @@ class DiscountService {
     async updateStandingDiscount(discountId, discountData, userId) {
         try {
             const result = await query(`
-                UPDATE "orders-standing-discounts"
+                UPDATE "ORDERS-standing-discounts"
                 SET 
                     discount_type = $1,
                     discount_value = $2,
@@ -408,7 +414,7 @@ class DiscountService {
     async deleteStandingDiscount(discountId) {
         try {
             await query(`
-                DELETE FROM "orders-standing-discounts"
+                DELETE FROM "ORDERS-standing-discounts"
                 WHERE id = $1
             `, [discountId]);
             

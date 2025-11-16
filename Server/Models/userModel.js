@@ -20,17 +20,30 @@ class UserModel {
         
         // Convert status to is_active boolean
         const is_active = status === 'active';
-        const is_admin = is_superuser;
+        const is_superadmin = Boolean(is_superuser);
         
         const sql = `
-            INSERT INTO users (username, first_name, last_name, email, email_hash, password_hash, is_active, is_admin, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+            INSERT INTO users (
+                username, first_name, last_name, email, email_hash, password_hash,
+                is_active, is_admin, is_superadmin, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
             RETURNING id, username, first_name as firstname, last_name as lastname, email, 
                      CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status, 
-                     is_admin as is_superuser, created_at
+                     COALESCE(is_superadmin, is_admin, false) as is_superuser, created_at
         `;
         
-        const result = await query(sql, [username, firstname, lastname, email, email_hash, password_hash, is_active, is_admin]);
+        const result = await query(sql, [
+            username,
+            firstname,
+            lastname,
+            email,
+            email_hash,
+            password_hash,
+            is_active,
+            is_superadmin,
+            is_superadmin
+        ]);
         return result.rows[0];
     }
 
@@ -48,7 +61,7 @@ class UserModel {
                        WHEN is_active = false THEN 'pending'
                        ELSE 'inactive'
                    END as status,
-                   is_admin as is_superuser, 
+                   COALESCE(is_superadmin, is_admin, false) as is_superuser, 
                    created_at, last_login, updated_at
             FROM users WHERE id = $1
         `;
@@ -70,7 +83,7 @@ class UserModel {
                        WHEN is_active = false THEN 'pending'
                        ELSE 'inactive'
                    END as status,
-                   is_admin as is_superuser, 
+                   COALESCE(is_superadmin, is_admin, false) as is_superuser, 
                    created_at, last_login, updated_at
             FROM users WHERE username = $1
         `;
@@ -92,7 +105,7 @@ class UserModel {
                        WHEN is_active = false THEN 'pending'
                        ELSE 'inactive'
                    END as status,
-                   is_admin as is_superuser, 
+                   COALESCE(is_superadmin, is_admin, false) as is_superuser, 
                    created_at, last_login, updated_at
             FROM users WHERE email = $1
         `;
@@ -118,7 +131,7 @@ class UserModel {
                     WHEN is_active = false THEN 'pending'
                     ELSE 'inactive'
                 END as status,
-                is_admin as is_superuser, 
+                COALESCE(is_superadmin, is_admin, false) as is_superuser, 
                 created_at, 
                 last_login 
             FROM users
@@ -158,7 +171,7 @@ class UserModel {
                     WHEN is_active = false THEN 'pending'
                     ELSE 'inactive'
                 END as status,
-                is_admin as is_superuser, 
+                COALESCE(is_superadmin, is_admin, false) as is_superuser, 
                 created_at, 
                 last_login 
             FROM users 
@@ -193,7 +206,7 @@ class UserModel {
             WHERE id = $2
             RETURNING id, username, first_name as firstname, last_name as lastname, email, 
                      CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status, 
-                     is_admin as is_superuser
+                     COALESCE(is_superadmin, is_admin, false) as is_superuser
         `;
         
         const result = await query(sql, [is_active, id]);
@@ -233,7 +246,7 @@ class UserModel {
             WHERE id = $4
             RETURNING id, username, first_name as firstname, last_name as lastname, email, 
                      CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status, 
-                     is_admin as is_superuser
+                     COALESCE(is_superadmin, is_admin, false) as is_superuser
         `;
         
         const result = await query(sql, [firstname, lastname, email, id]);
@@ -389,9 +402,13 @@ class UserModel {
      * @returns {Promise<boolean>} True if user is superuser
      */
     static async isSuperuser(userId) {
-        const sql = 'SELECT is_admin FROM users WHERE id = $1';
+        const sql = `
+            SELECT COALESCE(is_superadmin, is_admin, false) as super_flag
+            FROM users
+            WHERE id = $1
+        `;
         const result = await query(sql, [userId]);
-        return result.rows[0]?.is_admin || false;
+        return result.rows[0]?.super_flag || false;
     }
 
     /**
@@ -555,7 +572,7 @@ class UserModel {
             WHERE id = $1 AND is_active = false
             RETURNING id, username, first_name as firstname, last_name as lastname, email, 
                      CASE WHEN is_active = true THEN 'active' ELSE 'pending' END as status, 
-                     is_admin as is_superuser, created_at
+                     COALESCE(is_superadmin, is_admin, false) as is_superuser, created_at
         `;
         
         try {
@@ -577,7 +594,7 @@ class UserModel {
             WHERE id = $1 AND is_active = true
             RETURNING id, username, first_name as firstname, last_name as lastname, email, 
                      CASE WHEN is_active = true THEN 'active' ELSE 'pending' END as status, 
-                     is_admin as is_superuser, created_at
+                     COALESCE(is_superadmin, is_admin, false) as is_superuser, created_at
         `;
         
         try {

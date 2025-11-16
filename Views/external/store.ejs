@@ -50,6 +50,22 @@
         .cart-offline-message p {
             margin: 4px 0;
         }
+        .checkout-secondary-link {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 10px 0;
+            border-radius: 8px;
+            border: 1px solid var(--primary-color, #2563eb);
+            color: var(--primary-color, #2563eb);
+            font-weight: 600;
+            transition: background-color 0.2s ease, color 0.2s ease;
+        }
+        .checkout-secondary-link:hover {
+            background-color: rgba(37, 99, 235, 0.08);
+            text-decoration: none;
+        }
         .cart-actions-disabled .quantity-btn,
         .cart-actions-disabled .remove-item-btn {
             opacity: 0.5;
@@ -736,7 +752,7 @@
                 </div>
                 <div class="summary-row">
                     <span class="summary-label">Discounts:</span>
-                    <span class="summary-value">$0.00</span>
+                    <span class="summary-value" id="cart-discounts">$0.00</span>
                 </div>
                 <div class="summary-row summary-total">
                     <span>Total:</span>
@@ -744,9 +760,14 @@
                 </div>
             </div>
             
-            <button class="checkout-btn" id="checkout-btn" onclick="goToCheckout()" disabled>
-                Checkout
-            </button>
+            <div style="display:flex; flex-direction:column; gap:10px;">
+                <button class="checkout-btn" id="checkout-btn" onclick="goToCheckout()" disabled>
+                    Checkout
+                </button>
+                <a href="/external/store/<%= portalAccess.uuid %>/orders" class="checkout-secondary-link" style="text-align:center; font-weight:600; text-decoration:none; color: var(--primary-color, #2563eb);">
+                    View Your Orders
+                </a>
+            </div>
         </div>
     </div>
 </div>
@@ -2030,8 +2051,50 @@ function renderCart() {
         }
     }
     
-    cartSubtotalSpan.textContent = `$${cartData.subtotal.toFixed(2)}`;
-    cartTotalSpan.textContent = `$${cartData.total.toFixed(2)}`;
+    // Compute and display discounts using portal pricing API
+    (async () => {
+        try {
+            const cfgEl = document.getElementById('portal-websocket-config');
+            const cfg = cfgEl ? JSON.parse(cfgEl.textContent || '{}') : {};
+            const buyerId = cfg?.buyerId || null;
+            const hasItems = Array.isArray(cartData.items) && cartData.items.length > 0;
+            let subtotalVal = Number(cartData.subtotal || 0);
+            let discountsVal = 0;
+            let totalVal = Number(cartData.total || subtotalVal);
+            if (buyerId && hasItems) {
+                const payload = {
+                    cartItems: cartData.items.map(i => ({
+                        product_id: i.product_id,
+                        category_name: i.category_name || null,
+                        unit_price: i.unit_price,
+                        quantity: i.quantity
+                    }))
+                };
+                const res = await fetch(`/api/portal/<%= portalAccess.uuid %>/cart/pricing`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    subtotalVal = Number(data.subtotal || subtotalVal);
+                    discountsVal = Number(data.discounts || 0);
+                    totalVal = Number(data.total != null ? data.total : (subtotalVal - discountsVal));
+                }
+            }
+            if (cartSubtotalSpan) cartSubtotalSpan.textContent = `$${subtotalVal.toFixed(2)}`;
+            const cartDiscountsSpan = document.getElementById('cart-discounts');
+            if (cartDiscountsSpan) cartDiscountsSpan.textContent = `-$${discountsVal.toFixed(2)}`;
+            if (cartTotalSpan) cartTotalSpan.textContent = `$${totalVal.toFixed(2)}`;
+        } catch (e) {
+            // Fallback to existing values
+            if (cartSubtotalSpan) cartSubtotalSpan.textContent = `$${cartData.subtotal.toFixed(2)}`;
+            if (cartTotalSpan) cartTotalSpan.textContent = `$${cartData.total.toFixed(2)}`;
+            const cartDiscountsSpan = document.getElementById('cart-discounts');
+            if (cartDiscountsSpan) cartDiscountsSpan.textContent = '-$0.00';
+            console.warn('Failed to compute portal discounts:', e);
+        }
+    })();
 }
 renderCart.listenerBound = false;
 

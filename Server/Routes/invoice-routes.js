@@ -69,6 +69,13 @@ router.get('/products', auth, invoiceController.getProductsForLocation);
 router.get('/products/:productId/batches', auth, invoiceController.getBatchesForProduct);
 
 /**
+ * Get recent invoices for a buyer (optional filtered by location)
+ * GET /api/v1/invoices/buyers/:buyerId?location_id=123&limit=5
+ * Must be before /:id route
+ */
+router.get('/buyers/:buyerId', auth, invoiceController.getBuyerInvoices);
+
+/**
  * @swagger
  * /api/v1/invoices/:id:
  *   get:

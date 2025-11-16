@@ -8,6 +8,9 @@ const locationController = require('../../Controllers/crm/locationController');
 const noteController = require('../../Controllers/crm/noteController');
 const salesRepController = require('../../Controllers/crm/salesRepController');
 const tagController = require('../../Controllers/crm/tagController');
+const purchaseLimitController = require('../../Controllers/crm/purchaseLimitController');
+const { requireAuth, requireRole } = require('../../Middleware/auth');
+const { query } = require('../../config/database');
 
 // this is where all our crm api routes will go. keeps it cleannn
 
@@ -60,6 +63,21 @@ router.patch('/locations/:locationId', locationController.updateLocation);
 // @desc    Delete a location
 router.delete('/locations/:locationId', locationController.deleteLocation);
 
+// Purchase limit configuration for locations (Sales Admin / Administrator only)
+router.get(
+    '/locations/:locationId/purchase-limits',
+    requireAuth,
+    requireRole('Sales Admin', 'Administrator'),
+    purchaseLimitController.getLocationLimits
+);
+
+router.put(
+    '/locations/:locationId/purchase-limits',
+    requireAuth,
+    requireRole('Sales Admin', 'Administrator'),
+    purchaseLimitController.updateLocationLimits
+);
+
 // --- NOTE ROUTES ---
 
 // @route   POST /api/crm/buyers/:buyerId/notes
@@ -89,6 +107,60 @@ router.post('/locations/assign-sales-rep', salesRepController.assignRepToLocatio
 // @route   DELETE /api/crm/locations/:locationId/unassign-sales-rep
 // @desc    Unassign a sales rep from a location
 router.delete('/locations/:locationId/unassign-sales-rep', salesRepController.unassignRepFromLocation);
+
+// Quick location search (for credits UI, etc.)
+router.get(
+    '/locations/search',
+    requireAuth,
+    requireRole('Sales Admin', 'Administrator'),
+    async (req, res) => {
+        try {
+            const term = (req.query.q || '').trim();
+            const limit = Math.min(parseInt(req.query.limit, 10) || 15, 50);
+
+            if (term.length < 2) {
+                return res.json({ success: true, results: [] });
+            }
+
+            const results = await query(
+                `
+                SELECT
+                    l.entry_id AS location_id,
+                    l.name AS location_name,
+                    l.city,
+                    l.state,
+                    b.entry_id AS buyer_id,
+                    b.name AS buyer_name
+                FROM "ORDERS-buyer_locations" l
+                INNER JOIN "ORDERS-buyers" b ON l.orders_buyer_id = b.entry_id
+                WHERE
+                    l.name ILIKE $1
+                    OR b.name ILIKE $1
+                    OR COALESCE(l.city, '') ILIKE $1
+                    OR COALESCE(l.state, '') ILIKE $1
+                ORDER BY b.name ASC, l.name ASC
+                LIMIT $2
+            `,
+                [`%${term}%`, limit]
+            );
+
+            res.json({
+                success: true,
+                results: results.rows.map((row) => ({
+                    location_id: row.location_id,
+                    location_name: row.location_name,
+                    buyer_id: row.buyer_id,
+                    buyer_name: row.buyer_name,
+                    city: row.city,
+                    state: row.state
+                }))
+            });
+        } catch (error) {
+            console.error('Error searching locations:', error);
+            res.status(500).json({ success: false, error: 'Failed to search locations' });
+        }
+    }
+);
 
 // --- SALES REP CRUD ROUTES (for the management page) ---
 router.post('/sales-reps', salesRepController.createRep);

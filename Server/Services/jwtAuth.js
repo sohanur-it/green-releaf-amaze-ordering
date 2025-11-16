@@ -15,12 +15,13 @@ class JWTAuthService {
      * Generate JWT token for a user
      */
     static generateToken(user) {
+        const superFlag = user.is_superadmin ?? user.is_superuser ?? user.is_admin ?? false;
         const payload = {
             userId: user.id,
             username: user.username,
             email: user.email,
-            isAdmin: user.is_admin || false,
-            isSuperuser: user.is_superuser || false
+            isAdmin: superFlag,
+            isSuperuser: superFlag
         };
 
         return jwt.sign(payload, JWT_SECRET, { 
@@ -80,12 +81,13 @@ class JWTAuthService {
                 throw new Error('User account is not active');
             }
 
+            const superFlag = user.is_superadmin ?? user.is_superuser ?? user.is_admin ?? false;
             return {
                 id: user.id,
                 username: user.username,
                 email: user.email,
-                isAdmin: user.is_admin || false,
-                isSuperuser: user.is_superuser || false,
+                isAdmin: superFlag,
+                isSuperuser: superFlag,
                 status: user.status
             };
         } catch (error) {
@@ -140,6 +142,7 @@ class JWTAuthService {
             // Generate token
             const token = this.generateToken(user);
             
+            const superFlag = user.is_superadmin ?? user.is_superuser ?? user.is_admin ?? false;
             return {
                 success: true,
                 token,
@@ -147,8 +150,8 @@ class JWTAuthService {
                     id: user.id,
                     username: user.username,
                     email: user.email,
-                    isAdmin: user.is_admin || false,
-                    isSuperuser: user.is_superuser || false
+                    isAdmin: superFlag,
+                    isSuperuser: superFlag
                 },
                 expiresIn: JWT_EXPIRES_IN
             };

@@ -99,13 +99,13 @@ async function createSuperuser() {
                 SELECT column_name, data_type 
                 FROM information_schema.columns 
                 WHERE table_name = 'users' 
-                AND column_name IN ('first_name', 'last_name', 'is_admin', 'is_active', 'email_hash')
+                AND column_name IN ('first_name', 'last_name', 'is_admin', 'is_superadmin', 'is_active', 'email_hash')
                 ORDER BY column_name
             `);
             
-            if (tableCheck.rows.length < 5) {
+            if (tableCheck.rows.length < 6) {
                 console.error('❌ Users table does not have the expected structure');
-                console.error('Expected columns: first_name, last_name, is_admin, is_active, email_hash');
+                console.error('Expected columns: first_name, last_name, is_admin, is_superadmin, is_active, email_hash');
                 console.error('Found columns:', tableCheck.rows.map(r => r.column_name));
                 process.exit(1);
             }
@@ -114,7 +114,7 @@ async function createSuperuser() {
             
             // Check if superuser already exists
             const existingSuperuser = await client.query(
-                'SELECT id FROM users WHERE is_admin = true'
+                'SELECT id FROM users WHERE COALESCE(is_superadmin, is_admin, false) = true'
             );
 
             if (existingSuperuser.rows.length > 0) {
@@ -140,8 +140,11 @@ async function createSuperuser() {
             // Create superuser
             console.log('👤 Creating superuser account...');
             const result = await client.query(`
-                INSERT INTO users (username, first_name, last_name, email, email_hash, password_hash, is_active, is_admin, created_at)
-                VALUES ($1, $2, $3, $4, $5, $6, true, true, NOW())
+                INSERT INTO users (
+                    username, first_name, last_name, email, email_hash, password_hash,
+                    is_active, is_admin, is_superadmin, created_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, true, true, true, NOW())
                 RETURNING id, username, email
             `, [username, firstName, lastName, email, emailHash, passwordHash]);
 

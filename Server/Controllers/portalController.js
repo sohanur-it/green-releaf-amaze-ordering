@@ -21,11 +21,11 @@ class PortalController {
         }
 
         try {
-            // Try superuser first
+            // Try superuser flag first
             try {
                 const superUserResult = await query(`
                     SELECT id FROM users 
-                    WHERE is_superuser = true
+                    WHERE is_superadmin = true
                     LIMIT 1
                 `);
                 if (superUserResult.rows.length > 0) {
@@ -2031,6 +2031,8 @@ class PortalController {
             const invoiceDetails = await query(`
                 SELECT 
                     i.invoice_number,
+                    i.subtotal,
+                    i.discount_amount,
                     i.total,
                     i.credit_applied,
                     COALESCE(u.first_name || ' ' || u.last_name, '') as sales_rep_full_name
@@ -2059,6 +2061,21 @@ class PortalController {
             const salesRepName = invoice.sales_rep_full_name && invoice.sales_rep_full_name.trim() 
                 ? invoice.sales_rep_full_name.trim() 
                 : null;
+            
+            // Calculate correct subtotal (original before discounts)
+            // If subtotal + discount_amount + credit_applied = total, then subtotal is already correct
+            // Otherwise, calculate it as: total + discount_amount + credit_applied
+            const discountAmount = parseFloat(invoice.discount_amount || 0);
+            const creditApplied = parseFloat(invoice.credit_applied || 0);
+            const total = parseFloat(invoice.total || 0);
+            const storedSubtotal = parseFloat(invoice.subtotal || 0);
+            
+            // Verify: storedSubtotal should equal total + discount_amount + credit_applied
+            // If not, recalculate the original subtotal
+            const expectedSubtotal = total + discountAmount + creditApplied;
+            const originalSubtotal = (Math.abs(storedSubtotal - expectedSubtotal) < 0.01) 
+                ? storedSubtotal 
+                : expectedSubtotal;
             
             // Get buyer name and info for header
             let buyerName = 'Buyer';
@@ -2089,8 +2106,10 @@ class PortalController {
                 layout: 'layouts/portal',
                 uuid: uuid,
                 invoiceNumber: invoice.invoice_number,
-                orderTotal: invoice.total,
-                creditApplied: invoice.credit_applied || 0,
+                subtotal: originalSubtotal,
+                discountAmount: discountAmount,
+                orderTotal: total,
+                creditApplied: creditApplied,
                 salesRepName: salesRepName,
                 buyerName: buyerName,
                 buyerInfo: buyerInfo
@@ -2162,6 +2181,7 @@ class PortalController {
                         SUM(li.quantity_allocated)::INTEGER as total_allocated,
                         AVG(li.unit_price) as unit_price,
                         SUM(li.line_total) as total_line_total,
+                        SUM(COALESCE(li.line_discount_amount, 0)) as total_line_discount_amount,
                         MAX(li.id) as line_item_id,
                         MAX(li.line_item_order) as line_item_order
                     FROM "ORDERS-invoice-line-items" li
@@ -2188,20 +2208,24 @@ class PortalController {
                                 'unit_measurement_name', p.unit_measurement_name,
                                 'batch_name', b.batch_name,
                                 'quantity', lia.total_quantity,
-                            'quantity_allocated', COALESCE(lia.total_allocated, 0),
+                                'quantity_allocated', COALESCE(lia.total_allocated, 0),
                                 'unit_price', lia.unit_price,
                                 'line_total', lia.total_line_total,
-                            'quantity_available', (b.quantity - b.allocated_quantity + COALESCE(lia.total_allocated, 0))::INTEGER,
-                            'image_url', COALESCE(
+                                'line_discount_amount', COALESCE(lia.total_line_discount_amount, 0),
+                                'quantity_available', (
+                                    b.quantity - b.allocated_quantity + COALESCE(lia.total_allocated, 0)
+                                )::INTEGER,
+                                'image_url', COALESCE(
                                 (SELECT '/public/' || file_path 
                                  FROM "ORDERS-product-images" pi
                                  WHERE pi.fk_product_id = p.entry_id
                                    AND pi.is_deleted = false
                                    AND pi.is_featured = true
                                  ORDER BY pi.uploaded_at ASC
-                                 LIMIT 1),
-                                '/public/images/placeholder.jpg'
-                            )
+                                     LIMIT 1
+                                    ),
+                                    '/public/images/placeholder.jpg'
+                                )
                             ) ORDER BY lia.line_item_order
                         ),
                         '[]'::jsonb
@@ -2396,6 +2420,14 @@ class PortalController {
                 `, [notes, invoiceId]);
             }
             
+            // Apply discount builder discounts to invoice line items
+            const discountBuilderService = require('../Services/discountBuilderService');
+            const discountResult = await discountBuilderService.applyDiscountsToInvoice(
+                invoiceId, 
+                portalAccess.buyerId
+            );
+            console.log('Discount builder application result:', discountResult);
+            
             // Apply available credits to invoice
             const accountCreditService = require('../Services/accountCreditService');
             const creditResult = await accountCreditService.applyCreditsToInvoice(invoiceId);
@@ -2524,6 +2556,101 @@ class PortalController {
                 error: 'Failed to extend cart',
                 details: error.message 
             });
+        }
+    }
+    static async showOrders(req, res) {
+        try {
+            const portalAccess = req.session.portalAccess;
+            if (!portalAccess) {
+                return res.redirect('/external/store');
+            }
+
+            res.render('external/orders', {
+                layout: 'layouts/portal',
+                title: 'Your Orders',
+                portalAccess
+            });
+        } catch (error) {
+            console.error('Error rendering portal orders page:', error);
+            res.status(500).render('external/error', {
+                message: 'Unable to load your orders right now.'
+            });
+        }
+    }
+
+    static async getPortalOrders(req, res) {
+        try {
+            const portalAccess = req.session.portalAccess;
+            if (!portalAccess) {
+                return res.status(401).json({ success: false, error: 'Unauthorized' });
+            }
+
+            const invoices = await query(`
+                SELECT 
+                    i.id,
+                    i.invoice_number,
+                    i.status,
+                    i.source,
+                    i.subtotal,
+                    i.discount_amount,
+                    i.credit_applied,
+                    i.total,
+                    i.created_at,
+                    i.updated_at
+                FROM "ORDERS-invoices" i
+                WHERE i.fk_buyer_id = $1
+                  AND i.fk_location_id = $2
+                ORDER BY i.created_at DESC
+                LIMIT 200
+            `, [portalAccess.buyerId, portalAccess.locationId]);
+
+            const invoiceIds = invoices.rows.map(inv => inv.id);
+            let lineItemsMap = {};
+
+            if (invoiceIds.length > 0) {
+                const lineItemsResult = await query(`
+                    SELECT 
+                        li.fk_invoice_id,
+                        li.quantity_ordered as quantity,
+                        li.unit_price,
+                        li.line_total,
+                        li.line_discount_amount,
+                        li.specific_package_labels,
+                        p.name as product_name,
+                        p.brand_name,
+                        b.batch_name
+                    FROM "ORDERS-invoice-line-items" li
+                    INNER JOIN "ORDERS-products" p ON li.fk_master_product_id = p.entry_id
+                    INNER JOIN "ORDERS-batches" b ON li.fk_batch_id = b.id
+                    WHERE li.fk_invoice_id = ANY($1::int[])
+                    ORDER BY li.line_item_order
+                `, [invoiceIds]);
+
+                lineItemsMap = lineItemsResult.rows.reduce((acc, item) => {
+                    if (!acc[item.fk_invoice_id]) acc[item.fk_invoice_id] = [];
+                    acc[item.fk_invoice_id].push({
+                        product_name: item.product_name,
+                        brand_name: item.brand_name,
+                        batch_name: item.batch_name,
+                        quantity: item.quantity,
+                        unit_price: item.unit_price,
+                        line_total: item.line_total,
+                        line_discount_amount: item.line_discount_amount,
+                        specific_package_labels: item.specific_package_labels
+                    });
+                    return acc;
+                }, {});
+            }
+
+            const payload = invoices.rows.map(inv => ({
+                ...inv,
+                line_items: lineItemsMap[inv.id] || []
+            }));
+
+            res.json({ success: true, invoices: payload });
+        } catch (error) {
+            console.error('Error fetching portal orders:', error);
+            res.status(500).json({ success: false, error: 'Failed to fetch invoices' });
         }
     }
 }

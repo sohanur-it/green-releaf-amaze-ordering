@@ -525,6 +525,9 @@ body {
 }
 
 .app-container { display: flex; min-height: 100vh; }
+.app-container--full {
+    display: block;
+}
 
 .sidebar {
     position: fixed; top: 0; left: 0; height: 100vh;
@@ -881,6 +884,59 @@ html.sidebar-is-collapsed .sidebar-title-full {
     flex-direction: column;
 }
 
+.main-content--full {
+    margin-left: 0;
+    width: 100%;
+}
+
+.content-body--full {
+    padding: 0;
+}
+
+.inline-flash {
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+    font-weight: 600;
+}
+
+.inline-flash--success {
+    background: #ecfdf5;
+    color: #065f46;
+    border: 1px solid #34d399;
+}
+
+.inline-flash--error {
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+}
+
+.inline-flash--info {
+    background: #eff6ff;
+    color: #1e3a8a;
+    border: 1px solid #93c5fd;
+}
+
+.discount-modal-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+}
+
+.discount-modal-grid .span-2 {
+    grid-column: span 2;
+}
+
+@media (max-width: 640px) {
+    .discount-modal-grid {
+        grid-template-columns: 1fr;
+    }
+    .discount-modal-grid .span-2 {
+        grid-column: span 1;
+    }
+}
+
 /* Top Bar */
 .top-bar {
     display: flex;
@@ -1130,7 +1186,7 @@ html.sidebar-is-collapsed .sidebar-title-full {
 
 .content-body {
     flex: 1;
-    padding: 2rem 2rem;
+    padding: 2rem 1rem;
     overflow-x: hidden;
 }
 
@@ -1176,6 +1232,8 @@ html.sidebar-is-collapsed .sidebar-title-full {
 }
 .btn-primary { background-color: var(--primary-color); color: #fff; }
 .btn-primary:hover { background-color: var(--primary-hover); }
+#addItemBtn.btn.btn-primary.btn-block { width: 100%; display: block; }
+.btn-block { width: 100%; display: block; }
 #buyer-table-wrapper { background-color: var(--card-bg, #fff); border-radius: 10px; padding: 10px; transition: background-color 0.3s ease; }
 /* Sales Rep Modal - Full Width Fields */
 #salesRepModal .modal-body .row {
@@ -1195,6 +1253,7 @@ html.sidebar-is-collapsed .sidebar-title-full {
     width: 100% !important;
     max-width: 100% !important;
 }
+
 
 #salesRepModal .form-select-modern,
 #salesRepModal .form-input-modern {
@@ -1474,7 +1533,7 @@ html.sidebar-is-collapsed .sidebar-title-full {
 .form-actions-right { display: flex; gap: 12px; }
 .modal-overlay {
     position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-color: rgba(0, 0, 0, 0.6);
-    display: none; align-items: center; justify-content: center; z-index: 1000;
+    display: none; align-items: center; justify-content: center; z-index: 3000;
     opacity: 0; visibility: hidden; transition: opacity 0.3s ease, visibility 0.3s ease;
 }
 .modal-overlay.active {
@@ -1553,6 +1612,851 @@ html.sidebar-is-collapsed .sidebar-title-full {
 .modal-footer form { display: flex; justify-content: flex-end; gap: 12px; }
 .btn-danger { background-color: #d73a49; color: #fff; }
 .btn-danger:hover { background-color: #cb2131; }
+
+.credit-row--voided td {
+    text-decoration: line-through;
+    opacity: 0.65;
+}
+
+.status-badge.status-voided {
+    background-color: #fee2e2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+}
+
+.modal-summary-text {
+    font-weight: 600;
+    margin-bottom: 12px;
+    color: var(--text-color);
+}
+
+.confirm-checkbox {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+    font-size: 0.9rem;
+    color: var(--text-color);
+}
+
+.form-error-message {
+    color: #b91c1c;
+    font-weight: 600;
+    margin-top: 8px;
+}
+
+.location-search {
+    position: relative;
+}
+
+.location-search input[type="text"] {
+    width: 100%;
+    padding-right: 36px;
+}
+
+.location-search-results {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.15);
+    max-height: 260px;
+    overflow-y: auto;
+    z-index: 3500;
+    display: none;
+}
+
+.location-search-results.visible {
+    display: block;
+}
+
+.location-search-result {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border-color);
+    transition: background 0.15s ease;
+}
+
+.location-search-result:last-child {
+    border-bottom: none;
+}
+
+.location-search-result:hover,
+.location-search-result.active {
+    background: var(--hover-bg, #f1f5f9);
+}
+
+.location-search-result strong {
+    display: block;
+    font-size: 15px;
+    color: var(--text-color);
+}
+
+.location-search-result span {
+    display: block;
+    font-size: 13px;
+    color: var(--text-light);
+}
+
+.location-search-empty {
+    padding: 16px;
+    text-align: center;
+    color: var(--text-light);
+    font-size: 14px;
+}
+
+.related-invoice-manual {
+    margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#relatedInvoiceSelect:disabled {
+    opacity: 0.7;
+}
+
+/* Discount Module */
+.discount-header {
+    align-items: flex-start;
+}
+
+.discount-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 12px; /* inner breathing room since header has no padding */
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+}
+.discount-title-text {
+    background: linear-gradient(90deg, #111827, #2563eb);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.dark-theme .discount-title-text {
+    background: linear-gradient(90deg, #e5e7eb, #93c5fd);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.discount-title-icon {
+    font-size: 22px;
+}
+
+.discount-header-right {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-right: 12px; /* inner breathing room */
+}
+
+/* Toggle switch (active/inactive) */
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 20px;
+}
+.switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.switch .slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 20px;
+}
+.switch .slider:before {
+    position: absolute;
+    content: "";
+    height: 16px;
+    width: 16px;
+    left: 2px;
+    bottom: 2px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+.switch input:checked + .slider {
+    background-color: green;
+}
+.switch input:checked + .slider:before {
+    transform: translateX(20px);
+}
+.toggle-status-text {
+    margin-left: 8px;
+    font-weight: 700;
+    color: var(--text-color);
+}
+
+.discount-mode-switch .btn {
+    margin-left: 8px;
+}
+
+.discount-app {
+    display: grid;
+    grid-template-columns: 280px 1fr 1.1fr;
+    gap: 16px;
+    margin-top: 16px;
+}
+
+.discount-column {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 5px;
+    display: flex;
+    flex-direction: column;
+    min-height: 520px;
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+.panel-header--bar {
+    background: inherit; /* use parent background; no visual gap */
+    border: none; /* no surrounding box */
+    border-radius: 0;
+    padding: 0; /* header text will provide its own padding */
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border-color); /* thin line after header */
+}
+.panel-header--bar > h3,
+.panel-header--bar > h4 {
+    margin: 0;
+    padding: 10px 12px; /* padding on the text, not the header container */
+}
+.discount-header--bar {
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 0;
+    /* The page header should have padding but sit visually outside .content-body padding.
+       Offset the container padding (2rem) by using negative margins, and add internal padding. */
+    margin: -2rem -2rem 12px -2rem;
+    padding: 12px 2rem;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.library-search input {
+    width: 100%;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+}
+
+.discount-list,
+.buyer-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    flex: 1;
+    overflow-y: auto;
+    /* ensure scrollable list with fixed layout height */
+    max-height: calc(100vh - 260px);
+}
+
+.discount-list-item,
+.buyer-list-item {
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--card-bg);
+}
+
+.discount-list-item.active,
+.buyer-list-item.active {
+    border-color: var(--primary-color);
+    background: rgba(59,130,246,0.08);
+}
+
+.status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.status-dot.active {
+    background: #22c55e;
+}
+
+.status-dot.inactive {
+    background: #f87171;
+}
+
+.dl-item-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.dl-item-title {
+    font-weight: 800;
+    color: #2563eb;
+    letter-spacing: 0.3px;
+}
+.dl-item-sub {
+    color: var(--text-light);
+    font-weight: 600;
+}
+.dl-item-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-color);
+    font-size: 0.95rem;
+    margin-top: 4px;
+}
+.no-stack-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: #b91c1c;
+    background: rgba(239,68,68,0.12);
+    border: 1px solid rgba(239,68,68,0.35);
+}
+.dl-item-meta {
+    color: var(--text-light);
+    font-weight: 700;
+}
+.dark-theme .dl-item-title {
+    color: #93c5fd;
+}
+.dark-theme .discount-list-item,
+.dark-theme .buyer-list-item {
+    background: var(--card-bg);
+    border-color: var(--border-color);
+}
+.label-suffix {
+    font-size: 0.85rem;
+    color: var(--text-light);
+}
+
+.logic-rules,
+.conflict-manager,
+.calculation-breakdown {
+    margin-top: 20px;
+}
+
+/* Calculation notes box styled like breakdown */
+.calc-notes {
+    padding: 20px;
+    background: #f9f9f9;
+    border: 1px solid var(--border-color);
+    border-left: 6px solid #4e9af1;
+    border-radius: 10px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 16px;
+    color: var(--text-color);
+    margin-bottom: 16px;
+}
+.calc-note-line + .calc-note-line {
+    margin-top: 4px;
+}
+
+/* Scrollable breakdown area when many products */
+#calcBreakdown,
+#assignmentCalcBreakdown {
+    max-height: 360px;
+    overflow-y: auto;
+    padding-right: 4px;
+    text-align: left;
+}
+
+/* Dark theme polish for calc notes */
+.dark-theme .calc-notes {
+    background: #1f2430;
+    border-color: var(--border-color);
+}
+.dark-theme .calc-final-badge {
+    background: #3a3f53;
+    color: #fff;
+}
+.calc-notes .calc-notes-title {
+    display: block;
+    margin-bottom: 18px;
+}
+.calc-notes .calc-final-badge {
+    display: inline-block;
+    background: #fff8c4;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-weight: 700;
+}
+.dark-theme .calc-final-badge {
+    background: #334155; /* slate-700 */
+    color: #f8fafc;      /* light text */
+    border: 1px solid #475569;
+}
+.calc-note-line--base {
+    font-weight: 700;
+    font-size: 16px;
+    margin-bottom: 8px;
+}
+.calc-note-line--hint {
+    color: #2563eb;
+}
+.calc-note-line--discount {
+    color: #16a34a;
+}
+.calc-note-line--final {
+    margin-top: 10px;
+}
+
+.rule-group,
+.assignment-card,
+.breakdown-row,
+.cart-row {
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+    background: var(--bg-color, #f8f9fb);
+}
+
+.rule-group {
+    padding: 0;
+    overflow: hidden;
+}
+
+.rule-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: rgba(74, 144, 226, 0.12);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.rule-header-title {
+    font-weight: 700;
+    color: var(--text-color);
+}
+
+.rule-delete {
+    background: transparent;
+    border: none;
+    color: var(--text-light);
+    cursor: pointer;
+}
+.rule-delete:hover { color: var(--text-color); }
+
+.rule-body {
+    padding: 14px;
+}
+
+.rule-body .rule-if {
+    font-weight: 700;
+    margin-bottom: 4px;
+}
+
+.rule-body .rule-then {
+    color: var(--text-light);
+}
+
+.rule-title {
+    font-weight: 600;
+}
+
+.assignment-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.btn-xs {
+    padding: 4px 8px;
+    font-size: 0.75rem;
+}
+
+.sim-cart,
+.assignment-list,
+#ruleList {
+    flex: 1;
+}
+
+/* Simulator cart - refined to match Test Cart design */
+.sim-cart .sim-cart-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border: 1px solid var(--border-color);
+    background: var(--bg-color, #f8f9fb);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 12px;
+}
+.sim-cart .item-info {
+    font-size: 14px;
+}
+.sim-cart .item-info strong {
+    font-size: 15px;
+    color: var(--text-color);
+}
+.sim-cart .item-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.sim-cart .qty-input {
+    width: 80px;
+    padding: 6px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 14px;
+    background: var(--card-bg);
+    color: var(--text-color);
+}
+.sim-cart .remove-btn {
+    background: transparent;
+    color: #dc2626;
+    border: none;
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 6px;
+    border-radius: 6px;
+}
+.sim-cart .remove-btn:hover {
+    background: rgba(220,38,38,0.08);
+}
+
+.empty-state {
+    color: var(--text-light);
+    font-style: italic;
+}
+
+.totals-panel {
+    margin-top: auto;
+    border-top: 1px solid var(--border-color);
+    padding: 12px 12px 14px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: sticky;
+    bottom: 0;
+    background: var(--card-bg);
+    z-index: 5;
+    box-shadow: 0 -6px 12px rgba(0,0,0,0.04);
+}
+
+.totals-panel span {
+    color: var(--text-light);
+}
+
+.totals-panel strong {
+    font-size: 1.1rem;
+}
+
+/* Totals – improved visual hierarchy */
+.totals-panel > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.totals-panel > div:nth-child(1) strong,
+.totals-panel > div:nth-child(2) strong {
+    font-weight: 600;
+}
+.totals-panel > div:nth-child(2) strong {
+    color: #16a34a; /* green for discounts */
+}
+.totals-panel > div:last-child {
+    margin-top: 8px;
+    padding-top: 10px;
+    border-top: 2px solid var(--border-color);
+}
+.totals-panel > div:last-child strong {
+    font-size: 1.6rem;
+    font-weight: 800;
+    letter-spacing: 0.3px;
+    color: #111827; /* high contrast for grand total */
+}
+.dark-theme .totals-panel > div:last-child strong {
+    color: #e5e7eb; /* softer white in dark */
+}
+.dark-theme .totals-panel > div:nth-child(2) strong {
+    color: #22c55e; /* brighter green in dark */
+}
+
+.discount-column.discount-editor {
+    min-height: 600px;
+}
+
+.discount-column.discount-simulator {
+    position: sticky;
+    align-self: flex-start;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Compact simulator controls */
+#simulatorForm .form-group {
+    margin-bottom: 10px;
+}
+#addItemBtn.btn.btn-primary.btn-block {
+    margin-top: 8px;
+}
+.calculation-breakdown {
+    margin-top: 12px;
+}
+#calcBreakdown.empty-state {
+    padding: 0;
+}
+
+/* Simulator control bar */
+.sim-controls {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-radius: 8px;
+}
+.sim-controls-title {
+    margin: 0;
+    font-weight: 700;
+}
+
+.dark-theme .sim-controls-title {
+    color: var(--text-color);
+}
+
+/* Loading overlay and spinner */
+.sim-loading {
+    position: absolute;
+    inset: 0 0 0 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(1.5px);
+    background: rgba(0,0,0,0.08);
+    border-radius: 10px;
+}
+.spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid rgba(255,255,255,0.4);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+.dark-theme .sim-loading {
+    background: rgba(0,0,0,0.25);
+}
+.dark-theme .spinner {
+    border-color: rgba(255,255,255,0.25);
+    border-top-color: #93c5fd;
+}
+
+/* Dark theme text polish in simulator */
+.dark-theme .sim-cart .item-info strong,
+.dark-theme .totals-panel strong,
+.dark-theme .panel-header h3 {
+    color: var(--text-color);
+}
+
+/* Discount Engine - dark theme color tuning */
+.dark-theme .discount-app {
+    --bg-color: #0f172a;
+    --card-bg: #111827;
+    --border-color: #1f2937;
+    --text-color: #e5e7eb;
+    --text-light: #9ca3af;
+}
+.dark-theme .discount-list,
+.dark-theme .buyer-list {
+    color: var(--text-color);
+}
+.dark-theme .buyer-list .buyer-list-item,
+.dark-theme .discount-list .discount-list-item {
+    color: var(--text-color);
+    background: #0b1220;
+    border-color: var(--border-color);
+}
+.dark-theme .buyer-list .buyer-list-item.active,
+.dark-theme .discount-list .discount-list-item.active {
+    background: #0f1a33;
+}
+.dark-theme .conflict-manager label,
+.dark-theme .logic-rules .panel-header h4,
+.dark-theme .conflict-manager .panel-header h4 {
+    color: var(--text-color);
+}
+.dark-theme #conflictSelect,
+.dark-theme #conflictSelect option {
+    background: var(--card-bg);
+    color: var(--text-color);
+    border-color: var(--border-color);
+}
+.dark-theme .discount-app .btn {
+    background-color: #3b82f6 !important;
+    border-color: #3b82f6 !important;
+    color: #0b1020 !important;
+}
+.dark-theme .discount-app .btn:hover,
+.dark-theme .discount-app .btn:focus {
+    background-color: #2563eb !important;
+    border-color: #2563eb !important;
+    color: #0b1020 !important;
+}
+
+/* Dark theme: ensure form inputs use white text */
+.dark-theme .form-group input[type="text"],
+.dark-theme .form-group input[type="url"],
+.dark-theme .form-group input[type="email"],
+.dark-theme .form-group input[type="tel"],
+.dark-theme .form-group input[type="number"],
+.dark-theme .form-group select,
+.dark-theme .form-group textarea {
+    color: #ffffff !important;
+}
+.dark-theme .form-group input::placeholder,
+.dark-theme .form-group textarea::placeholder {
+    color: #9ca3af !important;
+}
+
+/* Discount Engine - force blue default buttons */
+.discount-app .btn {
+    background-color: var(--primary-color) !important;
+    border-color: var(--primary-color) !important;
+    color: #fff !important;
+}
+.discount-app .btn:hover,
+.discount-app .btn:focus {
+    background-color: var(--primary-hover) !important;
+    border-color: var(--primary-hover) !important;
+    color: #fff !important;
+}
+.discount-app .btn.btn-outline-secondary,
+.discount-app .btn.btn-outline-primary,
+.discount-app .btn.btn-secondary {
+    background-color: var(--primary-color) !important;
+    border-color: var(--primary-color) !important;
+    color: #fff !important;
+}
+.discount-app .btn.btn-outline-secondary:hover,
+.discount-app .btn.btn-outline-primary:hover,
+.discount-app .btn.btn-secondary:hover {
+    background-color: var(--primary-hover) !important;
+    border-color: var(--primary-hover) !important;
+}
+.dark-theme .discount-app .btn {
+    background-color: var(--primary-color) !important;
+    border-color: var(--primary-color) !important;
+    color: #fff !important;
+}
+.assignment-list {
+    min-height: 180px;
+}
+
+.assignment-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.breakdown-row {
+    display: flex;
+    justify-content: space-between;
+    font-weight: 600;
+}
+
+@media (max-width: 1200px) {
+    .discount-app {
+        grid-template-columns: 1fr;
+    }
+    .discount-column.discount-simulator {
+        position: static;
+    }
+}
+
+/* Account Credits - Dark Theme Polish */
+.dark-theme .dashboard-card .table {
+    color: var(--text-color);
+    background-color: transparent;
+}
+
+.dark-theme .dashboard-card .table thead th {
+    background-color: #2f3847;
+    color: var(--text-color);
+    border-color: var(--border-color);
+}
+
+.dark-theme .dashboard-card .table tbody tr {
+    background-color: #1f2430;
+    border-color: var(--border-color);
+}
+
+.dark-theme .dashboard-card .table tbody tr:nth-child(even) {
+    background-color: #232938;
+}
+
+.dark-theme .dashboard-card .table-hover tbody tr:hover {
+    background-color: #2d3445;
+}
+
+.dark-theme .dashboard-card .table td,
+.dark-theme .dashboard-card .table th {
+    border-color: var(--border-color);
+}
+
+.dark-theme .credit-row--voided td {
+    color: #fca5a5;
+    opacity: 0.75;
+}
+
+.dark-theme .status-badge.status-voided {
+    background-color: rgba(248, 113, 113, 0.2);
+    color: #fecaca;
+    border-color: #f87171;
+}
+
+.dark-theme #relatedInvoiceSelect,
+.dark-theme #relatedInvoiceInput,
+.dark-theme .related-invoice-manual input {
+    background-color: var(--input-bg);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+}
+
+.dark-theme #relatedInvoiceSelect option {
+    background-color: var(--card-bg);
+    color: var(--text-color);
+}
+
+.dark-theme .related-invoice-manual small,
+.dark-theme #relatedInvoiceHelper {
+    color: var(--text-light);
+}
 
 /* Confirmation Modal Enhancements */
 .confirmation-modal-dialog {
@@ -1660,13 +2564,39 @@ html.sidebar-is-collapsed .sidebar-title-full {
     font-size: 14px;
 }
 .form-error-message { background-color: #ffebe9; color: #cb2431; border: 1px solid #ffb3ac; border-radius: 6px; padding: 10px 12px; margin-top: 16px; font-size: 14px; }
-.table-actions { text-align: right; }
+.table-actions { text-align: right; display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
 .action-btn {
-    background: none; border: none; cursor: pointer; padding: 4px 8px; margin: 0 2px; font-size: 13px;
-    color: var(--text-light); border-radius: 4px; opacity: 0; transition: opacity 0.2s ease, background-color 0.2s ease;
+    background: var(--card-bg); border: 1px solid var(--border-color); cursor: pointer; padding: 5px 10px; margin: 0;
+    font-size: 13px; color: var(--text-color); border-radius: 4px; opacity: 1; transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
-.info-table tbody tr:hover .action-btn { opacity: 1; }
-.action-btn:hover { background-color: var(--bg-color); color: var(--primary-color); }
+.action-btn--primary {
+    background-color: var(--primary-color); border-color: var(--primary-color); color: #fff;
+}
+.action-btn--primary:hover {
+    background-color: var(--primary-color-dark, #0056b3); border-color: var(--primary-color-dark, #0056b3); color: #fff;
+}
+.action-btn--danger {
+    background-color: #dc3545; border-color: #dc3545; color: #fff;
+}
+.action-btn--danger:hover {
+    background-color: #bd2130; border-color: #bd2130;
+}
+.action-btn--secondary {
+    background-color: #f8f9fa; border-color: var(--border-color); color: var(--text-color);
+}
+.action-btn--secondary:hover {
+    background-color: #e2e6ea; border-color: #dae0e5;
+}
+.dark-theme .action-btn--secondary {
+    background-color: rgba(255,255,255,0.1);
+    border-color: rgba(255,255,255,0.25);
+    color: #f3f4f6;
+}
+.dark-theme .action-btn--secondary:hover {
+    background-color: rgba(255,255,255,0.2);
+    border-color: rgba(255,255,255,0.35);
+}
+.action-btn:hover { filter: brightness(0.98); }
 .note-meta { display: flex; align-items: center; gap: 16px; }
 .note-actions { display: flex; gap: 4px; }
 .note-item:hover .action-btn { opacity: 1; }
@@ -1695,6 +2625,10 @@ html.sidebar-is-collapsed .sidebar-title-full {
 .modal-body {
     overflow-y: auto;
     flex: 1;
+}
+
+body.modal-open {
+    overflow: hidden;
 }
 
 /* Bootstrap modal fixes for better positioning */
@@ -2543,3 +3477,26 @@ html.sidebar-is-collapsed .sidebar-title-full {
 /* Modal spacing fix: 1761305160 */
 /* Modal spacing fix v2: 1761305492 */
 /* Multiple role assignment fix: 1761306375 */
+.btn-sm-2 {
+    height: 3rem;
+    line-height: 1.2;
+    padding: 0.375rem 0.75rem;
+    font-size: 12px;
+    font-family: fangsong;
+}
+
+.discount-title-text-2{
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0;
+    color: var(--text-color);
+    font-family: monospace;
+}
+.form-input-modern-2{
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    font-size: 1rem;
+    font-weight: 600;
+    font-family: monospace;
+}

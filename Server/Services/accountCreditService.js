@@ -5,6 +5,8 @@
  */
 
 const { query, pool } = require('../config/database');
+const notificationService = require('./notificationService');
+const auditLogger = require('./auditLogger');
 
 const roundToCurrency = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
@@ -61,26 +63,45 @@ async function addCreditHistoryEntry({
 class AccountCreditService {
     async issueCredit(creditData, userId) {
         try {
-            const result = await query(`
-                INSERT INTO "ORDERS-account-credits" (
-                    fk_location_id,
-                    credit_amount,
-                    remaining_balance,
-                    issued_by,
-                    reason,
-                    related_invoice_id,
-                    expires_at
-                ) VALUES ($1, $2, $2, $3, $4, $5, $6)
-                RETURNING *
-            `, [
+            const insertColumns = [
+                'fk_location_id',
+                'credit_amount',
+                'remaining_balance',
+                'issued_by',
+                'reason',
+                'expires_at'
+            ];
+            const values = [
                 creditData.fk_location_id,
                 creditData.amount,
                 creditData.amount,
                 userId,
                 creditData.reason,
-                creditData.related_invoice_id || null,
                 creditData.expires_at || null
-            ]);
+            ];
+
+            if (creditData.related_invoice_id) {
+                insertColumns.push('related_invoice_id');
+                values.push(creditData.related_invoice_id);
+            }
+
+            if (Object.prototype.hasOwnProperty.call(creditData, 'internal_notes')) {
+                insertColumns.push('internal_notes');
+                values.push(creditData.internal_notes || null);
+            }
+
+            const valuePlaceholders = insertColumns
+                .map((_, idx) => `$${idx + 1}`)
+                .join(', ');
+
+            const result = await query(
+                `
+                INSERT INTO "ORDERS-account-credits" (${insertColumns.join(', ')})
+                VALUES (${valuePlaceholders})
+                RETURNING *
+            `,
+                values
+            );
 
             const credit = result.rows[0];
 
@@ -95,6 +116,16 @@ class AccountCreditService {
                 metadata: {
                     related_invoice_id: credit.related_invoice_id || null
                 }
+            });
+
+            // Notify buyer (best effort) that a credit is available
+            notificationService.notifyBuyerCreditIssued({
+                creditId: credit.id,
+                locationId: credit.fk_location_id,
+                amount: credit.credit_amount,
+                reason: credit.reason
+            }).catch((notificationError) => {
+                console.warn('Unable to notify buyer about new credit:', notificationError);
             });
 
             return { success: true, credit };
@@ -227,15 +258,28 @@ class AccountCreditService {
                 `, [newLineTotal, creditShare, id]);
             }
 
+            // Get discount_amount from invoice to ensure correct total calculation
+            const invoiceWithDiscount = await exec(`
+                SELECT discount_amount
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [invoiceId]);
+            
+            const discountAmount = parseFloat(invoiceWithDiscount.rows[0]?.discount_amount || 0);
+            // Total = Subtotal (already includes discounts in line_total) - Credits
+            // Note: subtotal here is sum of line_totals which already have discounts applied
+            const finalTotal = subtotal - (COALESCE(currentCredit, 0) + totalApplied);
+            
             await exec(`
                 UPDATE "ORDERS-invoices"
                 SET
                     subtotal = $1,
-                    credit_applied = COALESCE(credit_applied, 0) + $2,
-                    total = $1 - (COALESCE(credit_applied, 0) + $2),
+                    discount_amount = $2,
+                    credit_applied = COALESCE(credit_applied, 0) + $3,
+                    total = $4,
                     updated_at = NOW()
-                WHERE id = $3
-            `, [subtotal, totalApplied, invoiceId]);
+                WHERE id = $5
+            `, [subtotal, discountAmount, totalApplied, finalTotal, invoiceId]);
 
             for (const app of applications) {
                 await exec(`
@@ -283,7 +327,7 @@ class AccountCreditService {
                     l.name AS location_name,
                     u.username AS issued_by_username
                 FROM "ORDERS-account-credits" c
-                INNER JOIN "ORDERS-buyer_locations" l ON c.fk_location_id = l.id
+                INNER JOIN "ORDERS-buyer_locations" l ON c.fk_location_id = l.entry_id
                 INNER JOIN "ORDERS-buyers" b ON l.orders_buyer_id = b.entry_id
                 LEFT JOIN users u ON c.issued_by = u.id
                 WHERE c.fk_location_id = $1
@@ -390,6 +434,33 @@ class AccountCreditService {
             });
 
             await client.query('COMMIT');
+            auditLogger.logUserAction(
+                userId,
+                'credit_voided',
+                'AccountCredit',
+                creditId.toString(),
+                {
+                    locationId: credit.fk_location_id,
+                    original_amount: roundToCurrency(credit.credit_amount),
+                    balance_removed: balanceBefore,
+                    reason
+                },
+                'success',
+                null
+            ).catch((logError) => {
+                console.warn('Audit log failed for credit void:', logError);
+            });
+
+            notificationService.notifyAccountingCreditEvent({
+                eventType: 'credit_voided',
+                creditId,
+                locationId: credit.fk_location_id,
+                amount: roundToCurrency(credit.credit_amount),
+                performedBy: userId,
+                reason
+            }).catch((notifyError) => {
+                console.warn('Accounting notification failed for credit void:', notifyError);
+            });
             return { success: true };
         } catch (error) {
             await client.query('ROLLBACK');
@@ -462,7 +533,39 @@ class AccountCreditService {
                 changedByUserId: userId
             });
 
+            const balanceDelta = roundToCurrency(balanceAfter - balanceBefore);
+
             await client.query('COMMIT');
+            auditLogger.logUserAction(
+                userId,
+                'credit_manual_correction',
+                'AccountCredit',
+                creditId.toString(),
+                {
+                    locationId: credit.fk_location_id,
+                    previous_balance: balanceBefore,
+                    new_balance: balanceAfter,
+                    delta: balanceDelta,
+                    reason
+                },
+                'success',
+                null
+            ).catch((logError) => {
+                console.warn('Audit log failed for credit correction:', logError);
+            });
+
+            notificationService.notifyAccountingCreditEvent({
+                eventType: 'credit_manual_correction',
+                creditId,
+                locationId: credit.fk_location_id,
+                amount: balanceAfter,
+                delta: balanceDelta,
+                performedBy: userId,
+                reason
+            }).catch((notifyError) => {
+                console.warn('Accounting notification failed for credit correction:', notifyError);
+            });
+
             return { success: true, remaining_balance: balanceAfter };
         } catch (error) {
             await client.query('ROLLBACK');

@@ -27,16 +27,28 @@
                 <span class="detail-label">Order Number:</span>
                 <span class="detail-value"><%= invoiceNumber || 'N/A' %></span>
             </div>
-            <% if (orderTotal) { %>
+            <% if (subtotal) { %>
             <div class="detail-item">
-                <span class="detail-label">Order Total:</span>
-                <span class="detail-value">$<%= parseFloat(orderTotal).toFixed(2) %></span>
+                <span class="detail-label">Subtotal:</span>
+                <span class="detail-value">$<%= parseFloat(subtotal).toFixed(2) %></span>
+            </div>
+            <% } %>
+            <% if (discountAmount && discountAmount > 0) { %>
+            <div class="detail-item">
+                <span class="detail-label">Discounts:</span>
+                <span class="detail-value discount-amount">-$<%= parseFloat(discountAmount).toFixed(2) %></span>
             </div>
             <% } %>
             <% if (creditApplied && creditApplied > 0) { %>
             <div class="detail-item">
-                <span class="detail-label">Credit Applied:</span>
+                <span class="detail-label">Credits Applied:</span>
                 <span class="detail-value credit-amount">-$<%= parseFloat(creditApplied).toFixed(2) %></span>
+            </div>
+            <% } %>
+            <% if (orderTotal) { %>
+            <div class="detail-item detail-item-total">
+                <span class="detail-label">Total:</span>
+                <span class="detail-value">$<%= parseFloat(orderTotal).toFixed(2) %></span>
             </div>
             <% } %>
         </div>
@@ -124,6 +136,23 @@
     
     .credit-amount {
         color: #10b981;
+    }
+    
+    .discount-amount {
+        color: #10b981;
+    }
+    
+    .detail-item-total {
+        border-top: 2px solid #e5e7eb;
+        margin-top: 8px;
+        padding-top: 16px;
+        font-size: 1.1em;
+    }
+    
+    .detail-item-total .detail-label,
+    .detail-item-total .detail-value {
+        font-size: 1.1em;
+        font-weight: 700;
     }
     
     .confirmation-actions {

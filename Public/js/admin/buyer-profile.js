@@ -1,6 +1,7 @@
 // Public/js/admin/buyer-profile.js
 
 document.addEventListener('DOMContentLoaded', () => {
+    const canManagePurchaseLimits = window.canManagePurchaseLimits === true || window.canManagePurchaseLimits === 'true';
     // === HELPER: Open any modal ===
     const openModal = (modal) => {
         if (!modal) return;
@@ -199,13 +200,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const renderLocationRow = (location) => {
         const address = `${location.line_one}${location.line_two ? ', ' + location.line_two : ''}, ${location.city}, ${location.state} ${location.zip}`;
         // just addin the new access code to the html string it spits out. easy.
+        const limitsButton = canManagePurchaseLimits ? `
+                <button type="button" class="action-btn action-btn--secondary always-visible" data-action="manage-limits"
+                    data-location-id="${location.entry_id}"
+                    data-location-name="${location.name || ''}">
+                    Limits
+                </button>` : '';
+
         return `
             <td>${location.name || ''}</td>
             <td>${address}</td>
             <td>${location.state_license || 'N/A'}</td>
             <td><code>${location.access_code || ''}</code></td>
             <td class="table-actions">
-                <button class="action-btn" data-action="edit-location"
+                <button type="button" class="action-btn action-btn--primary" data-action="edit-location"
                     data-location-id="${location.entry_id}"
                     data-location-name="${location.name || ''}"
                     data-location-line_one="${location.line_one || ''}"
@@ -216,7 +224,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     data-location-state_license="${location.state_license || ''}">
                     Edit
                 </button>
-                <button class="action-btn" data-action="delete-location"
+                ${limitsButton}
+                <button type="button" class="action-btn action-btn--danger" data-action="delete-location"
                     data-location-id="${location.entry_id}"
                     data-location-name="${location.name || ''}">
                     Delete
@@ -224,6 +233,109 @@ document.addEventListener('DOMContentLoaded', () => {
             </td>
         `;
     };
+
+    // Purchase limit modal elements
+    const purchaseLimitModal = document.getElementById('purchaseLimitModal');
+    const purchaseLimitForm = document.getElementById('purchaseLimitForm');
+    const purchaseLimitLocationIdField = document.getElementById('purchaseLimitLocationId');
+    const purchaseLimitLocationName = document.getElementById('purchaseLimitLocationName');
+    const purchaseLimitMeta = document.getElementById('purchaseLimitMeta');
+    const purchaseLimitError = document.getElementById('purchaseLimitError');
+    const purchaseLimitSuccess = document.getElementById('purchaseLimitSuccess');
+    const limitOrderInput = document.getElementById('limitOrderTotal');
+    const limitUnshippedInput = document.getElementById('limitUnshipped');
+    const limitUnpaidInput = document.getElementById('limitUnpaid');
+    const resetPurchaseLimitBtn = document.getElementById('resetPurchaseLimitBtn');
+    const limitOrderDefaultText = document.getElementById('limitOrderDefaultText');
+    const limitUnshippedDefaultText = document.getElementById('limitUnshippedDefaultText');
+    const limitUnpaidDefaultText = document.getElementById('limitUnpaidDefaultText');
+
+    const formatCurrency = (value) => {
+        if (value === null || value === undefined) return 'Default';
+        return `$${Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    };
+
+    const formatInteger = (value) => {
+        if (value === null || value === undefined) return 'Default';
+        return `${Number(value).toLocaleString()}`;
+    };
+
+    const populatePurchaseLimitModal = (payload) => {
+        if (!payload || !payload.limits) return;
+        const { limits, metadata } = payload;
+        const overrides = limits.overrides || {};
+        const defaults = limits.defaults || {};
+
+        limitOrderInput.value = overrides.max_order_total ?? '';
+        limitOrderInput.placeholder = `Default ${formatCurrency(defaults.max_order_total)}`;
+        limitOrderDefaultText.textContent = `Leave blank to use system default (${formatCurrency(defaults.max_order_total)}).`;
+
+        limitUnshippedInput.value = overrides.max_unshipped_orders ?? '';
+        limitUnshippedInput.placeholder = `Default ${formatInteger(defaults.max_unshipped_orders)}`;
+        limitUnshippedDefaultText.textContent = `Leave blank to use system default (${formatInteger(defaults.max_unshipped_orders)}).`;
+
+        limitUnpaidInput.value = overrides.max_unpaid_invoices ?? '';
+        limitUnpaidInput.placeholder = `Default ${formatInteger(defaults.max_unpaid_invoices)}`;
+        limitUnpaidDefaultText.textContent = `Leave blank to use system default (${formatInteger(defaults.max_unpaid_invoices)}).`;
+
+        if (metadata && metadata.last_modified_at) {
+            const modifiedBy = metadata.last_modified_by ? ` by ${metadata.last_modified_by.name || metadata.last_modified_by.email}` : '';
+            purchaseLimitMeta.textContent = `Last updated ${new Date(metadata.last_modified_at).toLocaleString()}${modifiedBy}`;
+        } else {
+            purchaseLimitMeta.textContent = 'No overrides saved. Using system defaults.';
+        }
+    };
+
+    const loadPurchaseLimits = async (locationId) => {
+        console.log('[purchase-limits] loading limits for location', locationId);
+        purchaseLimitError.style.display = 'none';
+        purchaseLimitSuccess.style.display = 'none';
+        purchaseLimitMeta.textContent = 'Loading current limits...';
+        try {
+            const response = await fetch(`/api/crm/locations/${locationId}/purchase-limits`, {
+                credentials: 'same-origin'
+            });
+            console.log('[purchase-limits] fetch status', response.status);
+            if (!response.ok) {
+                throw new Error((await response.json()).error || 'Failed to load purchase limits');
+            }
+            const data = await response.json();
+            console.log('[purchase-limits] fetch success payload', data);
+            populatePurchaseLimitModal(data);
+        } catch (error) {
+            purchaseLimitMeta.textContent = 'Unable to load limits.';
+            purchaseLimitError.textContent = error.message;
+            purchaseLimitError.style.display = 'block';
+            console.error('[purchase-limits] error loading limits', error);
+        }
+    };
+
+    const handleManageLimitsClick = (locationId, locationName) => {
+        console.log('[purchase-limits] handleManageLimitsClick', { locationId, locationName, modalExists: !!purchaseLimitModal });
+        if (!purchaseLimitModal) {
+            console.warn('[purchase-limits] modal element missing');
+            return;
+        }
+        purchaseLimitForm.reset();
+        purchaseLimitError.style.display = 'none';
+        purchaseLimitSuccess.style.display = 'none';
+        purchaseLimitLocationIdField.value = locationId;
+        purchaseLimitLocationName.textContent = locationName || 'Location';
+        console.log('[purchase-limits] opening modal');
+        openModal(purchaseLimitModal);
+        loadPurchaseLimits(locationId);
+    };
+
+    // Attach click handlers to existing Limit buttons (server-rendered)
+    document.querySelectorAll('[data-action="manage-limits"]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+            event.preventDefault();
+            const locationId = btn.dataset.locationId;
+            if (!locationId) return;
+            document.body.classList.add('modal-open');
+            handleManageLimitsClick(locationId, btn.dataset.locationName);
+        });
+    });
 
     // === EVENT: Click "Add Location" button ===
     if (addLocationBtn) {
@@ -264,6 +376,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 locationFormError.style.display = 'none';
                 openModal(locationModal);
+            }
+
+            if (action === 'manage-limits') {
+                document.body.classList.add('modal-open');
+                handleManageLimitsClick(locationId, target.dataset.locationName);
             }
 
             if (action === 'delete-location') {
@@ -314,6 +431,69 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (error) {
                 locationFormError.textContent = `Error: ${error.message}`;
                 locationFormError.style.display = 'block';
+            }
+        });
+    }
+
+    if (resetPurchaseLimitBtn) {
+        resetPurchaseLimitBtn.addEventListener('click', () => {
+            limitOrderInput.value = '';
+            limitUnshippedInput.value = '';
+            limitUnpaidInput.value = '';
+            purchaseLimitError.style.display = 'none';
+            purchaseLimitSuccess.style.display = 'none';
+        });
+    }
+
+    if (purchaseLimitForm) {
+        purchaseLimitForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            purchaseLimitError.style.display = 'none';
+            purchaseLimitSuccess.style.display = 'none';
+
+            const locationId = purchaseLimitLocationIdField.value;
+            if (!locationId) {
+                purchaseLimitError.textContent = 'Missing location identifier.';
+                purchaseLimitError.style.display = 'block';
+                return;
+            }
+
+        const payload = {
+            max_order_total: limitOrderInput.value === '' ? null : parseInt(limitOrderInput.value, 10),
+            max_unshipped_orders: limitUnshippedInput.value === '' ? null : parseInt(limitUnshippedInput.value, 10),
+            max_unpaid_invoices: limitUnpaidInput.value === '' ? null : parseInt(limitUnpaidInput.value, 10)
+        };
+
+            try {
+                const response = await fetch(`/api/crm/locations/${locationId}/purchase-limits`, {
+                    method: 'PUT',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to update purchase limits');
+                }
+
+                populatePurchaseLimitModal(data);
+                purchaseLimitSuccess.textContent = 'Purchase limits updated successfully.';
+                purchaseLimitSuccess.style.display = 'block';
+
+                setTimeout(() => {
+                    closeModal(purchaseLimitModal, 'force');
+                    document.body.classList.remove('modal-open');
+                }, 800);
+
+                if (typeof showNotification === 'function') {
+                    showNotification('Purchase limits saved', 'success');
+                }
+            } catch (error) {
+                purchaseLimitError.textContent = error.message;
+                purchaseLimitError.style.display = 'block';
+                console.error('[purchase-limits] error saving limits', error);
+                document.body.classList.remove('modal-open');
             }
         });
     }

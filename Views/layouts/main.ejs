@@ -74,44 +74,40 @@
     </script>
 </head>
 <body>
-<div class="app-container" id="app-container">
+<% 
+const hideSidebarFlag = typeof hideSidebar !== 'undefined' && hideSidebar;
+const hasRole = (roleName) => userRoles && userRoles.includes(roleName);
+const isAdmin = isSuperuser || hasRole('Administrator');
+const isSalesAdmin = hasRole('Sales Admin');
+const isSalesRep = hasRole('Sales Representative');
+let primaryRole = 'User';
+if (isSuperuser) {
+    primaryRole = 'Superuser';
+    
+} else if (hasRole('Administrator')) {
+    primaryRole = 'Administrator';
+} else if (isSalesAdmin) {
+    primaryRole = 'Sales Admin';
+} else if (isSalesRep) {
+    primaryRole = 'Sales Representative';
+} else if (hasRole('Inventory Manager')) {
+    primaryRole = 'Inventory Manager';
+} else if (hasRole('Fulfillment Team')) {
+    primaryRole = 'Fulfillment Team';
+} else if (hasRole('Accounting/Finance')) {
+    primaryRole = 'Accounting/Finance';
+} else if (userRoles && userRoles.length > 0) {
+    primaryRole = userRoles[0];
+}
+%>
+<div class="app-container <%= hideSidebarFlag ? 'app-container--full' : '' %>" id="app-container">
+    <% if (!hideSidebarFlag) { %>
     <aside class="sidebar">
         <div class="sidebar-header">
             <img src="/public/images/amaze-logo.png" alt="AMAZE" class="sidebar-logo-image">
             <!-- <span class="sidebar-title-full">Green Releaf</span> -->
         </div>
         <nav class="sidebar-nav">
-            <% 
-            // Helper function to check if user has a role
-            const hasRole = (roleName) => {
-                return userRoles && userRoles.includes(roleName);
-            };
-            
-            // Helper function to check if user is administrator or superuser
-            const isAdmin = isSuperuser || hasRole('Administrator');
-            const isSalesAdmin = hasRole('Sales Admin');
-            const isSalesRep = hasRole('Sales Representative');
-            
-            // Determine primary role for display
-            let primaryRole = 'User';
-            if (isSuperuser) {
-                primaryRole = 'Superuser';
-            } else if (hasRole('Administrator')) {
-                primaryRole = 'Administrator';
-            } else if (isSalesAdmin) {
-                primaryRole = 'Sales Admin';
-            } else if (isSalesRep) {
-                primaryRole = 'Sales Representative';
-            } else if (hasRole('Inventory Manager')) {
-                primaryRole = 'Inventory Manager';
-            } else if (hasRole('Fulfillment Team')) {
-                primaryRole = 'Fulfillment Team';
-            } else if (hasRole('Accounting/Finance')) {
-                primaryRole = 'Accounting/Finance';
-            } else if (userRoles && userRoles.length > 0) {
-                primaryRole = userRoles[0];
-            }
-            %>
             
             <!-- Sales Admin: Dashboard, CRM and Invoices -->
             <% if (isSalesAdmin && !isAdmin) { %>
@@ -124,6 +120,19 @@
                 <a href="/admin/crm" class="nav-link <%= title.startsWith('CRM') ? 'active' : '' %>" title="CRM">
                     <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
                     <span class="nav-link-text">CRM</span>
+                </a>
+                <!-- Account Credits -->
+                <a href="/admin/credits" class="nav-link <%= title === 'Account Credits' ? 'active' : '' %>" title="Account Credits">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                    <span class="nav-link-text">Account Credits</span>
+                </a>
+                <a href="/admin/discounts" class="nav-link <%= (title === 'Discount Builder' || title === 'Buyer Discount Assignments') ? 'active' : '' %>" title="Discounts">
+                    <!-- Percentage tag icon -->
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M7 7h.01M17 17h.01M8 16l8-8"></path>
+                        <path d="M21 11.5V7a2 2 0 0 0-2-2h-4.5a2 2 0 0 0-1.414.586l-7.5 7.5A2 2 0 0 0 5 14.5V19a2 2 0 0 0 2 2h4.5a2 2 0 0 0 1.414-.586l7.5-7.5A2 2 0 0 0 21 11.5Z"></path>
+                    </svg>
+                    <span class="nav-link-text">Discounts</span>
                 </a>
                 <!-- Invoices -->
                 <a href="/admin/invoices" class="nav-link <%= title === 'Invoices' || title === 'Invoice Details' ? 'active' : '' %>" title="Invoices">
@@ -152,6 +161,16 @@
                 <a href="/admin/crm" class="nav-link <%= title.startsWith('CRM') ? 'active' : '' %>" title="CRM">
                     <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
                     <span class="nav-link-text">CRM</span>
+                </a>
+                
+                <a href="/admin/credits" class="nav-link <%= title === 'Account Credits' ? 'active' : '' %>" title="Account Credits">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                    <span class="nav-link-text">Account Credits</span>
+                </a>
+                
+                <a href="/admin/discounts" class="nav-link <%= (title === 'Discount Builder' || title === 'Buyer Discount Assignments') ? 'active' : '' %>" title="Discounts">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7l5-5 5 5"></path><path d="M5 17l5 5 5-5"></path><path d="M5 12h14"></path></svg>
+                    <span class="nav-link-text">Discounts</span>
                 </a>
                 
                 <% if (hasRole('Inventory Manager') || isAdmin) { %>
@@ -192,9 +211,10 @@
             <% } %>
         </nav>
     </aside>
+    <% } %>
 
-    <main class="main-content">
-        <!-- Top Bar -->
+    <main class="main-content <%= hideSidebarFlag ? 'main-content--full' : '' %>">
+        <% if (!hideSidebarFlag) { %>
         <div class="top-bar">
             <div class="top-bar-left">
                 <h1 class="page-title"><%= title %></h1>
@@ -241,8 +261,9 @@
                 </div>
             </div>
         </div>
+        <% } %>
         
-        <div class="content-body">
+        <div class="content-body <%= hideSidebarFlag ? 'content-body--full' : '' %>">
             <%- body %>
         </div>
     </main>

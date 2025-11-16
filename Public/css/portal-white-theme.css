@@ -1344,6 +1344,21 @@ body {
     opacity: 0.6;
 }
 
+/* Discounted totals styling in checkout */
+.price-strike {
+    text-decoration: line-through;
+    color: #9ca3af;
+    margin-right: 6px;
+}
+.price-discounted {
+    color: #10b981;
+    font-weight: 700;
+}
+.price-note {
+    font-size: 12px;
+    color: #6b7280;
+}
+
 .empty-cart {
     display: flex;
     flex-direction: column;
@@ -2187,6 +2202,15 @@ body {
     font-weight: 700;
     color: var(--text-dark);
     margin: 0;
+    color:azure;
+    font-family: monospace;
+    font-size: 2rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    text-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    text-align: center;
+    text-decoration: underline;
 }
 
 .back-to-store-btn {

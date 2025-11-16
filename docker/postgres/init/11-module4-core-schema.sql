@@ -302,6 +302,7 @@ CREATE TABLE IF NOT EXISTS "ORDERS-account-credits" (
     issued_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     reason TEXT NOT NULL,
     related_invoice_id INTEGER REFERENCES "ORDERS-invoices"(id),  -- If issued due to problem
+    internal_notes TEXT,
     
     -- Expiration
     expires_at TIMESTAMPTZ,

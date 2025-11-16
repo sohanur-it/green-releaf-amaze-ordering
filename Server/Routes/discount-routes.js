@@ -7,8 +7,216 @@
 const express = require('express');
 const router = express.Router();
 const discountService = require('../Services/discountService');
+const discountBuilderService = require('../Services/discountBuilderService');
 const { requireAuth: auth } = require('../Middleware/auth');
 const { auditMiddleware } = require('../Middleware/auditMiddleware');
+const { query } = require('../config/database');
+
+/**
+ * Discount Builder Endpoints
+ */
+router.get('/codes', auth, async (req, res) => {
+    try {
+        const codes = await discountBuilderService.listDiscountCodes();
+        res.json({ success: true, discounts: codes });
+    } catch (error) {
+        console.error('Error loading discount codes:', error);
+        res.status(500).json({ success: false, error: 'Failed to load discounts' });
+    }
+});
+
+router.post('/codes', auth, auditMiddleware, async (req, res) => {
+    try {
+        const userId = req.session.userId || req.user?.id;
+        const required = ['display_name', 'code_name'];
+        const missing = required.filter((field) => !req.body[field]);
+        if (missing.length) {
+            return res.status(400).json({ success: false, error: `Missing fields: ${missing.join(', ')}` });
+        }
+        const discount = await discountBuilderService.createDiscountCode(req.body, userId);
+        res.status(201).json({ success: true, discount });
+    } catch (error) {
+        console.error('Error creating discount code:', error);
+        res.status(500).json({ success: false, error: 'Failed to create discount' });
+    }
+});
+
+router.get('/codes/:id', auth, async (req, res) => {
+    try {
+        const code = await discountBuilderService.getDiscountCodeById(parseInt(req.params.id, 10));
+        if (!code) {
+            return res.status(404).json({ success: false, error: 'Discount not found' });
+        }
+        res.json({ success: true, discount: code });
+    } catch (error) {
+        console.error('Error fetching discount code:', error);
+        res.status(500).json({ success: false, error: 'Failed to fetch discount' });
+    }
+});
+
+router.put('/codes/:id', auth, auditMiddleware, async (req, res) => {
+    try {
+        const userId = req.session.userId || req.user?.id;
+        const discount = await discountBuilderService.updateDiscountCode(parseInt(req.params.id, 10), req.body, userId);
+        res.json({ success: true, discount });
+    } catch (error) {
+        console.error('Error updating discount code:', error);
+        res.status(500).json({ success: false, error: 'Failed to update discount' });
+    }
+});
+
+router.delete('/codes/:id', auth, auditMiddleware, async (req, res) => {
+    try {
+        await discountBuilderService.deleteDiscountCode(parseInt(req.params.id, 10));
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error deleting discount code:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete discount' });
+    }
+});
+
+router.post('/codes/:id/rules', auth, auditMiddleware, async (req, res) => {
+    try {
+        const required = ['applies_to', 'action', 'value'];
+        const missing = required.filter((field) => req.body[field] === undefined || req.body[field] === null);
+        if (missing.length) {
+            return res.status(400).json({ success: false, error: `Missing fields: ${missing.join(', ')}` });
+        }
+        const rule = await discountBuilderService.addRule(parseInt(req.params.id, 10), req.body);
+        res.status(201).json({ success: true, rule });
+    } catch (error) {
+        console.error('Error adding discount rule:', error);
+        res.status(500).json({ success: false, error: 'Failed to add rule' });
+    }
+});
+
+router.put('/rules/:ruleId', auth, auditMiddleware, async (req, res) => {
+    try {
+        const rule = await discountBuilderService.updateRule(parseInt(req.params.ruleId, 10), req.body);
+        res.json({ success: true, rule });
+    } catch (error) {
+        console.error('Error updating discount rule:', error);
+        res.status(500).json({ success: false, error: 'Failed to update rule' });
+    }
+});
+
+router.delete('/rules/:ruleId', auth, auditMiddleware, async (req, res) => {
+    try {
+        await discountBuilderService.deleteRule(parseInt(req.params.ruleId, 10));
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error deleting discount rule:', error);
+        res.status(500).json({ success: false, error: 'Failed to delete rule' });
+    }
+});
+
+router.post('/codes/:id/conflicts', auth, auditMiddleware, async (req, res) => {
+    try {
+        const conflictIds = Array.isArray(req.body.conflicts) ? req.body.conflicts : [];
+        await discountBuilderService.updateConflicts(parseInt(req.params.id, 10), conflictIds);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error updating discount conflicts:', error);
+        res.status(500).json({ success: false, error: 'Failed to update conflicts' });
+    }
+});
+
+router.get('/buyers/:buyerId/assignments', auth, async (req, res) => {
+    try {
+        const assignments = await discountBuilderService.getBuyerAssignments(parseInt(req.params.buyerId, 10));
+        res.json({ success: true, assignments });
+    } catch (error) {
+        console.error('Error fetching buyer assignments:', error);
+        res.status(500).json({ success: false, error: 'Failed to fetch assignments' });
+    }
+});
+
+router.post('/buyers/:buyerId/assignments', auth, auditMiddleware, async (req, res) => {
+    try {
+        const userId = req.session.userId || req.user?.id;
+        const { discount_id } = req.body;
+        if (!discount_id) {
+            return res.status(400).json({ success: false, error: 'discount_id is required' });
+        }
+        const assignment = await discountBuilderService.assignDiscountToBuyer(
+            parseInt(req.params.buyerId, 10),
+            parseInt(discount_id, 10),
+            userId
+        );
+        res.status(201).json({ success: true, assignment });
+    } catch (error) {
+        console.error('Error assigning discount:', error);
+        res.status(500).json({ success: false, error: 'Failed to assign discount' });
+    }
+});
+
+router.put('/buyers/:buyerId/assignments/reorder', auth, auditMiddleware, async (req, res) => {
+    try {
+        const ordering = Array.isArray(req.body.ordering) ? req.body.ordering : [];
+        await discountBuilderService.reorderAssignments(parseInt(req.params.buyerId, 10), ordering);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error reordering assignments:', error);
+        res.status(500).json({ success: false, error: 'Failed to reorder' });
+    }
+});
+
+router.delete('/buyers/:buyerId/assignments/:assignmentId', auth, auditMiddleware, async (req, res) => {
+    try {
+        await discountBuilderService.removeAssignment(parseInt(req.params.assignmentId, 10));
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error removing assignment:', error);
+        res.status(500).json({ success: false, error: 'Failed to remove assignment' });
+    }
+});
+
+router.post('/simulate', auth, async (req, res) => {
+    try {
+        const result = await discountBuilderService.simulatePricing(req.body || {});
+        res.json({ success: true, result });
+    } catch (error) {
+        console.error('Error running pricing simulation:', error);
+        res.status(500).json({ success: false, error: 'Simulation failed' });
+    }
+});
+
+/**
+ * Helper: list products for a buyer (first location fallback)
+ * GET /api/v1/discounts/buyers/:buyerId/products?limit=50
+ */
+router.get('/buyers/:buyerId/products', auth, async (req, res) => {
+    try {
+        const buyerId = parseInt(req.params.buyerId, 10);
+        const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+        if (Number.isNaN(buyerId)) {
+            return res.status(400).json({ success: false, error: 'Invalid buyer id' });
+        }
+        // Find a location to anchor pricing context (fallback to first)
+        const loc = await query(`
+            SELECT entry_id FROM "ORDERS-buyer_locations"
+            WHERE orders_buyer_id = $1
+            ORDER BY entry_id ASC
+            LIMIT 1
+        `, [buyerId]);
+        const locationId = loc.rows[0]?.entry_id || null;
+        // Return basic product list with default price
+        const products = await query(`
+            SELECT entry_id AS product_id, name, COALESCE(default_price, 0) AS unit_price, category_name
+            FROM "ORDERS-products"
+            ORDER BY name ASC
+            LIMIT $1
+        `, [limit]);
+        res.json({
+            success: true,
+            location_id: locationId,
+            products: products.rows
+        });
+    } catch (error) {
+        console.error('Error getting buyer products:', error);
+        res.status(500).json({ success: false, error: 'Failed to load products' });
+    }
+});
 
 /**
  * Get all standing discounts for a location

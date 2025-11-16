@@ -189,6 +189,115 @@
     border-bottom: none;
 }
 
+#batch-modal,
+#partial-package-modal {
+    z-index: 2000;
+}
+
+.invoice-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(15, 23, 42, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+}
+
+.invoice-modal {
+    background: var(--card-bg, #fff);
+    width: 95%;
+    max-width: 650px;
+    max-height: 90vh;
+    border-radius: 14px;
+    box-shadow: 0 25px 55px rgba(15, 23, 42, 0.45);
+    display: flex;
+    flex-direction: column;
+}
+
+.invoice-modal .modal-header,
+.invoice-modal .modal-body,
+.invoice-modal .modal-footer {
+    padding: 20px 24px;
+}
+
+.invoice-modal .modal-header {
+    border-bottom: 1px solid var(--border-color, #e5e7eb);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.invoice-modal .modal-body {
+    overflow-y: auto;
+}
+
+.invoice-modal .modal-footer {
+    border-top: 1px solid var(--border-color, #e5e7eb);
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+}
+
+.batch-card {
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 14px;
+    background: var(--hover-bg, #f9fafb);
+}
+
+.batch-card h4 {
+    margin: 0;
+    font-size: 15px;
+    color: var(--text-color, #111827);
+}
+
+.batch-meta {
+    font-size: 0.9rem;
+    color: var(--text-light, #6b7280);
+    margin-top: 4px;
+}
+
+.batch-actions {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.batch-actions input[type="number"] {
+    max-width: 140px;
+}
+
+.partial-summary {
+    font-size: 0.85rem;
+    color: var(--text-light, #6b7280);
+    margin-top: 6px;
+}
+
+.partial-package-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(229, 231, 235, 0.7);
+}
+
+.partial-package-row:last-child {
+    border-bottom: none;
+}
+
+.partial-package-list {
+    max-height: 320px;
+    overflow-y: auto;
+    margin-top: 10px;
+}
+
 #batch-modal .form-section {
     margin-bottom: 0;
 }
@@ -283,6 +392,8 @@ let selectedLocationId = null;
 let selectedBuyerId = null;
 let lineItems = [];
 let productCache = [];
+const selectedPartialPackages = {};
+const partialPackageCache = {};
 
 // Initialize
 document.addEventListener('DOMContentLoaded', function() {
@@ -476,21 +587,18 @@ async function selectProduct(productId) {
     document.getElementById('product-search-results').style.display = 'none';
     document.getElementById('product-search').value = '';
 
+    const productInfo = productCache.find(p => p.product_id === productId);
+    const productLabel = productInfo
+        ? `${productInfo.brand_name || 'AMAZE'} ${productInfo.name}`
+        : 'Selected Product';
+
     // Load batches for this product
     try {
         const response = await fetch(`/api/v1/invoices/products/${productId}/batches?location_id=${selectedLocationId}`);
         const data = await response.json();
         
         if (data.success && data.batches && data.batches.length > 0) {
-            // Show batch selection modal or add directly if only one batch
-            if (data.batches.length === 1) {
-                const qty = prompt(`Enter quantity (Available: ${data.batches[0].available_quantity}):`);
-                if (qty && parseInt(qty) > 0 && parseInt(qty) <= data.batches[0].available_quantity) {
-                    addLineItem(productId, data.batches[0].id, parseInt(qty), data.batches[0].unit_price, data.batches[0].batch_name);
-                }
-            } else {
-                showBatchSelectionModal(productId, data.batches);
-            }
+            showBatchSelectionModal(productId, productLabel, data.batches);
         } else {
             if (typeof showNotification === 'function') {
                 showNotification('No available batches found for this product', 'warning');
@@ -508,56 +616,246 @@ async function selectProduct(productId) {
     }
 }
 
-function showBatchSelectionModal(productId, batches) {
-    const batchList = batches.map(batch => `
-        <div class="batch-option" style="padding: 12px; border-bottom: 1px solid var(--border-color, #eee); cursor: pointer;" onclick="selectBatch(${productId}, ${batch.id}, ${batch.available_quantity}, ${batch.unit_price}, '${batch.batch_name}'); closeBatchModal();">
-            <strong style="color: var(--text-color, #24292e);">${batch.batch_name}</strong>
-            <div style="font-size: 0.9rem; color: var(--text-light, #666); margin-top: 4px;">
-                Available: ${batch.available_quantity} | Unit Price: $${parseFloat(batch.unit_price || 0).toFixed(2)}
+function escapeHtml(str = '') {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function showBatchSelectionModal(productId, productLabel, batches) {
+    closeBatchModal();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'batch-selection-modal';
+    overlay.className = 'invoice-modal-overlay';
+    overlay.innerHTML = `
+        <div class="invoice-modal">
+            <div class="modal-header">
+                <h3>Select Batch</h3>
+                <button type="button" class="btn btn-secondary" id="batch-modal-close">Close</button>
             </div>
+            <div class="modal-body">
+                <p style="margin-top: 0; margin-bottom: 12px; color: var(--text-light, #6b7280); font-size: 0.95rem;">
+                    ${escapeHtml(productLabel)}
+                </p>
+                <div id="batch-card-container"></div>
+            </div>
+        </div>
+    `;
+
+    document.body.appendChild(overlay);
+    document.body.style.overflow = 'hidden';
+
+    const cardContainer = overlay.querySelector('#batch-card-container');
+    cardContainer.innerHTML = batches.map(batch => `
+        <div class="batch-card"
+             data-batch-id="${batch.id}"
+             data-batch-name="${escapeHtml(batch.batch_name)}"
+             data-unit-price="${batch.unit_price}"
+             data-available="${batch.available_quantity}"
+             data-partial-count="${batch.partial_package_count || 0}">
+            <h4>${escapeHtml(batch.batch_name)}</h4>
+            <div class="batch-meta">
+                Available: ${batch.available_quantity} • Unit Price: $${parseFloat(batch.unit_price || 0).toFixed(2)}
+            </div>
+            <div class="batch-actions">
+                <label for="batch-qty-${batch.id}" style="font-weight: 600;">Quantity</label>
+                <input type="number"
+                       id="batch-qty-${batch.id}"
+                       min="1"
+                       value="1"
+                       max="${batch.available_quantity}"
+                       data-qty-input="${batch.id}">
+                ${batch.partial_package_count > 0 ? `
+                    <button type="button" class="btn btn-secondary" data-partial-selector="${batch.id}">
+                        Select Partial Packages
+                    </button>
+                ` : ''}
+                <button type="button" class="btn btn-primary" data-add-batch="${batch.id}">
+                    Add Batch
+                </button>
+            </div>
+            <div class="partial-summary" data-partial-summary="${batch.id}"></div>
         </div>
     `).join('');
 
-    const modal = document.createElement('div');
-    modal.id = 'batch-modal';
-    modal.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000;';
-    modal.innerHTML = `
-        <div class="form-section" style="border-radius: 8px; padding: 20px; max-width: 500px; max-height: 400px; overflow-y: auto; width: 90%;">
-            <h3 style="color: var(--text-color, #24292e); margin-top: 0;">Select Batch</h3>
-            <div>${batchList}</div>
-            <button onclick="closeBatchModal()" class="btn btn-secondary" style="margin-top: 20px;">Cancel</button>
-        </div>
-    `;
-    document.body.appendChild(modal);
+    overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+            closeBatchModal();
+        }
+    });
+
+    overlay.querySelector('#batch-modal-close').addEventListener('click', closeBatchModal);
+
+    overlay.querySelectorAll('[data-partial-selector]').forEach(button => {
+        button.addEventListener('click', async () => {
+            const batchId = parseInt(button.dataset.partialSelector, 10);
+            const qtyInput = overlay.querySelector(`[data-qty-input="${batchId}"]`);
+            const summaryEl = overlay.querySelector(`[data-partial-summary="${batchId}"]`);
+            await openPartialPackageSelector(batchId, summaryEl, qtyInput);
+        });
+    });
+
+    overlay.querySelectorAll('[data-add-batch]').forEach(button => {
+        button.addEventListener('click', () => {
+            const batchId = parseInt(button.dataset.addBatch, 10);
+            const card = button.closest('.batch-card');
+            const available = parseInt(card.dataset.available, 10);
+            const unitPrice = parseFloat(card.dataset.unitPrice);
+            const batchName = card.dataset.batchName;
+            const qtyInput = overlay.querySelector(`[data-qty-input="${batchId}"]`);
+            let quantity = parseInt(qtyInput.value, 10);
+
+            const partialLabels = selectedPartialPackages[batchId] || [];
+            if (partialLabels.length > 0) {
+                quantity = partialLabels.length;
+            }
+
+            if (!quantity || quantity <= 0) {
+                alert('Please enter a valid quantity.');
+                return;
+            }
+
+            if (quantity > available) {
+                alert(`Only ${available} units available for this batch.`);
+                return;
+            }
+
+            addLineItem(productId, batchId, quantity, unitPrice, batchName, partialLabels);
+            delete selectedPartialPackages[batchId];
+            closeBatchModal();
+        });
+    });
+
+    cardContainer.querySelectorAll('.batch-card').forEach(card => {
+        const batchId = parseInt(card.dataset.batchId, 10);
+        const summaryEl = card.querySelector(`[data-partial-summary="${batchId}"]`);
+        const qtyInput = card.querySelector(`[data-qty-input="${batchId}"]`);
+        updatePartialSummary(batchId, summaryEl, qtyInput);
+    });
 }
 
 function closeBatchModal() {
-    const modal = document.getElementById('batch-modal');
-    if (modal) modal.remove();
-}
-
-function selectBatch(productId, batchId, availableQuantity, unitPrice, batchName) {
-    const quantity = prompt(`Enter quantity (Available: ${availableQuantity}):`);
-    if (!quantity || parseInt(quantity) <= 0) return;
-    
-    const qty = parseInt(quantity);
-    if (qty > availableQuantity) {
-        if (typeof showNotification === 'function') {
-            showNotification(`Only ${availableQuantity} units available`, 'warning');
-        } else {
-            alert(`Only ${availableQuantity} units available`);
-        }
-        return;
+    const modal = document.getElementById('batch-selection-modal');
+    if (modal) {
+        modal.remove();
+        document.body.style.overflow = '';
     }
-    
-    addLineItem(productId, batchId, qty, unitPrice, batchName);
 }
 
-async function addLineItem(productId, batchId, quantity, unitPrice, batchName) {
+async function openPartialPackageSelector(batchId, summaryEl, qtyInput) {
+    try {
+        if (!partialPackageCache[batchId]) {
+            const response = await fetch(`/api/v1/batches/${batchId}/partial-packages/available`);
+            const data = await response.json();
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to load partial packages');
+            }
+            partialPackageCache[batchId] = (data.partial_packages || []).filter(pkg => pkg.available);
+        }
+
+        const availablePackages = partialPackageCache[batchId];
+
+        if (!availablePackages || availablePackages.length === 0) {
+            if (typeof showNotification === 'function') {
+                showNotification('No available partial packages for this batch.', 'warning');
+            } else {
+                alert('No available partial packages for this batch.');
+            }
+            return;
+        }
+
+        const overlay = document.createElement('div');
+        overlay.id = 'partial-package-modal';
+        overlay.className = 'invoice-modal-overlay';
+        const currentSelection = selectedPartialPackages[batchId] || [];
+        overlay.innerHTML = `
+            <div class="invoice-modal" style="max-width: 520px;">
+                <div class="modal-header">
+                    <h3>Select Partial Packages</h3>
+                    <button type="button" class="btn btn-secondary" data-close-partial>Close</button>
+                </div>
+                <div class="modal-body">
+                    <div class="partial-package-list">
+                        ${availablePackages.map(pkg => `
+                            <label class="partial-package-row">
+                                <input type="checkbox"
+                                       value="${pkg.label}"
+                                       ${currentSelection.includes(pkg.label) ? 'checked' : ''}
+                                >
+                                <span style="font-weight: 600;">${pkg.label}</span>
+                                <span style="color: var(--text-light, #6b7280); font-size: 0.9rem;">
+                                    ${pkg.quantity ? `Qty: ${pkg.quantity}` : ''}
+                                </span>
+                            </label>
+                        `).join('')}
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-close-partial>Cancel</button>
+                    <button type="button" class="btn btn-primary" data-save-partial>Select Packages</button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(overlay);
+    overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+            overlay.remove();
+            document.body.style.overflow = '';
+        }
+    });
+    overlay.querySelectorAll('[data-close-partial]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            overlay.remove();
+            document.body.style.overflow = '';
+        });
+    });
+        overlay.querySelector('[data-save-partial]').addEventListener('click', () => {
+            const selected = Array.from(overlay.querySelectorAll('input[type="checkbox"]:checked')).map(input => input.value);
+            selectedPartialPackages[batchId] = selected;
+            updatePartialSummary(batchId, summaryEl, qtyInput);
+            overlay.remove();
+        document.body.style.overflow = '';
+        });
+    } catch (error) {
+        console.error('Error loading partial packages:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to load partial packages.', 'error');
+        } else {
+            alert('Failed to load partial packages.');
+        }
+    }
+}
+
+function updatePartialSummary(batchId, summaryEl, qtyInput) {
+    const selected = selectedPartialPackages[batchId] || [];
+    if (!summaryEl) return;
+    if (selected.length > 0) {
+        summaryEl.textContent = `${selected.length} partial package${selected.length > 1 ? 's' : ''} selected`;
+        if (qtyInput) {
+            qtyInput.value = selected.length;
+            qtyInput.disabled = true;
+        }
+    } else {
+        summaryEl.textContent = '';
+        if (qtyInput) {
+            qtyInput.disabled = false;
+        }
+    }
+}
+
+async function addLineItem(productId, batchId, quantity, unitPrice, batchName, partialPackages = []) {
     // Check if product already added, if so update quantity
     const existing = lineItems.find(item => item.product_id === productId && item.batch_id === batchId);
     if (existing) {
         existing.quantity += quantity;
+        if (partialPackages && partialPackages.length) {
+            existing.partial_packages_selected = partialPackages.slice();
+        }
         renderLineItems();
         return;
     }
@@ -589,7 +887,8 @@ async function addLineItem(productId, batchId, quantity, unitPrice, batchName) {
             batch_id: batchId,
             batch_name: batchName || `Batch ${batchId}`,
             quantity: quantity,
-            unit_price: parseFloat(unitPrice || product.default_price || 0)
+            unit_price: parseFloat(unitPrice || product.default_price || 0),
+            partial_packages_selected: partialPackages && partialPackages.length ? partialPackages.slice() : []
         });
         renderLineItems();
     } else {
@@ -629,6 +928,11 @@ function renderLineItems() {
                         Unit Price: $${parseFloat(item.unit_price).toFixed(2)} | 
                         Total: $<strong>${parseFloat(lineTotal).toFixed(2)}</strong>
                     </div>
+                    ${item.partial_packages_selected && item.partial_packages_selected.length ? `
+                        <div style="font-size: 0.85rem; color: var(--text-light, #6b7280); margin-top: 4px;">
+                            Partial packages: ${item.partial_packages_selected.join(', ')}
+                        </div>
+                    ` : ''}
                 </div>
                 <div class="line-item-actions">
                     <button onclick="removeLineItem(${index})" class="btn btn-danger">Remove</button>
@@ -685,7 +989,10 @@ async function createInvoice(desiredStatus = 'Pending_Approval', triggerBtn = nu
                 status,
                 line_items: lineItems.map(item => ({
                     fk_batch_id: item.batch_id,
-                    quantity: item.quantity
+                    quantity: item.quantity,
+                    partial_packages_selected: item.partial_packages_selected && item.partial_packages_selected.length
+                        ? item.partial_packages_selected
+                        : null
                 })),
                 customer_notes: document.getElementById('customer-notes').value,
                 internal_notes: document.getElementById('internal-notes').value

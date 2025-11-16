@@ -25,6 +25,7 @@
                             <th>Name</th>
                             <th>Price</th>
                             <th>Quantity</th>
+                            <th>Discount</th>
                             <th>Line</th>
                         </tr>
                     </thead>
@@ -91,6 +92,9 @@
                                                 </button>
                                             </div>
                                         </div>
+                                    </td>
+                                    <td class="item-discount-cell">
+                                        <span class="line-discount">-$0.00</span>
                                     </td>
                                     <td class="item-line-cell">
                                         <div class="line-total-actions">
@@ -687,6 +691,34 @@ function checkInventoryAndToggleCheckout() {
         // Show checkout section if no issues
         showCheckoutBottomSection();
     }
+        
+    // Always update summary with discounts/credits after cart load and validation
+    try {
+        console.log('[checkout] calling updateCheckoutTotal with items:', cart.getCart().items);
+        updateCheckoutTotal();
+    } catch (e) {
+        console.warn('Failed to update checkout totals on init:', e);
+    }
+    
+    // Safety net: trigger totals again after a short delay
+    setTimeout(() => {
+        try {
+            console.log('[checkout] fallback updateCheckoutTotal() timer fired');
+            updateCheckoutTotal();
+        } catch (e) {
+            console.warn('Fallback totals update failed:', e);
+        }
+    }, 500);
+    
+    // Recompute totals whenever the cart changes (quantity updates, item add/remove)
+    window.addEventListener('cartChanged', () => {
+        try {
+            console.log('[checkout] cartChanged -> updateCheckoutTotal()');
+            updateCheckoutTotal();
+        } catch (e) {
+            console.warn('cartChanged totals update failed:', e);
+        }
+    });
 }
 
 async function handleLocationChange(locationId) {
@@ -787,6 +819,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (typeof renderCart === 'function') {
             renderCart();
         }
+        
+        // Update checkout totals with discounts and credits after cart is fully loaded
+        console.log('[checkout] DOMContentLoaded: cart loaded, calling updateCheckoutTotal()');
+        updateCheckoutTotal();
     }
     
     // Initialize checkout validator
@@ -1105,34 +1141,285 @@ function updateCheckoutQuantityInput(batchId, value) {
 
 // Update checkout total from cart
 function updateCheckoutTotal() {
+    console.log('[checkout] updateCheckoutTotal() called');
     const cart = getCartManager();
-    if (!cart) return;
+    if (!cart) {
+        console.warn('[checkout] updateCheckoutTotal() - cart manager not found');
+        return;
+    }
     
     const cartData = cart.getCart();
-    
-    // Update order summary total
-    const totalRow = document.querySelector('.order-total-row span');
-    if (totalRow) {
-        totalRow.textContent = `Total: $${cartData.total.toFixed(2)}`;
-    }
-    
-    // Update final total in payment section if it exists
-    const finalTotalElements = document.querySelectorAll('[data-total-display]');
-    finalTotalElements.forEach(el => {
-        el.textContent = `$${cartData.total.toFixed(2)}`;
+    console.log('[checkout] updateCheckoutTotal() - cart data:', {
+        itemCount: cartData?.items?.length || 0,
+        subtotal: cartData?.subtotal,
+        total: cartData?.total,
+        items: cartData?.items?.map(i => ({
+            line_item_id: i.line_item_id,
+            product_id: i.product_id,
+            quantity: i.quantity
+        }))
     });
     
-    // Update final total in payment section
-    const finalTotalAmount = document.querySelector('.final-total-amount');
-    if (finalTotalAmount) {
-        finalTotalAmount.textContent = `$${cartData.total.toFixed(2)}`;
-    } else {
-        // Fallback: update entire final-total section
-        const finalTotalSection = document.querySelector('.final-total');
-        if (finalTotalSection) {
-            finalTotalSection.innerHTML = `Final Total: <span class="final-total-amount">$${cartData.total.toFixed(2)}</span>`;
+    (async () => {
+        // Calculate subtotal from actual line items (sum of line_total which already includes discounts)
+        const lineItemsSubtotal = (cartData.items || []).reduce((sum, item) => {
+            return sum + Number(item.line_total || 0);
+        }, 0);
+        
+        let subtotalVal = Number(cartData.subtotal || lineItemsSubtotal);
+        let discountsVal = 0;
+        let creditsVal = 0;
+        // Total should be sum of all line_total values (already discounted) minus credits
+        let totalVal = lineItemsSubtotal;
+        let pricingResult = null;
+        try {
+            // Compute discounts
+            if (Array.isArray(cartData.items) && cartData.items.length > 0) {
+                const pricingPayload = {
+                    cartItems: cartData.items.map(i => ({
+                        product_id: i.product_id,
+                        category_name: i.category_name || null,
+                        unit_price: i.unit_price,
+                        quantity: i.quantity
+                    }))
+                };
+                console.log('[checkout] preparing pricing payload for', cartData.items.length, 'items');
+                console.log('[checkout] pricing payload:', JSON.stringify(pricingPayload, null, 2));
+                console.log('[checkout] cart items for matching:', cartData.items.map(i => ({
+                    line_item_id: i.line_item_id,
+                    product_id: i.product_id,
+                    category_name: i.category_name,
+                    unit_price: i.unit_price,
+                    quantity: i.quantity
+                })));
+                const pricingRes = await fetch(`/api/portal/<%= uuid %>/cart/pricing`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(pricingPayload)
+                });
+                console.log('[checkout] pricing response status:', pricingRes.status);
+                if (pricingRes.ok) {
+                    const pricing = await pricingRes.json();
+                    console.log('[checkout] pricing API full response:', JSON.stringify(pricing, null, 2));
+                    pricingResult = pricing?.result || null;
+                    console.log('[checkout] pricingResult extracted:', pricingResult);
+                    
+                    // Use pricing API values - these are the correct discounted totals
+                    subtotalVal = Number(pricing.subtotal || subtotalVal);
+                    discountsVal = Number(pricing.discounts || 0);
+                    // Use the pricing API total which is: subtotal - discounts
+                    // Credits will be subtracted later
+                    const pricingTotal = Number(pricing.total != null ? pricing.total : (subtotalVal - discountsVal));
+                    totalVal = pricingTotal;
+                    console.log('[checkout] pricing API values:', {
+                        pricingSubtotal: pricing.subtotal,
+                        pricingDiscounts: pricing.discounts,
+                        pricingTotal: pricing.total,
+                        calculatedTotal: pricingTotal
+                    });
+                    
+                    console.log('[checkout] pricing parsed:', { 
+                        subtotalVal, 
+                        discountsVal, 
+                        totalVal, 
+                        actualLineItemsTotal,
+                        lineItemsCount: cartData.items?.length || 0,
+                        hasItemNotes: !!(pricingResult && pricingResult.itemNotes), 
+                        hasItems: !!(pricingResult && pricingResult.items) 
+                    });
+                } else {
+                    const txt = await pricingRes.text().catch(() => '');
+                    console.warn('[checkout] pricing request failed:', pricingRes.status, txt);
+                }
+            }
+            // Get available credits for current location
+            const creditsRes = await fetch(`/api/portal/<%= uuid %>/credits/available`);
+            console.log('[checkout] credits response status:', creditsRes.status);
+            if (creditsRes.ok) {
+                const creditsData = await creditsRes.json();
+                const availableCredits = Number(creditsData?.credits?.available_total || creditsData?.credits?.available || 0);
+                // Credits apply up to remaining after discounts
+                creditsVal = Math.min(availableCredits, Math.max(0, subtotalVal - discountsVal));
+                console.log('[checkout] credits parsed:', { availableCredits, creditsVal });
+            } else {
+                const txt = await creditsRes.text().catch(() => '');
+                console.warn('[checkout] credits request failed:', creditsRes.status, txt);
+            }
+            // Compute final total: pricing API total (already includes discounts) minus credits
+            // The pricing API total is: subtotal - discounts
+            // Final total should be: pricing total - credits
+            if (pricingResult) {
+                // Pricing API was called successfully, use its total and subtract credits
+                totalVal = Math.max(0, totalVal - creditsVal);
+            } else {
+                // Fallback: if pricing API failed, use sum of line items minus credits
+                // (Note: line items might not have discounts applied yet in database)
+                const finalLineItemsTotal = (cartData.items || []).reduce((sum, item) => {
+                    return sum + Number(item.line_total || 0);
+                }, 0);
+                totalVal = Math.max(0, finalLineItemsTotal - creditsVal);
+            }
+            console.log('[checkout] final total calculation:', {
+                totalVal,
+                creditsVal,
+                subtotalVal,
+                discountsVal,
+                hasPricingResult: !!pricingResult,
+                lineItemsCount: cartData.items?.length || 0
+            });
+        } catch (e) {
+            console.warn('Checkout pricing/credits fetch failed, falling back to client totals:', e);
         }
-    }
+        // Update DOM
+        const subtotalSpan = document.getElementById('cart-subtotal');
+        const discountsSpan = document.getElementById('cart-discounts');
+        const creditsSpan = document.getElementById('cart-credits');
+        const totalSpan = document.getElementById('cart-total');
+        console.log('[checkout] updating summary UI:', { subtotalVal, discountsVal, creditsVal, totalVal, hasSubtotalEl: !!subtotalSpan, hasDiscountsEl: !!discountsSpan, hasCreditsEl: !!creditsSpan, hasTotalEl: !!totalSpan });
+        if (subtotalSpan) subtotalSpan.textContent = `$${subtotalVal.toFixed(2)}`;
+        if (discountsSpan) discountsSpan.textContent = `-$${discountsVal.toFixed(2)}`;
+        if (creditsSpan) creditsSpan.textContent = `-$${creditsVal.toFixed(2)}`;
+        if (totalSpan) totalSpan.textContent = `$${totalVal.toFixed(2)}`;
+        
+        // Update the order-total-row (the total shown below the table)
+        const updateOrderTotalRow = () => {
+            const orderTotalRow = document.querySelector('.order-total-row');
+            if (orderTotalRow) {
+                // Make sure it's visible
+                orderTotalRow.style.display = 'block';
+                const orderTotalRowSpan = orderTotalRow.querySelector('span');
+                if (orderTotalRowSpan) {
+                    orderTotalRowSpan.textContent = `Total: $${totalVal.toFixed(2)}`;
+                    console.log('[checkout] updated order-total-row to:', totalVal);
+                    return true;
+                } else {
+                    console.warn('[checkout] order-total-row span not found inside .order-total-row');
+                }
+            } else {
+                console.warn('[checkout] .order-total-row element not found, totalVal:', totalVal);
+            }
+            return false;
+        };
+        
+        // Try to update immediately
+        if (!updateOrderTotalRow()) {
+            // If not found, try again after a short delay
+            setTimeout(updateOrderTotalRow, 100);
+        }
+        
+        // Also update payment section totals
+        document.querySelectorAll('[data-total-display]').forEach(el => el.textContent = `$${totalVal.toFixed(2)}`);
+        const finalTotalAmount = document.querySelector('.final-total-amount');
+        if (finalTotalAmount) {
+            finalTotalAmount.textContent = `$${totalVal.toFixed(2)}`;
+        } else {
+            const finalTotalSection = document.querySelector('.final-total');
+            if (finalTotalSection) {
+                finalTotalSection.innerHTML = `Final Total: <span class="final-total-amount">$${totalVal.toFixed(2)}</span>`;
+            }
+        }
+
+        // Per-item discounted totals in checkout table
+        try {
+            console.log('[checkout] starting per-item discount update, pricingResult:', pricingResult);
+            if (pricingResult && Array.isArray(pricingResult.items)) {
+                console.log('[checkout] pricingResult.items array length:', pricingResult.items.length);
+                // Map product_id -> {running_total, original_total, quantity}
+                const itemMap = new Map();
+                pricingResult.items.forEach(pi => {
+                    if (pi && pi.product_id) {
+                        const key = Number(pi.product_id);
+                        const value = {
+                            running_total: Number(pi.running_total || 0),
+                            original_total: Number(pi.original_total || 0),
+                            quantity: Number(pi.quantity || 0)
+                        };
+                        itemMap.set(key, value);
+                        console.log('[checkout] mapped product_id', key, '->', value);
+                    } else {
+                        console.warn('[checkout] skipping pricing item (missing product_id):', pi);
+                    }
+                });
+                console.log('[checkout] itemMap size:', itemMap.size, 'entries:', Array.from(itemMap.entries()));
+                // Iterate cart items to update each row
+                const cartItems = cartData.items || [];
+                console.log('[checkout] processing', cartItems.length, 'cart items');
+                cartItems.forEach((ci, idx) => {
+                    console.log(`[checkout] processing cart item ${idx + 1}:`, {
+                        line_item_id: ci.line_item_id,
+                        product_id: ci.product_id,
+                        product_id_num: Number(ci.product_id),
+                        hasMatch: itemMap.has(Number(ci.product_id))
+                    });
+                    const m = itemMap.get(Number(ci.product_id));
+                    if (!m) {
+                        console.warn(`[checkout] no pricing match for product_id ${ci.product_id} (line_item_id: ${ci.line_item_id})`);
+                        return;
+                    }
+                    const lineItem = (ci.line_item_id) ? String(ci.line_item_id) : null;
+                    if (!lineItem) {
+                        console.warn(`[checkout] missing line_item_id for product_id ${ci.product_id}`);
+                        return;
+                    }
+                    const rowSelector = `tr[data-line-item-id="${lineItem}"]`;
+                    console.log(`[checkout] looking for row with selector: ${rowSelector}`);
+                    const row = document.querySelector(rowSelector);
+                    if (!row) {
+                        console.warn(`[checkout] row not found for line_item_id: ${lineItem}`);
+                        return;
+                    }
+                    console.log(`[checkout] found row for line_item_id: ${lineItem}`);
+                    const cell = row.querySelector('.line-total');
+                    const discountCell = row.querySelector('.line-discount');
+                    console.log(`[checkout] DOM elements found:`, {
+                        hasLineTotal: !!cell,
+                        hasDiscountCell: !!discountCell,
+                        lineTotalText: cell?.textContent,
+                        discountCellText: discountCell?.textContent
+                    });
+                    if (!cell) {
+                        console.warn(`[checkout] .line-total cell not found in row for line_item_id: ${lineItem}`);
+                        return;
+                    }
+                    const discounted = m.running_total;
+                    const original = m.original_total;
+                    const discountAmt = Math.max(0, original - discounted);
+                    console.log(`[checkout] discount calculation for line_item_id ${lineItem}:`, {
+                        original,
+                        discounted,
+                        discountAmt,
+                        quantity: m.quantity
+                    });
+                    if (discounted < original) {
+                        const perUnit = (m.quantity > 0) ? discounted / m.quantity : discounted;
+                        cell.innerHTML = `<span class="price-strike">$${original.toFixed(2)}</span>
+                                          <span class="price-discounted" title="Discounted line total">$${discounted.toFixed(2)}</span>
+                                          <div class="price-note">($${perUnit.toFixed(2)} each)</div>`;
+                        if (discountCell) {
+                            discountCell.textContent = `-$${discountAmt.toFixed(2)}`;
+                            console.log(`[checkout] updated discount cell to: -$${discountAmt.toFixed(2)}`);
+                        } else {
+                            console.warn(`[checkout] discount cell not found, cannot update`);
+                        }
+                    } else {
+                        cell.textContent = `$${original.toFixed(2)}`;
+                        if (discountCell) {
+                            discountCell.textContent = '-$0.00';
+                            console.log(`[checkout] no discount, set to -$0.00`);
+                        } else {
+                            console.warn(`[checkout] discount cell not found, cannot set to -$0.00`);
+                        }
+                    }
+                });
+                console.log('[checkout] finished processing all cart items');
+            } else {
+                console.warn('[checkout] pricingResult.items is not an array:', pricingResult);
+            }
+        } catch (e) {
+            console.error('[checkout] error in per-item discounted totals:', e);
+            console.error('[checkout] error stack:', e.stack);
+        }
+    })();
 }
 
 // Show loading overlay
@@ -1300,7 +1587,11 @@ async function placeOrder() {
             </div>
             <div class="summary-row">
                 <span class="summary-label">Discounts:</span>
-                <span class="summary-value">$0.00</span>
+                <span class="summary-value" id="cart-discounts">$0.00</span>
+            </div>
+            <div class="summary-row">
+                <span class="summary-label">Credits:</span>
+                <span class="summary-value" id="cart-credits">$0.00</span>
             </div>
             <div class="summary-row summary-total">
                 <span>Total:</span>

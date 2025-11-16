@@ -8,6 +8,8 @@ const productController = require('../Controllers/productController');
 const portalAccessController = require('../Controllers/portalAccessController');
 const invoiceController = require('../Controllers/invoiceController');
 const settingsController = require('../Controllers/settingsController');
+const creditUiController = require('../Controllers/creditUiController');
+const discountUiController = require('../Controllers/discountUiController');
 const UserModel = require('../Models/userModel');
 const { requireAuth, requirePermission, requireRole } = require('../Middleware/auth');
 const syncFailureTracker = require('../Services/syncFailureTracker');
@@ -370,6 +372,13 @@ router.post('/invoices/:id/approve', requireRole('Sales Admin', 'Sales Represent
 
 // Reject pending invoice (Sales Admin, Sales Rep, and Administrator)
 router.post('/invoices/:id/reject', requireRole('Sales Admin', 'Sales Representative', 'Administrator'), invoiceController.rejectInvoice);
+
+// =============================================
+// ACCOUNT CREDITS (UI)
+// =============================================
+router.get('/credits', requireRole('Sales Admin', 'Administrator'), creditUiController.listCredits);
+router.get('/discounts', requireRole('Sales Admin', 'Administrator'), discountUiController.renderBuilder);
+router.get('/discounts/assignments', requireRole('Sales Admin', 'Administrator'), discountUiController.renderAssignments);
 
 // =============================================
 // PORTAL ACCESS MANAGEMENT ROUTES (Module 4)

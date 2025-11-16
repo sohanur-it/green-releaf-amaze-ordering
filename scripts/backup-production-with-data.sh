@@ -145,7 +145,10 @@ ADMIN_EXISTS=$(docker exec "$LOCAL_DB_CONTAINER" psql -U "$LOCAL_DB_USER" -d "$L
 if [ "$ADMIN_EXISTS" = "0" ]; then
     log_info "Creating admin user..."
     docker exec "$LOCAL_DB_CONTAINER" psql -U "$LOCAL_DB_USER" -d "$LOCAL_DB_NAME" -c "
-        INSERT INTO users (username, first_name, last_name, email, email_hash, password_hash, is_active, is_admin, created_at)
+        INSERT INTO users (
+            username, first_name, last_name, email, email_hash, password_hash,
+            is_active, is_admin, is_superadmin, created_at
+        )
         VALUES (
             'admin', 
             'Admin', 
@@ -153,6 +156,7 @@ if [ "$ADMIN_EXISTS" = "0" ]; then
             'admin@greenreleaf.com', 
             '\$2b\$10\$example_hash', 
             '\$2b\$10\$2y\$12\$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj4Kz7z8Kz2', 
+            true, 
             true, 
             true, 
             NOW()

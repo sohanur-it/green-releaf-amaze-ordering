@@ -51,7 +51,7 @@ async function checkSchema() {
         const adminUser = await client.query(`
             SELECT id, username, first_name as firstname, last_name as lastname, email, 
                    CASE WHEN is_active = true THEN 'active' ELSE 'inactive' END as status, 
-                   is_admin as is_superuser
+                   COALESCE(is_superadmin, is_admin, false) as is_superuser
             FROM users 
             WHERE username = 'admin'
         `);

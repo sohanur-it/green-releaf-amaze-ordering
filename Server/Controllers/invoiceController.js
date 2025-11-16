@@ -2171,7 +2171,7 @@ class InvoiceController {
     async getBuyerInvoices(req, res) {
         try {
             const { buyerId } = req.params;
-            const { location_id } = req.query;
+            const { location_id, limit: limitParam } = req.query;
 
             let queryStr = `
                 SELECT 
@@ -2190,9 +2190,18 @@ class InvoiceController {
             if (location_id) {
                 queryStr += ` AND i.fk_location_id = $${paramIndex}`;
                 params.push(location_id);
+                paramIndex++;
             }
 
             queryStr += ` ORDER BY i.created_at DESC`;
+
+            let limit = parseInt(limitParam, 10);
+            if (!Number.isNaN(limit)) {
+                limit = Math.min(Math.max(limit, 1), 100);
+                queryStr += ` LIMIT $${paramIndex}`;
+                params.push(limit);
+                paramIndex++;
+            }
 
             const invoices = await query(queryStr, params);
 

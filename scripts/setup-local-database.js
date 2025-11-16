@@ -158,8 +158,11 @@ async function createSuperuser() {
         const email_hash = await bcrypt.hash('admin@greenreleaf.com', 10);
         
         await localQuery(`
-            INSERT INTO users (username, first_name, last_name, email, email_hash, password_hash, is_active, is_admin, created_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+            INSERT INTO users (
+                username, first_name, last_name, email, email_hash, password_hash,
+                is_active, is_admin, is_superadmin, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, NOW())
             ON CONFLICT (username) DO NOTHING
         `, ['admin', 'Admin', 'User', 'admin@greenreleaf.com', email_hash, password_hash, true, true]);
         
@@ -265,8 +268,15 @@ async function verifySetup() {
         
         // Check admin user
         const adminResult = await localQuery(`
-            SELECT username, first_name, last_name, email, is_active, is_admin 
-            FROM users WHERE username = 'admin'
+            SELECT 
+                username, 
+                first_name, 
+                last_name, 
+                email, 
+                is_active, 
+                COALESCE(is_superadmin, is_admin, false) as is_superadmin
+            FROM users 
+            WHERE username = 'admin'
         `);
         
         logSuccess('Setup verification completed:');
@@ -282,7 +292,7 @@ async function verifySetup() {
             logInfo(`  Name: ${admin.first_name} ${admin.last_name}`);
             logInfo(`  Email: ${admin.email}`);
             logInfo(`  Active: ${admin.is_active}`);
-            logInfo(`  Admin: ${admin.is_admin}`);
+            logInfo(`  Superadmin: ${admin.is_superadmin}`);
         }
         
     } catch (error) {

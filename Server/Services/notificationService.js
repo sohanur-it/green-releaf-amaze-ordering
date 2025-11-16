@@ -308,6 +308,140 @@ class NotificationService {
             return { success: false, error: error.message };
         }
     }
+
+    /**
+     * Notify buyer contacts that a credit was issued (best-effort)
+     */
+    async notifyBuyerCreditIssued({ creditId, locationId, amount, reason }) {
+        try {
+            const result = await query(`
+                SELECT 
+                    b.entry_id AS buyer_id,
+                    b.name AS buyer_name,
+                    l.name AS location_name,
+                    bc.name AS contact_name,
+                    bc.email AS contact_email
+                FROM "ORDERS-buyer_locations" l
+                LEFT JOIN "ORDERS-buyers" b ON l.orders_buyer_id = b.entry_id
+                LEFT JOIN "ORDERS-buyer_contacts" bc ON bc.orders_buyer_id = b.entry_id
+                WHERE l.entry_id = $1
+                ORDER BY bc.entry_id ASC
+                LIMIT 1
+            `, [locationId]);
+
+            if (result.rows.length === 0) {
+                console.warn(`Unable to notify buyer for credit ${creditId}: location ${locationId} not found`);
+                return { success: false, reason: 'no_buyer_info' };
+            }
+
+            const buyer = result.rows[0];
+            const amountText = Number(amount || 0).toFixed(2);
+            const note = `System: Buyer notified of $${amountText} credit (${reason || 'No reason provided'}) for location ${buyer.location_name || 'Unknown Location'}.`;
+
+            if (buyer.buyer_id) {
+                await query(`
+                    INSERT INTO "ORDERS-buyer_notes" (orders_buyer_id, note)
+                    VALUES ($1, $2)
+                `, [buyer.buyer_id, note]);
+            }
+
+            if (buyer.contact_email) {
+                console.log(`📧 Buyer notification queued for ${buyer.contact_email} about credit ${creditId}`);
+                // TODO: integrate with email/SMS service
+            } else {
+                console.log(`ℹ️ Buyer ${buyer.buyer_name || buyer.buyer_id} has no contact email on file for credit notification.`);
+            }
+
+            return { success: true };
+        } catch (error) {
+            console.error('Error notifying buyer about credit issuance:', error);
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * Notify accounting/finance team of credit events (voids, manual corrections)
+     */
+    async notifyAccountingCreditEvent({ eventType, creditId, locationId, amount, delta = null, performedBy = null, reason = null }) {
+        try {
+            const accountingUsers = await query(`
+                SELECT DISTINCT u.id
+                FROM users u
+                JOIN user_roles ur ON u.id = ur.user_id
+                JOIN roles r ON ur.role_id = r.id
+                WHERE LOWER(r.name) = 'accounting/finance'
+                   OR LOWER(r.role_name) = 'accounting/finance'
+            `);
+
+            if (accountingUsers.rows.length === 0) {
+                return { success: true, skipped: true, reason: 'no_accounting_users' };
+            }
+
+            const creditInfoResult = await query(`
+                SELECT 
+                    b.name AS buyer_name,
+                    l.name AS location_name
+                FROM "ORDERS-account-credits" c
+                LEFT JOIN "ORDERS-buyer_locations" l ON c.fk_location_id = l.entry_id
+                LEFT JOIN "ORDERS-buyers" b ON l.orders_buyer_id = b.entry_id
+                WHERE c.id = $1
+            `, [creditId]);
+
+            const creditInfo = creditInfoResult.rows[0] || {};
+            const formattedAmount = Number(amount || 0).toFixed(2);
+            const formattedDelta = delta !== null ? Number(delta).toFixed(2) : null;
+            const title = eventType === 'credit_voided' ? 'Account Credit Voided' : 'Manual Credit Correction';
+            const message = eventType === 'credit_voided'
+                ? `Credit #${creditId} for ${creditInfo.buyer_name || 'Buyer'} (${creditInfo.location_name || 'Location'}) was voided.`
+                : `Credit #${creditId} balance updated to $${formattedAmount}.`;
+
+            let notified = 0;
+            for (const user of accountingUsers.rows) {
+                const enabled = await notificationStore.isNotificationEnabled(user.id, 'accounting_credit_event');
+                if (!enabled) {
+                    continue;
+                }
+
+                const payload = {
+                    eventType,
+                    creditId,
+                    locationId,
+                    amount: formattedAmount,
+                    delta: formattedDelta,
+                    buyer_name: creditInfo.buyer_name,
+                    location_name: creditInfo.location_name,
+                    reason,
+                    performed_by: performedBy
+                };
+
+                const record = await notificationStore.createNotification({
+                    userId: user.id,
+                    type: 'accounting_credit_event',
+                    title,
+                    message,
+                    payload,
+                    priority: 'high',
+                    requiresAck: false
+                });
+
+                await websocketService.sendPersistentNotification(user.id, {
+                    type: 'accounting_credit_event',
+                    title,
+                    message,
+                    payload,
+                    id: record.id,
+                    timestamp: record.created_at
+                });
+
+                notified += 1;
+            }
+
+            return { success: true, notified_users: notified };
+        } catch (error) {
+            console.error('Error notifying accounting team about credit event:', error);
+            return { success: false, error: error.message };
+        }
+    }
 }
 
 module.exports = new NotificationService();

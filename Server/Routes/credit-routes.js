@@ -7,7 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const accountCreditService = require('../Services/accountCreditService');
-const { requireAuth: auth, requireRole } = require('../Middleware/auth');
+const { requireAuth: auth, requireRole, requireSuperuser } = require('../Middleware/auth');
 const { auditMiddleware } = require('../Middleware/auditMiddleware');
 
 /**
@@ -120,7 +120,7 @@ router.post('/:creditId/void', auth, requireRole('Sales Admin', 'Administrator')
  * Manual correction of credit balance
  * POST /api/v1/credits/:creditId/correct-balance
  */
-router.post('/:creditId/correct-balance', auth, requireRole('Sales Admin', 'Administrator'), auditMiddleware, async (req, res) => {
+router.post('/:creditId/correct-balance', auth, requireSuperuser, auditMiddleware, async (req, res) => {
     try {
         const { creditId } = req.params;
         const { new_remaining_balance: newRemainingBalance, reason } = req.body;

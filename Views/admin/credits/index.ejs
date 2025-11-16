@@ -1,0 +1,822 @@
+<div class="page-header">
+    <div>
+        <h1>Account Credits</h1>
+        <p class="text-muted mb-0">Issue, monitor, and reconcile customer credits.</p>
+    </div>
+    <div style="display:flex; gap:12px;">
+        <button class="btn btn-primary" id="issueCreditBtn" <%= schemaMissing ? 'disabled' : '' %>>
+            <i class="fas fa-plus"></i> Issue Credit
+        </button>
+        <button class="btn btn-secondary" id="refreshCredits" <%= schemaMissing ? 'disabled' : '' %>>
+            <i class="fas fa-sync"></i> Refresh
+        </button>
+    </div>
+</div>
+
+<% if (schemaMissing) { %>
+    <div class="alert alert-warning" role="alert">
+        <strong>Heads up:</strong> The `ORDERS-account-credits` table is missing in this environment. Run the Module 4 migrations (or <code>scripts/add-account-credits-schema.js</code>) to enable this screen.
+    </div>
+<% } else if (error) { %>
+    <div class="alert alert-danger" role="alert">
+        <strong>Unable to load credits:</strong> <%= error %>
+    </div>
+<% } %>
+
+<% if (!schemaMissing) { %>
+<div class="dashboard-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap:16px; margin-bottom:20px;">
+    <div class="dashboard-card">
+        <div class="card-label">Total Credits Issued</div>
+        <div class="card-value">$<%= (summary.totalIssued || 0).toFixed(2) %></div>
+    </div>
+    <div class="dashboard-card">
+        <div class="card-label">Remaining Balance</div>
+        <div class="card-value text-success">$<%= (summary.totalRemaining || 0).toFixed(2) %></div>
+    </div>
+    <div class="dashboard-card">
+        <div class="card-label">Active Credits</div>
+        <div class="card-value"><%= summary.activeCredits || 0 %></div>
+    </div>
+</div>
+
+<div class="dashboard-card">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5 class="mb-0">Recent Credits</h5>
+    </div>
+    <% if (credits && credits.length) { %>
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Buyer / Location</th>
+                        <th>Original</th>
+                        <th>Remaining</th>
+                        <th>Status</th>
+                        <th>Reason</th>
+                        <th>Internal Notes</th>
+                        <th>Expires</th>
+                        <th>Issued</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% credits.forEach(credit => { 
+                        const originalAmount = Number(credit.credit_amount || 0);
+                        const remainingAmount = Number(credit.remaining_balance || 0);
+                        const partialUsedAmount = Math.max(0, originalAmount - remainingAmount);
+                    %>
+                    <tr class="credit-row <%= credit.is_voided ? 'credit-row--voided' : '' %>" data-credit-id="<%= credit.id %>">
+                        <td>#<%= credit.id %></td>
+                        <td>
+                            <strong><%= credit.buyer_name || 'Unknown Buyer' %></strong><br>
+                            <small class="text-muted"><%= credit.location_name || 'Unknown Location' %></small>
+                        </td>
+                        <td>$<%= Number(credit.credit_amount || 0).toFixed(2) %></td>
+                        <td>$<%= Number(credit.remaining_balance || 0).toFixed(2) %></td>
+                        <td>
+                            <% if (credit.is_voided) { %>
+                                <span class="status-badge status-voided" title="Voided by <%= credit.voided_by_username || 'System' %> on <%= credit.voided_at ? new Date(credit.voided_at).toLocaleString() : 'N/A' %>">
+                                    VOIDED
+                                </span>
+                            <% } else if (credit.is_fully_used) { %>
+                                <span class="status-badge status-paid">Used</span>
+                            <% } else { %>
+                                <span class="status-badge status-approved">Active</span>
+                            <% } %>
+                        </td>
+                        <td><%= credit.reason || '—' %></td>
+                        <td><%= credit.internal_notes || '—' %></td>
+                        <td><%= credit.expires_at ? new Date(credit.expires_at).toLocaleDateString() : 'No Expiry' %></td>
+                        <td><%= credit.issued_at ? new Date(credit.issued_at).toLocaleDateString() : '—' %></td>
+                        <td>
+                            <% if (!credit.is_voided) { %>
+                            <div class="btn-group" role="group">
+                                <% if (isSuperuser) { %>
+                                <button class="btn btn-sm btn-outline-secondary"
+                                        data-action="correct"
+                                        data-credit-id="<%= credit.id %>"
+                                        data-original-amount="<%= originalAmount.toFixed(2) %>"
+                                        data-remaining-amount="<%= remainingAmount.toFixed(2) %>"
+                                        data-buyer="<%= (credit.buyer_name || '').replace(/"/g, '&quot;') %>"
+                                        data-location="<%= (credit.location_name || '').replace(/"/g, '&quot;') %>">
+                                    Manual Correction
+                                </button>
+                                <% } %>
+                                <button class="btn btn-sm btn-outline-danger"
+                                        data-action="void"
+                                        data-credit-id="<%= credit.id %>"
+                                        data-original-amount="<%= originalAmount.toFixed(2) %>"
+                                        data-remaining-amount="<%= remainingAmount.toFixed(2) %>"
+                                        data-partial-amount="<%= partialUsedAmount.toFixed(2) %>"
+                                        data-partial-used="<%= partialUsedAmount > 0 %>"
+                                        data-buyer="<%= (credit.buyer_name || '').replace(/"/g, '&quot;') %>"
+                                        data-location="<%= (credit.location_name || '').replace(/"/g, '&quot;') %>">
+                                    Void
+                                </button>
+                            </div>
+                            <% } else { %>
+                                <span class="text-muted">—</span>
+                            <% } %>
+                        </td>
+                    </tr>
+                    <% }) %>
+                </tbody>
+            </table>
+        </div>
+    <% } else { %>
+        <div class="empty-state">
+            <i class="fas fa-money-check-alt"></i>
+            <h3>No account credits yet</h3>
+            <p>Issue a credit using the button above.</p>
+        </div>
+    <% } %>
+</div>
+
+<div class="modal-overlay" id="creditModal" aria-hidden="true" style="display:none;">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="creditModalTitle">
+        <form id="creditForm" class="styled-form">
+            <div class="modal-header">
+                <h3 id="creditModalTitle">Issue Credit</h3>
+                <button type="button" class="modal-close-btn" data-close-modal>&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-grid">
+                    <div class="form-group span-2">
+                        <label>Location</label>
+                        <div class="location-search">
+                            <input type="text" id="locationSearchInput" placeholder="Start typing buyer or location name">
+                            <input type="hidden" name="fk_location_id" id="locationIdInput" required>
+                            <div class="location-search-results" id="locationSearchResults"></div>
+                        </div>
+                        <small class="text-muted">Pick a buyer location; minimum 2 characters to search.</small>
+                    </div>
+                    <div class="form-group span-2">
+                        <label>Related Invoice (optional)</label>
+                        <select id="relatedInvoiceSelect">
+                            <option value="">Select a location to load recent invoices</option>
+                        </select>
+                        <div class="related-invoice-manual">
+                            <small class="text-muted">Or enter invoice ID manually:</small>
+                            <input type="number" name="related_invoice_id" id="relatedInvoiceInput" placeholder="Invoice ID (if applicable)">
+                        </div>
+                        <small id="relatedInvoiceHelper" class="text-muted">Loading will show the last 5 invoices for this buyer/location.</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Amount</label>
+                        <input type="number" min="0" step="0.01" name="amount" required placeholder="1000.00">
+                    </div>
+                    <div class="form-group">
+                        <label>Expires At</label>
+                        <input type="date" name="expires_at">
+                    </div>
+                    <div class="form-group span-2">
+                        <label>Reason</label>
+                        <input type="text" name="reason" required placeholder="Reason for credit">
+                    </div>
+                    <div class="form-group span-2">
+                        <label>Internal Notes (optional)</label>
+                        <textarea name="internal_notes" rows="2" placeholder="Visible to admins only"></textarea>
+                    </div>
+                </div>
+                <div class="form-error-message" id="creditFormError" style="display:none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="modal-overlay" id="voidCreditModal" aria-hidden="true" style="display:none;">
+    <div class="modal-dialog" role="dialog" aria-modal="true">
+        <form id="voidCreditForm" class="styled-form">
+            <div class="modal-header">
+                <h3>Void Account Credit</h3>
+                <button type="button" class="modal-close-btn" data-close-void>&times;</button>
+            </div>
+            <div class="modal-body">
+                <p id="voidCreditSummary" class="modal-summary-text"></p>
+                <div class="alert alert-warning" id="voidPartialWarning" style="display:none;">
+                    <strong>Warning:</strong> This credit has already been partially used. Voiding it will <em>not</em> reverse historical applications.
+                    <label class="confirm-checkbox">
+                        <input type="checkbox" id="voidPartialConfirm">
+                        I understand this will not reverse previously applied credits.
+                    </label>
+                </div>
+                <div class="form-group">
+                    <label for="voidReason">Reason <span class="text-danger">*</span></label>
+                    <textarea id="voidReason" rows="3" placeholder="Provide at least 20 characters" required></textarea>
+                </div>
+                <div class="form-error-message" id="voidCreditError" style="display:none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-close-void>Cancel</button>
+                <button type="submit" class="btn btn-danger" id="voidCreditSubmit">Void Credit</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<% if (isSuperuser) { %>
+<div class="modal-overlay" id="manualCorrectionModal" aria-hidden="true" style="display:none;">
+    <div class="modal-dialog" role="dialog" aria-modal="true">
+        <form id="manualCorrectionForm" class="styled-form">
+            <div class="modal-header">
+                <h3>Manual Credit Correction</h3>
+                <button type="button" class="modal-close-btn" data-close-correction>&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-summary-text" id="correctionCreditSummary"></p>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Original Amount</label>
+                        <input type="text" id="correctionOriginalAmount" readonly>
+                    </div>
+                    <div class="form-group">
+                        <label>Current Balance</label>
+                        <input type="text" id="correctionCurrentAmount" readonly>
+                    </div>
+                    <div class="form-group span-2">
+                        <label for="correctionNewAmount">New Remaining Balance</label>
+                        <input type="number" id="correctionNewAmount" min="0" step="0.01" required>
+                    </div>
+                    <div class="form-group span-2">
+                        <label for="correctionReason">Reason <span class="text-danger">*</span></label>
+                        <textarea id="correctionReason" rows="3" placeholder="Provide at least 50 characters" required></textarea>
+                    </div>
+                </div>
+                <label class="confirm-checkbox">
+                    <input type="checkbox" id="correctionConfirm">
+                    I understand this manual override bypasses standard validations.
+                </label>
+                <div class="form-error-message" id="correctionError" style="display:none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-close-correction>Cancel</button>
+                <button type="submit" class="btn btn-danger" id="correctionSubmit">Apply Correction</button>
+            </div>
+        </form>
+    </div>
+</div>
+<% } %>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    console.groupCollapsed('[credits] init');
+    const issueBtn = document.getElementById('issueCreditBtn');
+    const refreshBtn = document.getElementById('refreshCredits');
+    const modal = document.getElementById('creditModal');
+    const form = document.getElementById('creditForm');
+    const errorBox = document.getElementById('creditFormError');
+    const locationSearchInput = document.getElementById('locationSearchInput');
+    const locationIdInput = document.getElementById('locationIdInput');
+    const locationResults = document.getElementById('locationSearchResults');
+    const relatedInvoiceSelect = document.getElementById('relatedInvoiceSelect');
+    const relatedInvoiceInput = document.getElementById('relatedInvoiceInput');
+    const relatedInvoiceHelper = document.getElementById('relatedInvoiceHelper');
+    const voidModal = document.getElementById('voidCreditModal');
+    const voidForm = document.getElementById('voidCreditForm');
+    const voidSummary = document.getElementById('voidCreditSummary');
+    const voidReasonInput = document.getElementById('voidReason');
+    const voidError = document.getElementById('voidCreditError');
+    const voidPartialWarning = document.getElementById('voidPartialWarning');
+    const voidPartialConfirm = document.getElementById('voidPartialConfirm');
+    const voidSubmitBtn = document.getElementById('voidCreditSubmit');
+    const correctionModal = document.getElementById('manualCorrectionModal');
+    const correctionForm = document.getElementById('manualCorrectionForm');
+    const correctionSummary = document.getElementById('correctionCreditSummary');
+    const correctionOriginalField = document.getElementById('correctionOriginalAmount');
+    const correctionCurrentField = document.getElementById('correctionCurrentAmount');
+    const correctionNewField = document.getElementById('correctionNewAmount');
+    const correctionReasonField = document.getElementById('correctionReason');
+    const correctionConfirmCheckbox = document.getElementById('correctionConfirm');
+    const correctionError = document.getElementById('correctionError');
+    const correctionSubmitBtn = document.getElementById('correctionSubmit');
+    let searchDebounce;
+    let lastSearchTerm = '';
+    let activeVoidCredit = null;
+    let activeCorrectionCredit = null;
+    console.log('[credits] elements', { issueBtn: !!issueBtn, refreshBtn: !!refreshBtn, modal: !!modal, form: !!form });
+    console.groupEnd();
+
+    function toggleModal(isOpen) {
+        if (!modal) return;
+        if (isOpen) {
+            modal.style.display = 'flex';
+            requestAnimationFrame(() => modal.classList.add('active'));
+            document.body.classList.add('modal-open');
+        } else {
+            modal.classList.remove('active');
+            setTimeout(() => {
+                modal.style.display = 'none';
+                if (!document.querySelector('.modal-overlay.active')) {
+                    document.body.classList.remove('modal-open');
+                }
+            }, 300);
+        }
+    }
+
+    function openStandaloneModal(target) {
+        if (!target) return;
+        target.style.display = 'flex';
+        requestAnimationFrame(() => target.classList.add('active'));
+        document.body.classList.add('modal-open');
+    }
+
+    function closeStandaloneModal(target) {
+        if (!target) return;
+        target.classList.remove('active');
+        setTimeout(() => {
+            target.style.display = 'none';
+            if (!document.querySelector('.modal-overlay.active')) {
+                document.body.classList.remove('modal-open');
+            }
+        }, 300);
+    }
+
+    function resetRelatedInvoiceSelect(message = 'Select a location to load recent invoices', disableSelect = true) {
+        if (relatedInvoiceSelect) {
+            relatedInvoiceSelect.innerHTML = `<option value="">${message}</option>`;
+            relatedInvoiceSelect.disabled = !!disableSelect;
+        }
+        if (relatedInvoiceHelper) {
+            relatedInvoiceHelper.textContent = 'Loading will show the last 5 invoices for this buyer/location.';
+        }
+        if (relatedInvoiceInput) {
+            relatedInvoiceInput.value = '';
+        }
+    }
+
+    resetRelatedInvoiceSelect();
+
+    async function parseJsonResponse(response) {
+        const cloned = response.clone();
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            const raw = await response.text().catch(() => '');
+            throw new Error(raw || `Unexpected response (${response.status})`);
+        }
+        try {
+            return await response.json();
+        } catch (err) {
+            const raw = await cloned.text().catch(() => '');
+            throw new Error(raw || 'Failed to parse server response.');
+        }
+    }
+
+    function clearLocationSelection(options = { keepText: false }) {
+        if (!options.keepText && locationSearchInput) {
+            locationSearchInput.value = '';
+        }
+        if (locationIdInput) {
+            locationIdInput.value = '';
+        }
+        resetRelatedInvoiceSelect();
+    }
+
+    function hideLocationResults() {
+        if (locationResults) {
+            locationResults.classList.remove('visible');
+            locationResults.innerHTML = '';
+        }
+    }
+
+    function renderLocationResults(items) {
+        if (!locationResults) return;
+        if (!items.length) {
+            locationResults.innerHTML = '<div class="location-search-empty">No matches found</div>';
+            locationResults.classList.add('visible');
+            return;
+        }
+
+        locationResults.innerHTML = items
+            .map((item) => {
+                const cityState = [item.city, item.state].filter(Boolean).join(', ');
+                const descriptor = cityState ? `${cityState}` : 'No city/state on file';
+                const displayValue = `${item.buyer_name} — ${item.location_name}`;
+                return `
+                    <div class="location-search-result"
+                        data-location-id="${item.location_id}"
+                        data-buyer-id="${item.buyer_id}"
+                        data-display="${displayValue.replace(/"/g, '&quot;')}">
+                        <strong>${item.buyer_name}</strong>
+                        <span>${item.location_name} • ${descriptor} · #${item.location_id}</span>
+                    </div>
+                `;
+            })
+            .join('');
+
+        locationResults.classList.add('visible');
+        locationResults.querySelectorAll('.location-search-result').forEach((node) => {
+            node.addEventListener('click', () => {
+                const locationId = node.getAttribute('data-location-id');
+                const buyerId = node.getAttribute('data-buyer-id');
+                const display = node.getAttribute('data-display');
+                if (locationIdInput) {
+                    locationIdInput.value = locationId;
+                }
+                if (locationSearchInput && display) {
+                    locationSearchInput.value = display;
+                }
+                if (buyerId && locationId) {
+                    loadRecentInvoices(buyerId, locationId);
+                } else {
+                    resetRelatedInvoiceSelect('No buyer details for this location');
+                }
+                hideLocationResults();
+            });
+        });
+    }
+
+    async function searchLocations(term) {
+        if (!locationResults) return;
+        try {
+            locationResults.innerHTML = '<div class="location-search-empty">Searching…</div>';
+            locationResults.classList.add('visible');
+            lastSearchTerm = term;
+            const response = await fetch(`/api/crm/locations/search?q=${encodeURIComponent(term)}`);
+            const data = await parseJsonResponse(response);
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'Search failed');
+            }
+            renderLocationResults(data.results || []);
+        } catch (err) {
+            console.error('[credits] location search error', err);
+            locationResults.innerHTML = `<div class="location-search-empty">${err.message || 'Unable to search locations'}</div>`;
+            locationResults.classList.add('visible');
+        }
+    }
+
+    async function loadRecentInvoices(buyerId, locationId) {
+        if (!relatedInvoiceSelect || !buyerId) {
+            return;
+        }
+        relatedInvoiceSelect.disabled = true;
+        relatedInvoiceSelect.innerHTML = '<option value="">Loading recent invoices…</option>';
+        if (relatedInvoiceHelper) {
+            relatedInvoiceHelper.textContent = 'Fetching recent invoices...';
+        }
+        try {
+            const params = new URLSearchParams({
+                limit: 5
+            });
+            if (locationId) {
+                params.set('location_id', locationId);
+            }
+            const response = await fetch(`/api/v1/invoices/buyers/${buyerId}?${params.toString()}`);
+            const data = await parseJsonResponse(response);
+            if (!response.ok || !data.success) {
+                throw new Error(data.error || 'Unable to load invoices');
+            }
+            const invoices = (data.invoices || []).slice(0, 5);
+            if (!invoices.length) {
+                resetRelatedInvoiceSelect('No recent invoices found for this location');
+                if (relatedInvoiceHelper) {
+                    relatedInvoiceHelper.textContent = 'No invoices matched; enter an invoice ID manually if needed.';
+                }
+                return;
+            }
+            const options = ['<option value="">Select an invoice</option>'].concat(
+                invoices.map((inv) => {
+                    const number = inv.invoice_number || `INV-${inv.id}`;
+                    const total = Number(inv.total ?? inv.subtotal ?? 0).toFixed(2);
+                    const created = inv.created_at ? new Date(inv.created_at).toLocaleDateString() : '';
+                    const status = inv.status || 'Unknown';
+                    return `<option value="${inv.id}">#${number} · ${status} · $${total} · ${created}</option>`;
+                })
+            );
+            relatedInvoiceSelect.innerHTML = options.join('');
+            relatedInvoiceSelect.disabled = false;
+            if (relatedInvoiceHelper) {
+                relatedInvoiceHelper.textContent = `Showing ${invoices.length} most recent invoices for this location.`;
+            }
+        } catch (error) {
+            console.error('[credits] loadRecentInvoices error', error);
+            resetRelatedInvoiceSelect('Unable to load invoices');
+            if (relatedInvoiceHelper) {
+                relatedInvoiceHelper.textContent = error.message || 'Failed to load invoices.';
+            }
+        }
+    }
+
+    issueBtn?.addEventListener('click', () => {
+        console.log('[credits] Issue button clicked');
+        form.reset();
+        errorBox.style.display = 'none';
+        clearLocationSelection();
+        hideLocationResults();
+        toggleModal(true);
+        locationSearchInput?.focus();
+    });
+
+    modal?.addEventListener('click', (event) => {
+        if (event.target === modal || event.target.matches('[data-close-modal]')) {
+            toggleModal(false);
+        }
+    });
+
+    refreshBtn?.addEventListener('click', () => {
+        console.log('[credits] Refresh clicked');
+        window.location.reload();
+    });
+
+    locationSearchInput?.addEventListener('input', (event) => {
+        const term = event.target.value.trim();
+        clearLocationSelection({ keepText: true });
+
+        if (term.length < 2) {
+            hideLocationResults();
+            return;
+        }
+
+        if (searchDebounce) {
+            clearTimeout(searchDebounce);
+        }
+
+        searchDebounce = setTimeout(() => {
+            searchLocations(term);
+        }, 250);
+    });
+
+    document.addEventListener('click', (event) => {
+        if (!locationResults || !locationSearchInput) return;
+        if (
+            event.target === locationSearchInput ||
+            locationResults.contains(event.target)
+        ) {
+            return;
+        }
+        hideLocationResults();
+    });
+
+    locationSearchInput?.addEventListener('focus', () => {
+        if (locationResults && locationResults.innerHTML.trim().length > 0) {
+            locationResults.classList.add('visible');
+        }
+    });
+
+    relatedInvoiceSelect?.addEventListener('change', (event) => {
+        const value = event.target.value || '';
+        if (relatedInvoiceInput) {
+            relatedInvoiceInput.value = value;
+        }
+    });
+
+    relatedInvoiceInput?.addEventListener('input', () => {
+        if (relatedInvoiceSelect && relatedInvoiceSelect.value) {
+            relatedInvoiceSelect.value = '';
+        }
+    });
+
+    document.querySelectorAll('[data-action="void"]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const original = parseFloat(btn.dataset.originalAmount || '0');
+            const remaining = parseFloat(btn.dataset.remainingAmount || '0');
+            const partialAmount = parseFloat(btn.dataset.partialAmount || '0');
+            activeVoidCredit = {
+                id: btn.dataset.creditId,
+                buyer: btn.dataset.buyer || 'Buyer',
+                location: btn.dataset.location || 'Location',
+                original,
+                remaining,
+                partialAmount
+            };
+            if (voidSummary) {
+                voidSummary.textContent = `Credit #${activeVoidCredit.id} • ${activeVoidCredit.buyer} (${activeVoidCredit.location}) — Remaining $${remaining.toFixed(2)} of $${original.toFixed(2)}`;
+            }
+            if (voidPartialWarning) {
+                voidPartialWarning.style.display = partialAmount > 0 ? 'block' : 'none';
+            }
+            if (voidPartialConfirm) {
+                voidPartialConfirm.checked = false;
+            }
+            if (voidReasonInput) {
+                voidReasonInput.value = '';
+            }
+            if (voidError) {
+                voidError.style.display = 'none';
+            }
+            openStandaloneModal(voidModal);
+        });
+    });
+
+    if (correctionModal) {
+        document.querySelectorAll('[data-action="correct"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const original = parseFloat(btn.dataset.originalAmount || '0');
+                const remaining = parseFloat(btn.dataset.remainingAmount || '0');
+                activeCorrectionCredit = {
+                    id: btn.dataset.creditId,
+                    buyer: btn.dataset.buyer || 'Buyer',
+                    location: btn.dataset.location || 'Location',
+                    original
+                };
+                if (correctionSummary) {
+                    correctionSummary.textContent = `Credit #${activeCorrectionCredit.id} • ${activeCorrectionCredit.buyer} (${activeCorrectionCredit.location})`;
+                }
+                if (correctionOriginalField) {
+                    correctionOriginalField.value = `$${original.toFixed(2)}`;
+                }
+                if (correctionCurrentField) {
+                    correctionCurrentField.value = `$${remaining.toFixed(2)}`;
+                }
+                if (correctionNewField) {
+                    correctionNewField.value = remaining.toFixed(2);
+                    correctionNewField.setAttribute('max', original.toFixed(2));
+                }
+                if (correctionReasonField) {
+                    correctionReasonField.value = '';
+                }
+                if (correctionConfirmCheckbox) {
+                    correctionConfirmCheckbox.checked = false;
+                }
+                if (correctionError) {
+                    correctionError.style.display = 'none';
+                }
+                openStandaloneModal(correctionModal);
+            });
+        });
+    }
+
+    form?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        errorBox.style.display = 'none';
+        const formData = Object.fromEntries(new FormData(form).entries());
+        if (!formData.fk_location_id) {
+            errorBox.textContent = 'Please select a location before saving.';
+            errorBox.style.display = 'block';
+            locationSearchInput?.focus();
+            return;
+        }
+        try {
+        const payload = {
+            fk_location_id: Number(formData.fk_location_id),
+            amount: parseFloat(formData.amount),
+            reason: formData.reason,
+            expires_at: formData.expires_at || null
+        };
+
+        if (formData.related_invoice_id) {
+            payload.related_invoice_id = Number(formData.related_invoice_id);
+        }
+
+        if (formData.internal_notes && formData.internal_notes.trim().length) {
+            payload.internal_notes = formData.internal_notes.trim();
+        }
+
+        const res = await fetch('/api/v1/credits', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (!res.ok || !data.success) {
+                throw new Error(data.error || 'Failed to issue credit');
+            }
+            toggleModal(false);
+            if (typeof showNotification === 'function') {
+                showNotification('Credit issued successfully', 'success');
+            }
+            setTimeout(() => window.location.reload(), 800);
+        } catch (err) {
+            errorBox.textContent = err.message;
+            errorBox.style.display = 'block';
+        }
+    });
+
+    voidModal?.addEventListener('click', (event) => {
+        if (event.target === voidModal) {
+            closeStandaloneModal(voidModal);
+        }
+    });
+
+    document.querySelectorAll('[data-close-void]').forEach(btn => {
+        btn.addEventListener('click', () => closeStandaloneModal(voidModal));
+    });
+
+    correctionModal?.addEventListener('click', (event) => {
+        if (event.target === correctionModal) {
+            closeStandaloneModal(correctionModal);
+        }
+    });
+
+    document.querySelectorAll('[data-close-correction]').forEach(btn => {
+        btn.addEventListener('click', () => closeStandaloneModal(correctionModal));
+    });
+
+    voidForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!activeVoidCredit) return;
+        const reason = (voidReasonInput?.value || '').trim();
+        const requiresConfirm = activeVoidCredit.partialAmount > 0;
+
+        if (reason.length < 20) {
+            if (voidError) {
+                voidError.textContent = 'Reason must be at least 20 characters.';
+                voidError.style.display = 'block';
+            }
+            return;
+        }
+
+        if (requiresConfirm && !(voidPartialConfirm?.checked)) {
+            if (voidError) {
+                voidError.textContent = 'Please acknowledge the partial usage warning.';
+                voidError.style.display = 'block';
+            }
+            return;
+        }
+
+        if (voidError) {
+            voidError.style.display = 'none';
+        }
+
+        try {
+            voidSubmitBtn?.setAttribute('disabled', 'true');
+            await updateCredit(`/api/v1/credits/${activeVoidCredit.id}/void`, { reason }, 'Credit voided');
+            closeStandaloneModal(voidModal);
+        } catch (err) {
+            if (voidError) {
+                voidError.textContent = err.message || 'Failed to void credit.';
+                voidError.style.display = 'block';
+            }
+        } finally {
+            voidSubmitBtn?.removeAttribute('disabled');
+        }
+    });
+
+    correctionForm?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (!activeCorrectionCredit) return;
+        const newAmount = parseFloat(correctionNewField?.value || '0');
+        const reason = (correctionReasonField?.value || '').trim();
+
+        if (Number.isNaN(newAmount)) {
+            correctionError.textContent = 'Enter a valid number for the new balance.';
+            correctionError.style.display = 'block';
+            return;
+        }
+
+        if (newAmount < 0 || newAmount > activeCorrectionCredit.original) {
+            correctionError.textContent = `New balance must be between 0 and $${activeCorrectionCredit.original.toFixed(2)}.`;
+            correctionError.style.display = 'block';
+            return;
+        }
+
+        if (reason.length < 50) {
+            correctionError.textContent = 'Reason must be at least 50 characters.';
+            correctionError.style.display = 'block';
+            return;
+        }
+
+        if (!(correctionConfirmCheckbox?.checked)) {
+            correctionError.textContent = 'Please confirm you understand this manual override.';
+            correctionError.style.display = 'block';
+            return;
+        }
+
+        correctionError.style.display = 'none';
+
+        try {
+            correctionSubmitBtn?.setAttribute('disabled', 'true');
+            await updateCredit(`/api/v1/credits/${activeCorrectionCredit.id}/correct-balance`, {
+                new_remaining_balance: parseFloat(newAmount.toFixed(2)),
+                reason
+            }, 'Credit updated');
+            closeStandaloneModal(correctionModal);
+        } catch (err) {
+            correctionError.textContent = err.message || 'Failed to apply correction.';
+            correctionError.style.display = 'block';
+        } finally {
+            correctionSubmitBtn?.removeAttribute('disabled');
+        }
+    });
+});
+
+async function updateCredit(url, payload, successMessage) {
+    try {
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+            throw new Error(data.error || 'Request failed');
+        }
+        if (typeof showNotification === 'function') {
+            showNotification(successMessage, 'success');
+        }
+        setTimeout(() => window.location.reload(), 500);
+    } catch (error) {
+        if (typeof showNotification === 'function') {
+            showNotification(error.message, 'error');
+        } else {
+            alert(error.message);
+        }
+    }
+}
+</script>
+<% } %>
+
