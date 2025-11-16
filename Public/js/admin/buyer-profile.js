@@ -8,6 +8,8 @@ document.addEventListener('DOMContentLoaded', () => {
         modal.classList.add('active');
         modal.setAttribute('aria-hidden', 'false');
         modal.style.display = 'flex';
+        // Prevent background scrolling when modal is open
+        document.body.classList.add('modal-open');
     };
 
     // === HELPER: Close any modal ===
@@ -22,6 +24,12 @@ document.addEventListener('DOMContentLoaded', () => {
         modal.classList.remove('active');
         modal.setAttribute('aria-hidden', 'true');
         modal.style.display = 'none';
+        // Re-enable background scrolling when modal is closed
+        // Check if any other modals are still open
+        const openModals = document.querySelectorAll('.modal-overlay.active');
+        if (openModals.length === 0) {
+            document.body.classList.remove('modal-open');
+        }
     };
 
     // === GLOBAL: Handle modal overlay click (close on backdrop) ===
@@ -194,6 +202,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // === MODAL & FORM ELEMENTS (Locations) ===
     const locationModalTitle = document.getElementById('locationModalTitle');
     const locationFormError = document.getElementById('locationFormError');
+    const locationFormWarning = document.getElementById('locationFormWarning');
+    const locationFormWarningText = document.getElementById('locationFormWarningText');
+    const locationLicenseInput = document.getElementById('locationLicense');
     const locationIdField = document.getElementById('locationId');
 
     // === RENDER FUNCTION (Locations) ===
@@ -346,7 +357,90 @@ document.addEventListener('DOMContentLoaded', () => {
             locationForm.setAttribute('data-action', `/api/crm/buyers/${addLocationBtn.dataset.buyerId}/locations`);
             locationIdField.value = '';
             locationFormError.style.display = 'none';
+            locationFormWarning.style.display = 'none';
+            locationForm.dataset.targetBuyerId = addLocationBtn.dataset.buyerId;
+            locationForm.dataset.existingLocationId = ''; // Will be set if DIS belongs to another buyer
             openModal(locationModal);
+        });
+    }
+
+    // === EVENT: Click "Merge Location" button ===
+    const mergeLocationBtn = document.getElementById('mergeLocationBtn');
+    if (mergeLocationBtn) {
+        mergeLocationBtn.addEventListener('click', () => {
+            const mergeModal = document.getElementById('mergeLocationModal');
+            const mergeDisInput = document.getElementById('mergeDisNumber');
+            const mergeWarning = document.getElementById('mergeLocationWarning');
+            const mergeWarningText = document.getElementById('mergeLocationWarningText');
+            const mergeError = document.getElementById('mergeLocationError');
+            const confirmMergeBtn = document.getElementById('confirmMergeLocationBtn');
+            const targetBuyerId = mergeLocationBtn.dataset.buyerId;
+            
+            // Reset modal state
+            mergeDisInput.value = '';
+            mergeWarning.style.display = 'none';
+            mergeError.style.display = 'none';
+            confirmMergeBtn.disabled = true;
+            confirmMergeBtn.dataset.targetBuyerId = targetBuyerId;
+            confirmMergeBtn.dataset.sourceLocationId = '';
+            
+            // Remove any existing event listeners by cloning the input
+            const newMergeDisInput = mergeDisInput.cloneNode(true);
+            mergeDisInput.parentNode.replaceChild(newMergeDisInput, mergeDisInput);
+            
+            // Check DIS number as user types
+            let checkTimeout;
+            newMergeDisInput.addEventListener('input', () => {
+                clearTimeout(checkTimeout);
+                const disNumber = newMergeDisInput.value.trim();
+                
+                if (!disNumber) {
+                    mergeWarning.style.display = 'none';
+                    mergeError.style.display = 'none';
+                    confirmMergeBtn.disabled = true;
+                    confirmMergeBtn.dataset.sourceLocationId = '';
+                    return;
+                }
+                
+                checkTimeout = setTimeout(async () => {
+                    try {
+                        const response = await fetch(`/api/crm/locations/check-dis?disNumber=${encodeURIComponent(disNumber)}`);
+                        const data = await response.json();
+                        
+                        if (data.success && data.exists) {
+                            const location = data.location;
+                            if (Number(location.buyer_id) === Number(targetBuyerId)) {
+                                mergeWarning.style.display = 'block';
+                                mergeWarningText.textContent = `This DIS number already belongs to a location in this buyer's account.`;
+                                confirmMergeBtn.disabled = true;
+                                confirmMergeBtn.dataset.sourceLocationId = '';
+                            } else {
+                                mergeWarning.style.display = 'block';
+                                mergeWarningText.textContent = `This licence/DIS number is allocated to another buyer: "${location.buyer_name}". Do you want to move it to this buyer?`;
+                                confirmMergeBtn.disabled = false;
+                                confirmMergeBtn.dataset.sourceLocationId = location.location_id;
+                            }
+                            mergeError.style.display = 'none';
+                        } else {
+                            mergeWarning.style.display = 'none';
+                            mergeError.style.display = 'block';
+                            mergeError.textContent = 'DIS number not found. Please check the number and try again.';
+                            confirmMergeBtn.disabled = true;
+                            confirmMergeBtn.dataset.sourceLocationId = '';
+                        }
+                    } catch (err) {
+                        console.error('Error checking DIS number:', err);
+                        mergeError.style.display = 'block';
+                        mergeError.textContent = 'Failed to check DIS number. Please try again.';
+                        confirmMergeBtn.disabled = true;
+                        confirmMergeBtn.dataset.sourceLocationId = '';
+                    }
+                }, 500);
+            });
+            
+            openModal(mergeModal);
+            // Focus the input field
+            setTimeout(() => newMergeDisInput.focus(), 100);
         });
     }
 
@@ -399,6 +493,125 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // === EVENT: Confirm Merge Location Button ===
+    const confirmMergeLocationBtn = document.getElementById('confirmMergeLocationBtn');
+    if (confirmMergeLocationBtn) {
+        confirmMergeLocationBtn.addEventListener('click', async () => {
+            // Use sourceLocationId from the DIS check (the location that will be moved)
+            const locationId = confirmMergeLocationBtn.dataset.sourceLocationId;
+            const targetBuyerId = confirmMergeLocationBtn.dataset.targetBuyerId;
+            const mergeDisInput = document.getElementById('mergeDisNumber');
+            const mergeError = document.getElementById('mergeLocationError');
+            const mergeWarning = document.getElementById('mergeLocationWarning');
+            const mergeModal = document.getElementById('mergeLocationModal');
+            
+            // If mergeDisInput was replaced, get the new one
+            const disInput = mergeDisInput || document.getElementById('mergeDisNumber');
+            const disNumber = disInput ? disInput.value.trim() : '';
+            
+            if (!disNumber) {
+                mergeError.style.display = 'block';
+                mergeError.textContent = 'Please enter a DIS number';
+                return;
+            }
+            
+            if (!locationId || !targetBuyerId) {
+                mergeError.style.display = 'block';
+                mergeError.textContent = 'Missing location or buyer information. Please check the DIS number again.';
+                return;
+            }
+            
+            // Disable button during request
+            confirmMergeLocationBtn.disabled = true;
+            confirmMergeLocationBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Moving...';
+            mergeError.style.display = 'none';
+            
+            try {
+                const response = await fetch(`/api/crm/locations/${locationId}/move`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        targetBuyerId: targetBuyerId,
+                        disNumber: disNumber
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Show success message
+                    if (typeof showNotification !== 'undefined') {
+                        showNotification(data.message || 'Location moved successfully', 'success');
+                    } else {
+                        alert(data.message || 'Location moved successfully');
+                    }
+                    
+                    // Close modal
+                    closeModal(mergeModal, 'force');
+                    
+                    // Reload page to show updated locations
+                    window.location.reload();
+                } else {
+                    mergeError.style.display = 'block';
+                    mergeError.textContent = data.message || data.error || 'Failed to move location';
+                    confirmMergeLocationBtn.disabled = false;
+                    confirmMergeLocationBtn.innerHTML = '<i class="fas fa-exchange-alt"></i> Move Location';
+                }
+            } catch (err) {
+                console.error('Error moving location:', err);
+                mergeError.style.display = 'block';
+                mergeError.textContent = 'Failed to move location. Please try again.';
+                confirmMergeLocationBtn.disabled = false;
+                confirmMergeLocationBtn.innerHTML = '<i class="fas fa-exchange-alt"></i> Move Location';
+            }
+        });
+    }
+
+    // === EVENT: Check DIS number when typing in location license field ===
+    if (locationLicenseInput) {
+        let checkDisTimeout;
+        locationLicenseInput.addEventListener('input', () => {
+            clearTimeout(checkDisTimeout);
+            const disNumber = locationLicenseInput.value.trim();
+            const method = locationForm.getAttribute('data-method');
+            
+            // Only check for new locations (POST), not edits
+            if (method !== 'POST' || !disNumber) {
+                locationFormWarning.style.display = 'none';
+                locationForm.dataset.existingLocationId = '';
+                return;
+            }
+            
+            checkDisTimeout = setTimeout(async () => {
+                try {
+                    const response = await fetch(`/api/crm/locations/check-dis?disNumber=${encodeURIComponent(disNumber)}`);
+                    const data = await response.json();
+                    
+                    if (data.success && data.exists) {
+                        const location = data.location;
+                        const targetBuyerId = locationForm.dataset.targetBuyerId;
+                        
+                        if (Number(location.buyer_id) === Number(targetBuyerId)) {
+                            locationFormWarning.style.display = 'block';
+                            locationFormWarningText.textContent = `This DIS number already belongs to a location in this buyer's account.`;
+                            locationForm.dataset.existingLocationId = '';
+                        } else {
+                            locationFormWarning.style.display = 'block';
+                            locationFormWarningText.textContent = `This licence/DIS number is allocated to another buyer: "${location.buyer_name}". If you continue, this location will be moved to this buyer.`;
+                            locationForm.dataset.existingLocationId = location.location_id;
+                        }
+                    } else {
+                        locationFormWarning.style.display = 'none';
+                        locationForm.dataset.existingLocationId = '';
+                    }
+                } catch (err) {
+                    console.error('Error checking DIS number:', err);
+                    // Don't show error, just continue
+                }
+            }, 500);
+        });
+    }
+
     // === EVENT: Submission of the Add/Edit Location Form ===
     if (locationForm) {
         locationForm.addEventListener('submit', async (e) => {
@@ -407,14 +620,76 @@ document.addEventListener('DOMContentLoaded', () => {
             const method = locationForm.getAttribute('data-method');
             const formData = new FormData(locationForm);
             const locationData = Object.fromEntries(formData.entries());
+            const existingLocationId = locationForm.dataset.existingLocationId;
+            const targetBuyerId = locationForm.dataset.targetBuyerId;
 
+            // If creating new location and DIS belongs to another buyer, move it instead
+            if (method === 'POST' && existingLocationId && targetBuyerId) {
+                const disNumber = locationData.state_license?.trim();
+                if (disNumber) {
+                    // Show confirmation
+                    const confirmed = confirm(
+                        `This DIS number belongs to another buyer. Do you want to move that location to this buyer?\n\n` +
+                        `This will move the location and all associated data (invoices, sales reps, etc.) to this buyer.`
+                    );
+                    
+                    if (!confirmed) {
+                        return; // User cancelled
+                    }
+                    
+                    // Move the existing location instead of creating new one
+                    try {
+                        const moveResponse = await fetch(`/api/crm/locations/${existingLocationId}/move`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                targetBuyerId: targetBuyerId,
+                                disNumber: disNumber
+                            })
+                        });
+                        
+                        const moveData = await moveResponse.json();
+                        
+                        if (moveData.success) {
+                            if (typeof showNotification !== 'undefined') {
+                                showNotification(moveData.message || 'Location moved successfully', 'success');
+                            } else {
+                                alert(moveData.message || 'Location moved successfully');
+                            }
+                            
+                            closeModal(locationModal);
+                            window.location.reload();
+                            return;
+                        } else {
+                            throw new Error(moveData.message || moveData.error || 'Failed to move location');
+                        }
+                    } catch (error) {
+                        locationFormError.textContent = `Error: ${error.message}`;
+                        locationFormError.style.display = 'block';
+                        return;
+                    }
+                }
+            }
+
+            // Normal create/update flow
             try {
+                // Remove locationId from data if it's an update (it's in the URL)
+                const dataToSend = { ...locationData };
+                if (method === 'PATCH') {
+                    delete dataToSend.locationId;
+                }
+                
                 const response = await fetch(action, {
                     method: method,
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(locationData),
+                    body: JSON.stringify(dataToSend),
                 });
-                if (!response.ok) throw new Error((await response.json()).message);
+                
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ message: 'Failed to save location' }));
+                    throw new Error(errorData.message || errorData.error || 'Failed to save location');
+                }
+                
                 const resultLocation = await response.json();
 
                 if (method === 'POST') {
@@ -425,12 +700,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     newRow.innerHTML = renderLocationRow(resultLocation);
                 } else {
                     const rowToUpdate = locationsTableBody.querySelector(`[data-location-id="${resultLocation.entry_id}"]`);
-                    if (rowToUpdate) rowToUpdate.innerHTML = renderLocationRow(resultLocation);
+                    if (rowToUpdate) {
+                        rowToUpdate.innerHTML = renderLocationRow(resultLocation);
+                    } else {
+                        // If row not found, reload page to show updated data
+                        window.location.reload();
+                        return;
+                    }
                 }
                 closeModal(locationModal);
             } catch (error) {
+                console.error('Error saving location:', error);
                 locationFormError.textContent = `Error: ${error.message}`;
                 locationFormError.style.display = 'block';
+                // Scroll to error message
+                locationFormError.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
         });
     }

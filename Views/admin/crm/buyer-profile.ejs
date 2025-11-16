@@ -91,9 +91,14 @@ const canManagePurchaseLimits = isAdmin || isSalesAdmin;
     <div class="info-card">
         <div class="card-header">
             <h3>Locations</h3>
-            <button class="btn btn-secondary btn-sm" id="addLocationBtn" data-buyer-id="<%= buyer.details.entry_id %>">
-                Add Location
-            </button>
+            <div style="display: flex; gap: 0.5rem;">
+                <button class="btn btn-info btn-sm" id="mergeLocationBtn" data-buyer-id="<%= buyer.details.entry_id %>">
+                    Merge Location
+                </button>
+                <button class="btn btn-secondary btn-sm" id="addLocationBtn" data-buyer-id="<%= buyer.details.entry_id %>">
+                    Add Location
+                </button>
+            </div>
         </div>
         <div class="card-body">
             <table class="info-table">
@@ -311,6 +316,40 @@ const canManagePurchaseLimits = isAdmin || isSalesAdmin;
 
 <!-- Include the location modal partial -->
 <%- include('../../partials/location-modal') %>
+
+<!-- Merge Location Modal -->
+<div class="modal-overlay" id="mergeLocationModal" aria-hidden="true" onclick="handleModalOverlayClick(event)">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="mergeLocationModalTitle" onclick="event.stopPropagation()">
+        <form class="styled-form" novalidate>
+            <div class="modal-header">
+                <h3 class="modal-title" id="mergeLocationModalTitle">Merge/Move Location</h3>
+                <button type="button" class="modal-close-btn" data-close-modal aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body" style="padding: 2rem;">
+                <div class="row" style="margin: 0;">
+                    <div class="col-md-12" style="padding: 0; margin-bottom: 1.5rem;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="mergeDisNumber" style="display: block; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-color);">DIS Number / State License <span class="required">*</span></label>
+                            <input type="text" id="mergeDisNumber" class="form-input-modern" placeholder="Enter DIS number" style="width: 100%; box-sizing: border-box;" autofocus>
+                            <small class="form-hint">The state license number of the location to move</small>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="mergeLocationWarning" class="alert alert-warning" style="display: none; margin-top: 1rem;">
+                    <strong>Warning:</strong> <span id="mergeLocationWarningText"></span>
+                </div>
+                <div id="mergeLocationError" class="form-error-message" style="display: none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
+                <button type="button" class="btn btn-primary" id="confirmMergeLocationBtn" disabled>
+                    <i class="fas fa-exchange-alt"></i> Move Location
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
 
 <!-- Include the note modal partial -->
 <%- include('../../partials/note-modal') %>

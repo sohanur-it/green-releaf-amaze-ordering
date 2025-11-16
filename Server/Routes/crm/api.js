@@ -63,6 +63,14 @@ router.patch('/locations/:locationId', locationController.updateLocation);
 // @desc    Delete a location
 router.delete('/locations/:locationId', locationController.deleteLocation);
 
+// @route   GET /api/crm/locations/check-dis
+// @desc    Check if a DIS number belongs to another buyer's location
+router.get('/locations/check-dis', requireAuth, requireRole('Sales Admin', 'Administrator'), locationController.checkDisNumber);
+
+// @route   POST /api/crm/locations/:locationId/move
+// @desc    Move a location from one buyer to another
+router.post('/locations/:locationId/move', requireAuth, requireRole('Sales Admin', 'Administrator'), locationController.moveLocation);
+
 // Purchase limit configuration for locations (Sales Admin / Administrator only)
 router.get(
     '/locations/:locationId/purchase-limits',

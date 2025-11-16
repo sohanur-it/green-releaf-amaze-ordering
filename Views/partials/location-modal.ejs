@@ -52,13 +52,16 @@
                     </div>
                     <div class="col-md-12" style="padding: 0; margin-bottom: 1.5rem;">
                         <div class="form-group" style="margin-bottom: 0;">
-                            <label for="locationLicense" style="display: block; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-color);">State License #</label>
-                            <input type="text" id="locationLicense" name="state_license" class="form-input-modern" placeholder="License number (optional)" style="width: 100%; box-sizing: border-box;">
-                            <small class="form-hint">State-issued license number (optional)</small>
+                            <label for="locationLicense" style="display: block; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-color);">State License # (DIS Number) <span class="required">*</span></label>
+                            <input type="text" id="locationLicense" name="state_license" class="form-input-modern" required placeholder="Enter DIS number" style="width: 100%; box-sizing: border-box;">
+                            <small class="form-hint">State-issued license number. If this DIS number belongs to another buyer, you can move that location here.</small>
                         </div>
                     </div>
                 </div>
 
+                <div id="locationFormWarning" class="alert alert-warning" style="display: none; margin-top: 1rem;">
+                    <strong>Warning:</strong> <span id="locationFormWarningText"></span>
+                </div>
                 <div id="locationFormError" class="form-error-message" style="display: none;"></div>
             </div>
             <div class="modal-footer">
