@@ -64,28 +64,61 @@ async function createPortalAccess() {
             LIMIT 1
         `, [buyer.entry_id]);
         
+        // Get locations for this buyer
+        const locations = await client.query(`
+            SELECT entry_id, name, access_code
+            FROM "ORDERS-buyer_locations"
+            WHERE orders_buyer_id = $1
+            LIMIT 1
+        `, [buyer.entry_id]);
+        
+        if (locations.rows.length === 0) {
+            console.log('❌ No locations found for this buyer. Please add a location first through the CRM.');
+            process.exit(1);
+        }
+        
+        const location = locations.rows[0];
+        
+        if (!location.access_code) {
+            console.log('❌ Location does not have an access_code. This should be set when the location is created.');
+            process.exit(1);
+        }
+        
         if (existing.rows.length > 0) {
             console.log('\n✅ Portal access already exists:');
             console.log(`   UUID: ${existing.rows[0].access_uuid}`);
             console.log(`   Active: ${existing.rows[0].is_active}`);
             
-            const testUrl = `http://localhost:3000/external/store/${existing.rows[0].access_uuid}`;
+            // Sync with location's access_code if different
+            if (existing.rows[0].access_uuid !== location.access_code) {
+                console.log(`\n🔄 Syncing UUID with location's access_code...`);
+                await client.query(`
+                    UPDATE "ORDERS-portal-access"
+                    SET access_uuid = $1
+                    WHERE id = (SELECT id FROM "ORDERS-portal-access" WHERE fk_buyer_id = $2 LIMIT 1)
+                `, [location.access_code, buyer.entry_id]);
+                console.log(`   ✅ Synced to: ${location.access_code}`);
+            }
+            
+            const testUrl = `http://localhost:3000/external/store/${location.access_code}`;
             console.log(`   Test URL: ${testUrl}`);
             console.log('\n💡 To use in production, replace localhost with your domain.');
         } else {
-            // Create new portal access
+            // Create new portal access using location's access_code
             const result = await client.query(`
                 INSERT INTO "ORDERS-portal-access" (
                     fk_buyer_id,
                     fk_location_id,
+                    access_uuid,
                     is_active,
                     created_by
-                ) VALUES ($1, $1, true, 1)
+                ) VALUES ($1, $2, $3, true, 1)
                 RETURNING access_uuid
-            `, [buyer.entry_id]);
+            `, [buyer.entry_id, location.entry_id, location.access_code]);
             
             console.log('\n✅ Portal access created successfully!');
             console.log(`   UUID: ${result.rows[0].access_uuid}`);
+            console.log(`   Location: ${location.name}`);
             
             const testUrl = `http://localhost:3000/external/store/${result.rows[0].access_uuid}`;
             console.log(`   Test URL: ${testUrl}`);

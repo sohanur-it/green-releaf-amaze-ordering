@@ -296,7 +296,8 @@ class PortalController {
                             city,
                             state,
                             zip,
-                            state_license
+                            state_license,
+                            access_code
                         FROM "ORDERS-buyer_locations"
                         WHERE orders_buyer_id = $1
                         ORDER BY name
@@ -342,15 +343,25 @@ class PortalController {
                             }
                             
                             try {
+                                // Get the location's access_code from CRM
+                                const locationAccessCode = rawLocation.access_code;
+                                
+                                if (!locationAccessCode) {
+                                    console.error(`Location ${locationId} does not have an access_code`);
+                                    continue;
+                                }
+                                
+                                // Create portal access using the location's access_code as UUID
                                 const newAccess = await query(`
                                     INSERT INTO "ORDERS-portal-access" (
                                         fk_buyer_id,
                                         fk_location_id,
+                                        access_uuid,
                                         is_active,
                                         created_by
-                                    ) VALUES ($1, $2, true, $3)
+                                    ) VALUES ($1, $2, $3, true, $4)
                                     RETURNING access_uuid, is_active
-                                `, [portalAccess.buyerId, locationId, systemUserIdForAccess]);
+                                `, [portalAccess.buyerId, locationId, locationAccessCode, systemUserIdForAccess]);
                                 
                                 accessInfo = {
                                     fk_location_id: locationId,
@@ -361,7 +372,28 @@ class PortalController {
                                 activeAccessByLocation.set(locationId, accessInfo);
                                 anyAccessByLocation.set(locationId, [accessInfo]);
                             } catch (createErr) {
-                                console.error(`Error creating portal access for location ${locationId}:`, createErr);
+                                // If it's a unique constraint violation, try to get existing access
+                                if (createErr.code === '23505') { // Unique violation
+                                    const existingAccess = await query(`
+                                        SELECT access_uuid, is_active
+                                        FROM "ORDERS-portal-access"
+                                        WHERE fk_location_id = $1
+                                        ORDER BY created_at DESC
+                                        LIMIT 1
+                                    `, [locationId]);
+                                    
+                                    if (existingAccess.rows.length > 0) {
+                                        accessInfo = {
+                                            fk_location_id: locationId,
+                                            access_uuid: existingAccess.rows[0].access_uuid,
+                                            is_active: existingAccess.rows[0].is_active
+                                        };
+                                        activeAccessByLocation.set(locationId, accessInfo);
+                                        anyAccessByLocation.set(locationId, [accessInfo]);
+                                    }
+                                } else {
+                                    console.error(`Error creating portal access for location ${locationId}:`, createErr);
+                                }
                             }
                         }
                         
@@ -1885,15 +1917,25 @@ class PortalController {
                             }
                             
                             try {
+                                // Get the location's access_code from CRM
+                                const locationAccessCode = rawLocation.access_code;
+                                
+                                if (!locationAccessCode) {
+                                    console.error(`Location ${locationId} does not have an access_code`);
+                                    continue;
+                                }
+                                
+                                // Create portal access using the location's access_code as UUID
                                 const newAccess = await query(`
                                     INSERT INTO "ORDERS-portal-access" (
                                         fk_buyer_id,
                                         fk_location_id,
+                                        access_uuid,
                                         is_active,
                                         created_by
-                                    ) VALUES ($1, $2, true, $3)
+                                    ) VALUES ($1, $2, $3, true, $4)
                                     RETURNING access_uuid, is_active
-                                `, [portalAccess.buyerId, locationId, systemUserIdForAccess]);
+                                `, [portalAccess.buyerId, locationId, locationAccessCode, systemUserIdForAccess]);
                                 
                                 accessInfo = {
                                     fk_location_id: locationId,
@@ -1904,7 +1946,28 @@ class PortalController {
                                 activeAccessByLocation.set(locationId, accessInfo);
                                 anyAccessByLocation.set(locationId, [accessInfo]);
                             } catch (createErr) {
-                                console.error(`Error creating portal access for location ${locationId}:`, createErr);
+                                // If it's a unique constraint violation, try to get existing access
+                                if (createErr.code === '23505') { // Unique violation
+                                    const existingAccess = await query(`
+                                        SELECT access_uuid, is_active
+                                        FROM "ORDERS-portal-access"
+                                        WHERE fk_location_id = $1
+                                        ORDER BY created_at DESC
+                                        LIMIT 1
+                                    `, [locationId]);
+                                    
+                                    if (existingAccess.rows.length > 0) {
+                                        accessInfo = {
+                                            fk_location_id: locationId,
+                                            access_uuid: existingAccess.rows[0].access_uuid,
+                                            is_active: existingAccess.rows[0].is_active
+                                        };
+                                        activeAccessByLocation.set(locationId, accessInfo);
+                                        anyAccessByLocation.set(locationId, [accessInfo]);
+                                    }
+                                } else {
+                                    console.error(`Error creating portal access for location ${locationId}:`, createErr);
+                                }
                             }
                         }
                         

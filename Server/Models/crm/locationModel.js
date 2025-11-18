@@ -1,6 +1,7 @@
 // Server/Models/crm/locationModel.js
 
 const db = require('../../config/database');
+const crypto = require('crypto');
 
 //model for handling all the location data logic.
 const Location = {

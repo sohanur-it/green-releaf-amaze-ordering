@@ -53,19 +53,78 @@ class PortalAccessController {
                 return res.status(400).json({ error: 'Location ID is required' });
             }
             
+            // Get the location's access_code from CRM
+            const locationResult = await query(`
+                SELECT access_code
+                FROM "ORDERS-buyer_locations"
+                WHERE entry_id = $1
+            `, [location_id]);
+            
+            if (locationResult.rows.length === 0) {
+                return res.status(404).json({ error: 'Location not found' });
+            }
+            
+            const locationAccessCode = locationResult.rows[0].access_code;
+            
+            if (!locationAccessCode) {
+                return res.status(400).json({ error: 'Location does not have an access_code' });
+            }
+            
+            // Check if portal access already exists for this location
+            const existingAccess = await query(`
+                SELECT id, access_uuid, is_active
+                FROM "ORDERS-portal-access"
+                WHERE fk_location_id = $1
+                ORDER BY created_at DESC
+                LIMIT 1
+            `, [location_id]);
+            
+            if (existingAccess.rows.length > 0) {
+                const existing = existingAccess.rows[0];
+                // Update the existing access to use the location's access_code if it doesn't match
+                if (existing.access_uuid !== locationAccessCode) {
+                    await query(`
+                        UPDATE "ORDERS-portal-access"
+                        SET access_uuid = $1,
+                            is_active = true,
+                            expires_at = $2,
+                            notes = $3
+                        WHERE id = $4
+                    `, [locationAccessCode, expires_at || null, notes || null, existing.id]);
+                } else if (expires_at !== undefined || notes !== undefined) {
+                    // Update expires_at or notes if provided
+                    await query(`
+                        UPDATE "ORDERS-portal-access"
+                        SET expires_at = COALESCE($1, expires_at),
+                            notes = COALESCE($2, notes)
+                        WHERE id = $3
+                    `, [expires_at || null, notes || null, existing.id]);
+                }
+                
+                return res.json({
+                    success: true,
+                    access_uuid: locationAccessCode,
+                    id: existing.id,
+                    message: 'Portal access already exists for this location'
+                });
+            }
+            
+            // Create new portal access using the location's access_code as UUID
             const result = await query(`
                 INSERT INTO "ORDERS-portal-access" (
                     fk_buyer_id,
                     fk_location_id,
+                    access_uuid,
                     is_active,
                     expires_at,
                     notes,
                     created_by
-                ) VALUES ($1, $2, true, $3, $4, $5)
+                ) VALUES ($1, $2, $3, true, $4, $5, $6)
                 RETURNING access_uuid, id
             `, [
                 buyer_id,
                 location_id,
+                locationAccessCode,
                 expires_at || null,
                 notes || null,
                 req.user.id
@@ -130,22 +189,50 @@ class PortalAccessController {
     }
     
     /**
-     * Regenerate UUID for portal access (for security if link is leaked)
+     * Sync UUID for portal access with location's access_code
+     * Since UUID should always match the location's access_code, this syncs it back
      */
     static async regenerateUuid(req, res) {
         try {
             const { id } = req.params;
             
-            const result = await query(`
-                UPDATE "ORDERS-portal-access"
-                SET access_uuid = gen_random_uuid()
+            // Get the portal access to find the location
+            const portalAccess = await query(`
+                SELECT fk_location_id
+                FROM "ORDERS-portal-access"
                 WHERE id = $1
-                RETURNING access_uuid
             `, [id]);
             
-            if (result.rows.length === 0) {
+            if (portalAccess.rows.length === 0) {
                 return res.status(404).json({ error: 'Portal access not found' });
             }
+            
+            const locationId = portalAccess.rows[0].fk_location_id;
+            
+            // Get the location's access_code
+            const locationResult = await query(`
+                SELECT access_code
+                FROM "ORDERS-buyer_locations"
+                WHERE entry_id = $1
+            `, [locationId]);
+            
+            if (locationResult.rows.length === 0) {
+                return res.status(404).json({ error: 'Location not found' });
+            }
+            
+            const locationAccessCode = locationResult.rows[0].access_code;
+            
+            if (!locationAccessCode) {
+                return res.status(400).json({ error: 'Location does not have an access_code' });
+            }
+            
+            // Sync the portal access UUID with the location's access_code
+            const result = await query(`
+                UPDATE "ORDERS-portal-access"
+                SET access_uuid = $1
+                WHERE id = $2
+                RETURNING access_uuid
+            `, [locationAccessCode, id]);
             
             const host = req.get('host');
             const protocol = req.protocol;
@@ -153,13 +240,13 @@ class PortalAccessController {
             
             res.json({
                 success: true,
-                message: 'UUID regenerated successfully',
+                message: 'UUID synced with location access_code successfully',
                 access_uuid: result.rows[0].access_uuid,
                 url: url
             });
         } catch (error) {
-            console.error('Error regenerating UUID:', error);
-            res.status(500).json({ error: 'Failed to regenerate UUID' });
+            console.error('Error syncing UUID:', error);
+            res.status(500).json({ error: 'Failed to sync UUID' });
         }
     }
     
