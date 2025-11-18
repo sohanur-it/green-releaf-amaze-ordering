@@ -754,9 +754,9 @@
                     <span class="summary-label">Discounts:</span>
                     <span class="summary-value" id="cart-discounts">$0.00</span>
                 </div>
-                <div class="summary-row">
+                <div class="summary-row" id="cart-credits-row">
                     <span class="summary-label">Credits:</span>
-                    <span class="summary-value" id="cart-credits" style="color: #10b981;">$0.00</span>
+                    <span class="summary-value" id="cart-credits" style="color: #10b981; font-weight: 600;">$0.00</span>
                 </div>
                 <div class="summary-row summary-total">
                     <span>Total:</span>
@@ -2107,7 +2107,13 @@ function renderCart() {
             const cartDiscountsSpan = document.getElementById('cart-discounts');
             if (cartDiscountsSpan) cartDiscountsSpan.textContent = `-$${discountsVal.toFixed(2)}`;
             const cartCreditsSpan = document.getElementById('cart-credits');
-            if (cartCreditsSpan) cartCreditsSpan.textContent = `-$${creditsVal.toFixed(2)}`;
+            const cartCreditsRow = document.getElementById('cart-credits-row');
+            if (cartCreditsSpan) {
+                cartCreditsSpan.textContent = creditsVal > 0 ? `-$${creditsVal.toFixed(2)}` : '$0.00';
+            }
+            if (cartCreditsRow) {
+                cartCreditsRow.style.display = creditsVal > 0 ? 'flex' : 'flex'; // Always show, even if $0.00
+            }
             if (cartTotalSpan) cartTotalSpan.textContent = `$${totalVal.toFixed(2)}`;
         } catch (e) {
             // Fallback to existing values
@@ -2116,7 +2122,9 @@ function renderCart() {
             const cartDiscountsSpan = document.getElementById('cart-discounts');
             if (cartDiscountsSpan) cartDiscountsSpan.textContent = '-$0.00';
             const cartCreditsSpan = document.getElementById('cart-credits');
-            if (cartCreditsSpan) cartCreditsSpan.textContent = '-$0.00';
+            const cartCreditsRow = document.getElementById('cart-credits-row');
+            if (cartCreditsSpan) cartCreditsSpan.textContent = '$0.00';
+            if (cartCreditsRow) cartCreditsRow.style.display = 'flex'; // Always show
             console.warn('Failed to compute portal discounts/credits:', e);
         }
     })();

@@ -27,30 +27,22 @@
                 <span class="detail-label">Order Number:</span>
                 <span class="detail-value"><%= invoiceNumber || 'N/A' %></span>
             </div>
-            <% if (subtotal) { %>
             <div class="detail-item">
                 <span class="detail-label">Subtotal:</span>
-                <span class="detail-value">$<%= parseFloat(subtotal).toFixed(2) %></span>
+                <span class="detail-value">$<%= subtotal ? parseFloat(subtotal).toFixed(2) : '0.00' %></span>
             </div>
-            <% } %>
-            <% if (discountAmount && discountAmount > 0) { %>
             <div class="detail-item">
                 <span class="detail-label">Discounts:</span>
-                <span class="detail-value discount-amount">-$<%= parseFloat(discountAmount).toFixed(2) %></span>
+                <span class="detail-value discount-amount">-$<%= discountAmount && discountAmount > 0 ? parseFloat(discountAmount).toFixed(2) : '0.00' %></span>
             </div>
-            <% } %>
-            <% if (creditApplied && creditApplied > 0) { %>
             <div class="detail-item">
                 <span class="detail-label">Credits Applied:</span>
-                <span class="detail-value credit-amount">-$<%= parseFloat(creditApplied).toFixed(2) %></span>
+                <span class="detail-value credit-amount"><%= creditApplied && creditApplied > 0 ? '-$' + parseFloat(creditApplied).toFixed(2) : '$0.00' %></span>
             </div>
-            <% } %>
-            <% if (orderTotal) { %>
             <div class="detail-item detail-item-total">
                 <span class="detail-label">Total:</span>
-                <span class="detail-value">$<%= parseFloat(orderTotal).toFixed(2) %></span>
+                <span class="detail-value">$<%= orderTotal ? parseFloat(orderTotal).toFixed(2) : '0.00' %></span>
             </div>
-            <% } %>
         </div>
         
         <div class="confirmation-actions">

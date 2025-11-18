@@ -2062,20 +2062,37 @@ class PortalController {
                 ? invoice.sales_rep_full_name.trim() 
                 : null;
             
-            // Calculate correct subtotal (original before discounts)
-            // If subtotal + discount_amount + credit_applied = total, then subtotal is already correct
-            // Otherwise, calculate it as: total + discount_amount + credit_applied
+            // Invoice structure:
+            // - subtotal: sum of line_totals (after discounts, before credits)
+            // - discount_amount: total discounts applied
+            // - credit_applied: total credits applied
+            // - total: subtotal - credit_applied
+            // 
+            // For display:
+            // - Original Subtotal (before discounts) = subtotal + discount_amount
+            // - Discounts = discount_amount
+            // - Credits Applied = credit_applied
+            // - Total = total
             const discountAmount = parseFloat(invoice.discount_amount || 0);
             const creditApplied = parseFloat(invoice.credit_applied || 0);
             const total = parseFloat(invoice.total || 0);
             const storedSubtotal = parseFloat(invoice.subtotal || 0);
             
-            // Verify: storedSubtotal should equal total + discount_amount + credit_applied
-            // If not, recalculate the original subtotal
-            const expectedSubtotal = total + discountAmount + creditApplied;
-            const originalSubtotal = (Math.abs(storedSubtotal - expectedSubtotal) < 0.01) 
-                ? storedSubtotal 
-                : expectedSubtotal;
+            // Calculate the original subtotal (before discounts and credits)
+            // invoice.subtotal is after discounts but before credits
+            // So original subtotal = storedSubtotal + discountAmount
+            const originalSubtotal = storedSubtotal + discountAmount;
+            
+            // Debug logging
+            console.log('[showConfirmation] Invoice breakdown:', {
+                invoiceId,
+                storedSubtotal: 'subtotal (after discounts, before credits)',
+                discountAmount,
+                creditApplied,
+                total,
+                originalSubtotal: 'original subtotal (before discounts)',
+                verification: `total (${total}) should equal subtotal (${storedSubtotal}) - credits (${creditApplied}) = ${storedSubtotal - creditApplied}`
+            });
             
             // Get buyer name and info for header
             let buyerName = 'Buyer';

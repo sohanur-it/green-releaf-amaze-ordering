@@ -56,9 +56,17 @@ router.get('/api/portal/:uuid/credits/available', authenticatePortalAccess, requ
         const access = req.portalAccess || {};
         const locationId = access.locationId || access.location_id || null;
         if (!locationId) {
+            console.log('[credits/available] Missing location context. Access object:', {
+                locationId: access.locationId,
+                location_id: access.location_id,
+                buyerId: access.buyerId,
+                buyer_id: access.buyer_id
+            });
             return res.status(400).json({ success: false, error: 'Missing location context' });
         }
+        console.log(`[credits/available] Fetching credits for location ${locationId}`);
         const credits = await accountCreditService.getAvailableCredits(Number(locationId));
+        console.log(`[credits/available] Found ${credits.active_credits?.length || 0} active credits, total available: $${credits.available_total || 0}`);
         res.json({ success: true, credits });
     } catch (err) {
         console.error('Portal credits available error:', err);

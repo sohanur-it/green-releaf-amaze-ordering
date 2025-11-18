@@ -133,9 +133,28 @@
                             </tr>
                         <% } %>
                     </tbody>
+                    <tfoot id="checkout-summary-footer" style="display: none;">
+                        <tr class="summary-row-subtotal">
+                            <td colspan="4" style="text-align: right; font-weight: 600;">Subtotal:</td>
+                            <td class="summary-value-subtotal" style="font-weight: 600;">$0.00</td>
+                        </tr>
+                        <tr class="summary-row-discounts">
+                            <td colspan="4" style="text-align: right; color: #10b981;">Discounts:</td>
+                            <td class="summary-value-discounts" style="color: #10b981;">-$0.00</td>
+                        </tr>
+                        <tr class="summary-row-credits" id="checkout-credits-row">
+                            <td colspan="4" style="text-align: right; color: #10b981; font-weight: 600;">Credits Applied:</td>
+                            <td class="summary-value-credits" style="color: #10b981; font-weight: 600;">-$0.00</td>
+                        </tr>
+                        <tr class="order-total-row">
+                            <td colspan="4" style="text-align: right; font-weight: 700; font-size: 1.1em; padding-top: 10px; border-top: 2px solid #e5e7eb;">Total:</td>
+                            <td class="summary-value-total" style="font-weight: 700; font-size: 1.1em; padding-top: 10px; border-top: 2px solid #e5e7eb;">$0.00</td>
+                        </tr>
+                    </tfoot>
                 </table>
+                <!-- Legacy order-total-row div (kept for backward compatibility, but table footer is primary) -->
                 <% if (cart && cart.items && cart.items.length > 0) { %>
-                    <div class="order-total-row">
+                    <div class="order-total-row" style="display: none;">
                         <span>Total: $<%= cart.total ? parseFloat(cart.total).toFixed(2) : '0.00' %></span>
                     </div>
                 <% } %>
@@ -1141,7 +1160,9 @@ function updateCheckoutQuantityInput(batchId, value) {
 
 // Update checkout total from cart
 function updateCheckoutTotal() {
-    console.log('[checkout] updateCheckoutTotal() called');
+    console.log('[checkout] ========================================');
+    console.log('[checkout] 🔥 updateCheckoutTotal() FUNCTION CALLED');
+    console.log('[checkout] ========================================');
     const cart = getCartManager();
     if (!cart) {
         console.warn('[checkout] updateCheckoutTotal() - cart manager not found');
@@ -1160,7 +1181,14 @@ function updateCheckoutTotal() {
         }))
     });
     
+    // Wrap everything in async to ensure credits are fetched before DOM updates
     (async () => {
+        console.log('[checkout] ========== updateCheckoutTotal ASYNC FUNCTION START ==========');
+        console.log('[checkout] Cart data:', {
+            itemCount: cartData?.items?.length || 0,
+            hasItems: Array.isArray(cartData?.items) && cartData.items.length > 0
+        });
+        
         // Calculate subtotal from actual line items (sum of line_total which already includes discounts)
         const lineItemsSubtotal = (cartData.items || []).reduce((sum, item) => {
             return sum + Number(item.line_total || 0);
@@ -1172,7 +1200,11 @@ function updateCheckoutTotal() {
         // Total should be sum of all line_total values (already discounted) minus credits
         let totalVal = lineItemsSubtotal;
         let pricingResult = null;
+        
+        console.log('[checkout] Initial values:', { subtotalVal, discountsVal, creditsVal, totalVal });
+        
         try {
+            console.error('🔥🔥🔥 TRY BLOCK STARTED - About to compute discounts and credits 🔥🔥🔥');
             // Compute discounts
             if (Array.isArray(cartData.items) && cartData.items.length > 0) {
                 const pricingPayload = {
@@ -1222,7 +1254,7 @@ function updateCheckoutTotal() {
                         subtotalVal, 
                         discountsVal, 
                         totalVal, 
-                        actualLineItemsTotal,
+                        lineItemsSubtotal,
                         lineItemsCount: cartData.items?.length || 0,
                         hasItemNotes: !!(pricingResult && pricingResult.itemNotes), 
                         hasItems: !!(pricingResult && pricingResult.items) 
@@ -1231,33 +1263,111 @@ function updateCheckoutTotal() {
                     const txt = await pricingRes.text().catch(() => '');
                     console.warn('[checkout] pricing request failed:', pricingRes.status, txt);
                 }
+            } else {
+                console.log('[checkout] No cart items, skipping pricing API');
             }
+            
+            console.error('🔥🔥🔥 ABOUT TO START CREDITS FETCH - LINE 1250 🔥🔥🔥');
+            console.error('🔥 Current creditsVal before fetch:', creditsVal);
+            
             // Get available credits for current location
-            const creditsRes = await fetch(`/api/portal/<%= uuid %>/credits/available`);
-            console.log('[checkout] credits response status:', creditsRes.status);
-            if (creditsRes.ok) {
-                const creditsData = await creditsRes.json();
-                const availableCredits = Number(creditsData?.credits?.available_total || creditsData?.credits?.available || 0);
-                // Credits apply up to remaining after discounts
-                creditsVal = Math.min(availableCredits, Math.max(0, subtotalVal - discountsVal));
-                console.log('[checkout] credits parsed:', { availableCredits, creditsVal });
-            } else {
-                const txt = await creditsRes.text().catch(() => '');
-                console.warn('[checkout] credits request failed:', creditsRes.status, txt);
+            // This should ALWAYS run, regardless of pricing API result or cart items
+            console.error('🔥🔥🔥 CREDITS FETCH STARTING NOW 🔥🔥🔥');
+            console.log('[checkout] ========== CREDITS FETCH START ==========');
+            console.log('[checkout] ✅ REACHED CREDITS FETCH CODE - About to fetch credits');
+            console.log('[checkout] UUID for credits API:', '<%= uuid %>');
+            console.log('[checkout] Credits API URL will be:', `/api/portal/<%= uuid %>/credits/available`);
+            
+            // Force credits fetch to execute - wrap in try-catch to ensure it runs
+            console.error('🔥 ABOUT TO CALL FETCH FOR CREDITS API 🔥');
+            console.log('[checkout] 🔄 EXECUTING FETCH NOW...');
+            console.log('[checkout] Current values before credits fetch:', {
+                subtotalVal,
+                discountsVal,
+                creditsVal,
+                totalVal
+            });
+            
+            try {
+                console.error('🔥 CALLING FETCH() FOR CREDITS NOW 🔥');
+                console.log('[checkout] About to call fetch() for credits API...');
+                const url = `/api/portal/<%= uuid %>/credits/available`;
+                console.error('🔥 Credits API URL:', url);
+                const creditsRes = await fetch(url);
+                console.error('🔥 FETCH COMPLETED! Status:', creditsRes.status);
+                console.log('[checkout] ✅ Fetch call completed, got response');
+                console.log('[checkout] Credits API response status:', creditsRes.status);
+                console.log('[checkout] Credits API response ok:', creditsRes.ok);
+                console.log('[checkout] Credits API response headers:', Object.fromEntries(creditsRes.headers.entries()));
+                
+                if (creditsRes.ok) {
+                    const creditsData = await creditsRes.json();
+                    console.log('[checkout] Credits API full response:', JSON.stringify(creditsData, null, 2));
+                    console.log('[checkout] Credits data structure:', {
+                        hasCredits: !!creditsData.credits,
+                        creditsType: typeof creditsData.credits,
+                        creditsKeys: creditsData.credits ? Object.keys(creditsData.credits) : 'N/A',
+                        available_total: creditsData?.credits?.available_total,
+                        available: creditsData?.credits?.available
+                    });
+                    
+                    const availableCredits = Number(creditsData?.credits?.available_total || creditsData?.credits?.available || 0);
+                    console.log('[checkout] Parsed availableCredits:', availableCredits);
+                    
+                    // Credits apply up to remaining after discounts
+                    const remainingAfterDiscounts = Math.max(0, subtotalVal - discountsVal);
+                    console.log('[checkout] Remaining after discounts:', remainingAfterDiscounts);
+                    
+                    creditsVal = Math.min(availableCredits, remainingAfterDiscounts);
+                    console.log('[checkout] Final creditsVal calculated:', creditsVal);
+                    console.log('[checkout] Credits calculation:', {
+                        availableCredits,
+                        remainingAfterDiscounts,
+                        creditsVal,
+                        formula: `Math.min(${availableCredits}, ${remainingAfterDiscounts})`
+                    });
+                } else {
+                    const txt = await creditsRes.text().catch(() => '');
+                    console.error('[checkout] Credits request FAILED:', {
+                        status: creditsRes.status,
+                        statusText: creditsRes.statusText,
+                        responseText: txt
+                    });
+                }
+            } catch (creditsError) {
+                console.error('[checkout] ❌ Credits fetch ERROR:', creditsError);
+                console.error('[checkout] Credits fetch error message:', creditsError.message);
+                console.error('[checkout] Credits fetch error stack:', creditsError.stack);
+            } finally {
+                console.log('[checkout] Credits fetch try-catch block completed');
             }
-            // Compute final total: pricing API total (already includes discounts) minus credits
-            // The pricing API total is: subtotal - discounts
-            // Final total should be: pricing total - credits
+            
+            console.log('[checkout] ========== CREDITS FETCH END ==========');
+            console.log('[checkout] Final creditsVal after fetch:', creditsVal);
+            console.log('[checkout] Credits fetch completed successfully, creditsVal =', creditsVal);
+            
+            // Compute final total using consistent formula: subtotal - discounts - credits
+            // This ensures all pages (cart, checkout, confirmation, orders) use the same calculation
             if (pricingResult) {
-                // Pricing API was called successfully, use its total and subtract credits
-                totalVal = Math.max(0, totalVal - creditsVal);
+                // Pricing API was called successfully
+                // Pricing API total is: subtotal - discounts
+                // Final total should be: subtotal - discounts - credits
+                totalVal = Math.max(0, subtotalVal - discountsVal - creditsVal);
             } else {
-                // Fallback: if pricing API failed, use sum of line items minus credits
-                // (Note: line items might not have discounts applied yet in database)
+                // Fallback: if pricing API failed, use sum of line items
+                // Line items already have discounts applied in their line_total
                 const finalLineItemsTotal = (cartData.items || []).reduce((sum, item) => {
                     return sum + Number(item.line_total || 0);
                 }, 0);
+                // For fallback, we need to estimate discounts and credits
+                // But since line_total already has discounts, we can use it directly
+                // Credits still need to be subtracted
                 totalVal = Math.max(0, finalLineItemsTotal - creditsVal);
+                // Update subtotal and discounts for display consistency
+                if (subtotalVal === lineItemsSubtotal) {
+                    // If we're using line items, we don't have separate discount info
+                    // So discountsVal stays 0, and subtotalVal is the sum of line items
+                }
             }
             console.log('[checkout] final total calculation:', {
                 totalVal,
@@ -1268,43 +1378,179 @@ function updateCheckoutTotal() {
                 lineItemsCount: cartData.items?.length || 0
             });
         } catch (e) {
+            console.error('[checkout] ❌❌❌ ERROR in try block:', e);
+            console.error('[checkout] Error message:', e.message);
+            console.error('[checkout] Error stack:', e.stack);
             console.warn('Checkout pricing/credits fetch failed, falling back to client totals:', e);
         }
-        // Update DOM
+        
+        console.error('🔥🔥🔥 TRY-CATCH BLOCK COMPLETED - creditsVal =', creditsVal, '🔥🔥🔥');
+        console.log('[checkout] ========== ASYNC FUNCTION COMPLETED ==========');
+        console.log('[checkout] Final values before DOM update:', { subtotalVal, discountsVal, creditsVal, totalVal });
+        
+        // Update DOM - This must happen AFTER async operations complete
+        console.log('[checkout] ========== DOM UPDATE START ==========');
+        console.log('[checkout] Values to display:', {
+            subtotalVal,
+            discountsVal,
+            creditsVal,
+            totalVal
+        });
+        
         const subtotalSpan = document.getElementById('cart-subtotal');
         const discountsSpan = document.getElementById('cart-discounts');
         const creditsSpan = document.getElementById('cart-credits');
         const totalSpan = document.getElementById('cart-total');
-        console.log('[checkout] updating summary UI:', { subtotalVal, discountsVal, creditsVal, totalVal, hasSubtotalEl: !!subtotalSpan, hasDiscountsEl: !!discountsSpan, hasCreditsEl: !!creditsSpan, hasTotalEl: !!totalSpan });
-        if (subtotalSpan) subtotalSpan.textContent = `$${subtotalVal.toFixed(2)}`;
-        if (discountsSpan) discountsSpan.textContent = `-$${discountsVal.toFixed(2)}`;
-        if (creditsSpan) creditsSpan.textContent = `-$${creditsVal.toFixed(2)}`;
-        if (totalSpan) totalSpan.textContent = `$${totalVal.toFixed(2)}`;
         
-        // Update the order-total-row (the total shown below the table)
+        console.log('[checkout] DOM elements found:', {
+            hasSubtotalEl: !!subtotalSpan,
+            hasDiscountsEl: !!discountsSpan,
+            hasCreditsEl: !!creditsSpan,
+            hasTotalEl: !!totalSpan,
+            subtotalElId: subtotalSpan?.id,
+            discountsElId: discountsSpan?.id,
+            creditsElId: creditsSpan?.id,
+            totalElId: totalSpan?.id
+        });
+        
+        // Search for credits element with different selectors if not found
+        if (!creditsSpan) {
+            console.warn('[checkout] cart-credits element not found by ID, searching alternatives...');
+            const altCredits = document.querySelector('#cart-credits') || 
+                              document.querySelector('[id*="credits"]') ||
+                              document.querySelector('.summary-value[id*="credits"]');
+            console.log('[checkout] Alternative credits element search:', {
+                found: !!altCredits,
+                element: altCredits
+            });
+        }
+        
+        if (subtotalSpan) {
+            subtotalSpan.textContent = `$${subtotalVal.toFixed(2)}`;
+            console.log('[checkout] Updated subtotal span to:', `$${subtotalVal.toFixed(2)}`);
+        } else {
+            console.warn('[checkout] subtotalSpan element not found!');
+        }
+        
+        if (discountsSpan) {
+            discountsSpan.textContent = `-$${discountsVal.toFixed(2)}`;
+            console.log('[checkout] Updated discounts span to:', `-$${discountsVal.toFixed(2)}`);
+        } else {
+            console.warn('[checkout] discountsSpan element not found!');
+        }
+        
+        if (creditsSpan) {
+            const creditsDisplayValue = creditsVal > 0 ? `-$${creditsVal.toFixed(2)}` : '$0.00';
+            creditsSpan.textContent = creditsDisplayValue;
+            console.log('[checkout] ✅ Updated credits span to:', creditsDisplayValue);
+            console.log('[checkout] Credits span current textContent:', creditsSpan.textContent);
+            console.log('[checkout] Credits span computed style:', window.getComputedStyle(creditsSpan));
+        } else {
+            console.error('[checkout] ❌ creditsSpan element not found!');
+            console.error('[checkout] Searching for credits element in DOM...');
+            const allElements = document.querySelectorAll('*');
+            const creditsElements = Array.from(allElements).filter(el => 
+                el.id && el.id.toLowerCase().includes('credit')
+            );
+            console.log('[checkout] Found elements with "credit" in ID:', creditsElements.map(el => ({
+                id: el.id,
+                tagName: el.tagName,
+                textContent: el.textContent?.substring(0, 50)
+            })));
+        }
+        
+        const cartCreditsRow = document.getElementById('cart-credits-row');
+        if (cartCreditsRow) {
+            cartCreditsRow.style.display = 'flex'; // Always show credits row
+            console.log('[checkout] ✅ Credits row is visible');
+            console.log('[checkout] Credits row computed style:', window.getComputedStyle(cartCreditsRow));
+        } else {
+            console.error('[checkout] ❌ cart-credits-row element not found!');
+            console.error('[checkout] Searching for credits row in DOM...');
+            const allRows = document.querySelectorAll('.summary-row, [class*="credits"], [id*="credits"]');
+            console.log('[checkout] Found potential credit rows:', Array.from(allRows).map(el => ({
+                id: el.id,
+                className: el.className,
+                textContent: el.textContent?.substring(0, 100)
+            })));
+        }
+        
+        if (totalSpan) {
+            totalSpan.textContent = `$${totalVal.toFixed(2)}`;
+            console.log('[checkout] Updated total span to:', `$${totalVal.toFixed(2)}`);
+        } else {
+            console.warn('[checkout] totalSpan element not found!');
+        }
+        
+        console.log('[checkout] ========== DOM UPDATE END ==========');
+        
+        // Update the checkout table summary footer (subtotal, discounts, credits, total)
+        const updateCheckoutTableSummary = () => {
+            const footer = document.getElementById('checkout-summary-footer');
+            if (!footer) {
+                console.warn('[checkout] checkout-summary-footer not found');
+                return false;
+            }
+            
+            // Show the footer
+            footer.style.display = 'table-footer-group';
+            
+            // Update subtotal
+            const subtotalCell = footer.querySelector('.summary-value-subtotal');
+            if (subtotalCell) {
+                subtotalCell.textContent = `$${subtotalVal.toFixed(2)}`;
+            }
+            
+            // Update discounts
+            const discountsCell = footer.querySelector('.summary-value-discounts');
+            if (discountsCell) {
+                discountsCell.textContent = `-$${discountsVal.toFixed(2)}`;
+            }
+            
+            // Update credits
+            const creditsRow = footer.querySelector('#checkout-credits-row');
+            const creditsCell = footer.querySelector('.summary-value-credits');
+            if (creditsRow && creditsCell) {
+                creditsRow.style.display = 'table-row'; // Always show
+                creditsCell.textContent = creditsVal > 0 ? `-$${creditsVal.toFixed(2)}` : '$0.00';
+                console.log('[checkout] ✅ Updated credits row in table:', creditsVal > 0 ? `-$${creditsVal.toFixed(2)}` : '$0.00');
+            } else {
+                console.warn('[checkout] Credits row or cell not found in footer');
+            }
+            
+            // Update total
+            const totalCell = footer.querySelector('.summary-value-total');
+            if (totalCell) {
+                totalCell.textContent = `$${totalVal.toFixed(2)}`;
+                console.log('[checkout] ✅ Updated total in table footer:', `$${totalVal.toFixed(2)}`);
+            }
+            
+            return true;
+        };
+        
+        // Update the order-total-row (legacy, for backward compatibility)
         const updateOrderTotalRow = () => {
             const orderTotalRow = document.querySelector('.order-total-row');
             if (orderTotalRow) {
-                // Make sure it's visible
-                orderTotalRow.style.display = 'block';
                 const orderTotalRowSpan = orderTotalRow.querySelector('span');
                 if (orderTotalRowSpan) {
                     orderTotalRowSpan.textContent = `Total: $${totalVal.toFixed(2)}`;
-                    console.log('[checkout] updated order-total-row to:', totalVal);
+                    console.log('[checkout] updated order-total-row to:', totalVal, '(includes credits:', creditsVal, ')');
                     return true;
-                } else {
-                    console.warn('[checkout] order-total-row span not found inside .order-total-row');
                 }
-            } else {
-                console.warn('[checkout] .order-total-row element not found, totalVal:', totalVal);
             }
             return false;
         };
         
-        // Try to update immediately
+        // Update both the table footer and legacy total row
+        if (!updateCheckoutTableSummary()) {
+            setTimeout(updateCheckoutTableSummary, 100);
+            setTimeout(updateCheckoutTableSummary, 500);
+        }
+        
         if (!updateOrderTotalRow()) {
-            // If not found, try again after a short delay
             setTimeout(updateOrderTotalRow, 100);
+            setTimeout(updateOrderTotalRow, 500);
         }
         
         // Also update payment section totals
@@ -1318,8 +1564,9 @@ function updateCheckoutTotal() {
                 finalTotalSection.innerHTML = `Final Total: <span class="final-total-amount">$${totalVal.toFixed(2)}</span>`;
             }
         }
-
+        
         // Per-item discounted totals in checkout table
+        // This must also be inside the async IIFE to access pricingResult
         try {
             console.log('[checkout] starting per-item discount update, pricingResult:', pricingResult);
             if (pricingResult && Array.isArray(pricingResult.items)) {
@@ -1419,7 +1666,7 @@ function updateCheckoutTotal() {
             console.error('[checkout] error in per-item discounted totals:', e);
             console.error('[checkout] error stack:', e.stack);
         }
-    })();
+    })(); // End of async IIFE - All async operations (pricing, credits, DOM updates) complete here
 }
 
 // Show loading overlay
@@ -1589,9 +1836,9 @@ async function placeOrder() {
                 <span class="summary-label">Discounts:</span>
                 <span class="summary-value" id="cart-discounts">$0.00</span>
             </div>
-            <div class="summary-row">
+            <div class="summary-row" id="cart-credits-row">
                 <span class="summary-label">Credits:</span>
-                <span class="summary-value" id="cart-credits">$0.00</span>
+                <span class="summary-value" id="cart-credits" style="color: #10b981; font-weight: 600;">$0.00</span>
             </div>
             <div class="summary-row summary-total">
                 <span>Total:</span>

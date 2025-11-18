@@ -379,24 +379,20 @@ function renderInvoiceDetail(inv) {
         </div>
         <div class="order-breakdown">
             <div class="breakdown-row">
-                <span>Subtotal</span>
+                <span>Subtotal:</span>
                 <span>$${parseFloat(inv.subtotal || inv.total || 0).toFixed(2)}</span>
             </div>
-            ${parseFloat(inv.discount_amount || 0) > 0 ? `
             <div class="breakdown-row">
-                <span>Discounts</span>
-                <span style="color: #10b981;">-$${parseFloat(inv.discount_amount).toFixed(2)}</span>
+                <span>Discounts:</span>
+                <span style="color: #10b981;">-$${parseFloat(inv.discount_amount || 0).toFixed(2)}</span>
             </div>
-            ` : ''}
-            ${parseFloat(inv.credit_applied || 0) > 0 ? `
             <div class="breakdown-row">
-                <span>Credits Applied</span>
-                <span style="color: #10b981;">-$${parseFloat(inv.credit_applied).toFixed(2)}</span>
+                <span>Credits Applied:</span>
+                <span style="color: #10b981; font-weight: 600;">${parseFloat(inv.credit_applied || 0) > 0 ? '-$' + parseFloat(inv.credit_applied).toFixed(2) : '$0.00'}</span>
             </div>
-            ` : ''}
             <div class="breakdown-divider"></div>
             <div class="breakdown-row total">
-                <span>Total</span>
+                <span>Total:</span>
                 <span>$${parseFloat(inv.total || 0).toFixed(2)}</span>
             </div>
         </div>

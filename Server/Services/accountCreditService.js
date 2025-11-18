@@ -235,7 +235,19 @@ class AccountCreditService {
                 originalTotal: roundToCurrency(parseFloat(item.line_total) + parseFloat(item.credit_portion || 0))
             }));
 
-            const subtotal = originalTotals.reduce((sum, item) => sum + item.originalTotal, 0);
+            // Get current invoice values
+            const invoiceWithDiscount = await exec(`
+                SELECT subtotal, discount_amount
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [invoiceId]);
+            
+            const currentDiscountAmount = parseFloat(invoiceWithDiscount.rows[0]?.discount_amount || 0);
+            // invoice.subtotal stores the ORIGINAL subtotal (before discounts), per discountService.recalculateInvoiceTotals
+            const originalSubtotal = parseFloat(invoiceWithDiscount.rows[0]?.subtotal || 0);
+            
+            // After credits are applied, the sum of line_totals (after discounts, before credits) is the sum of originalTotals
+            const subtotalAfterDiscounts = originalTotals.reduce((sum, item) => sum + item.originalTotal, 0);
 
             let allocated = 0;
             for (let i = 0; i < originalTotals.length; i++) {
@@ -244,8 +256,8 @@ class AccountCreditService {
 
                 if (i === originalTotals.length - 1) {
                     creditShare = roundToCurrency(totalApplied - allocated);
-                } else if (subtotal > 0) {
-                    creditShare = roundToCurrency(totalApplied * (originalTotal / subtotal));
+                } else if (subtotalAfterDiscounts > 0) {
+                    creditShare = roundToCurrency(totalApplied * (originalTotal / subtotalAfterDiscounts));
                     allocated = roundToCurrency(allocated + creditShare);
                 }
 
@@ -258,28 +270,23 @@ class AccountCreditService {
                 `, [newLineTotal, creditShare, id]);
             }
 
-            // Get discount_amount from invoice to ensure correct total calculation
-            const invoiceWithDiscount = await exec(`
-                SELECT discount_amount
-                FROM "ORDERS-invoices"
-                WHERE id = $1
-            `, [invoiceId]);
-            
-            const discountAmount = parseFloat(invoiceWithDiscount.rows[0]?.discount_amount || 0);
-            // Total = Subtotal (already includes discounts in line_total) - Credits
-            // Note: subtotal here is sum of line_totals which already have discounts applied
-            const finalTotal = subtotal - (COALESCE(currentCredit, 0) + totalApplied);
+            // Constraint requires: total = subtotal - discount_amount - credit_applied
+            // Where subtotal = original subtotal (before discounts), stored in invoice.subtotal
+            // So: total = originalSubtotal - currentDiscountAmount - (currentCredit + totalApplied)
+            const currentCreditValue = currentCredit || 0;
+            const newCreditApplied = roundToCurrency(currentCreditValue + totalApplied);
+            const finalTotal = roundToCurrency(originalSubtotal - currentDiscountAmount - newCreditApplied);
             
             await exec(`
                 UPDATE "ORDERS-invoices"
                 SET
                     subtotal = $1,
                     discount_amount = $2,
-                    credit_applied = COALESCE(credit_applied, 0) + $3,
+                    credit_applied = $3,
                     total = $4,
                     updated_at = NOW()
                 WHERE id = $5
-            `, [subtotal, discountAmount, totalApplied, finalTotal, invoiceId]);
+            `, [originalSubtotal, currentDiscountAmount, newCreditApplied, finalTotal, invoiceId]);
 
             for (const app of applications) {
                 await exec(`
@@ -320,6 +327,7 @@ class AccountCreditService {
 
     async getAvailableCredits(locationId) {
         try {
+            // Get all credits for this location, including inactive ones for display
             const result = await query(`
                 SELECT
                     c.*,
@@ -334,10 +342,36 @@ class AccountCreditService {
                 ORDER BY c.issued_at DESC
             `, [locationId]);
 
-            return result.rows;
+            // Filter for active credits only (not expired, not fully used, not voided)
+            const activeCredits = result.rows.filter(credit => {
+                const isActive = 
+                    parseFloat(credit.remaining_balance || 0) > 0 &&
+                    !credit.is_expired &&
+                    !credit.is_fully_used &&
+                    !credit.is_voided &&
+                    (credit.expires_at === null || new Date(credit.expires_at) > new Date());
+                return isActive;
+            });
+
+            // Calculate total available balance
+            const availableTotal = activeCredits.reduce((sum, credit) => {
+                return sum + parseFloat(credit.remaining_balance || 0);
+            }, 0);
+
+            return {
+                credits: result.rows, // All credits for reference
+                active_credits: activeCredits, // Only active credits
+                available_total: roundToCurrency(availableTotal),
+                available: roundToCurrency(availableTotal) // Alias for compatibility
+            };
         } catch (error) {
             console.error('Error getting available credits:', error);
-            return [];
+            return {
+                credits: [],
+                active_credits: [],
+                available_total: 0,
+                available: 0
+            };
         }
     }
 
