@@ -7,7 +7,14 @@ const UserModel = require('../Models/userModel');
  */
 const requireAuth = async (req, res, next) => {
     try {
+        console.log(`[AUTH MIDDLEWARE] Checking auth for: ${req.path}`);
+        console.log(`[AUTH MIDDLEWARE] Session exists: ${!!req.session}`);
+        console.log(`[AUTH MIDDLEWARE] Session ID: ${req.sessionID}`);
+        console.log(`[AUTH MIDDLEWARE] Session userId: ${req.session?.userId}`);
+        console.log(`[AUTH MIDDLEWARE] Session data:`, req.session ? Object.keys(req.session) : 'no session');
+        
         if (!req.session || !req.session.userId) {
+            console.log(`[AUTH MIDDLEWARE] No session or userId, redirecting to login`);
             // If it's an API request, return JSON error
             if (req.path.startsWith('/api/')) {
                 return res.status(401).json({ 
@@ -18,19 +25,27 @@ const requireAuth = async (req, res, next) => {
             // Otherwise redirect to login
             return res.redirect('/auth/login');
         }
+        
+        console.log(`[AUTH MIDDLEWARE] Session found, verifying user: ${req.session.userId}`);
 
         // Verify user still exists and is active
+        console.log(`[AUTH MIDDLEWARE] Looking up user ID: ${req.session.userId}`);
         const user = await UserModel.findById(req.session.userId);
         
         if (!user) {
+            console.log(`[AUTH MIDDLEWARE] User not found, destroying session`);
             req.session.destroy();
             return res.redirect('/auth/login');
         }
 
+        console.log(`[AUTH MIDDLEWARE] User found: ${user.username}, status: ${user.status}`);
         if (user.status !== 'active') {
+            console.log(`[AUTH MIDDLEWARE] User not active, destroying session`);
             req.session.destroy();
             return res.redirect('/auth/login?error=Your account is not active');
         }
+        
+        console.log(`[AUTH MIDDLEWARE] Authentication successful, proceeding`);
 
         // Attach user info to request
         req.user = {

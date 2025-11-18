@@ -61,9 +61,24 @@ async function ensureTables(client) {
             action discount_action NOT NULL,
             value NUMERIC(12, 4) NOT NULL,
             metadata JSONB,
+            sort_order INTEGER,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
+    `);
+    
+    // Add sort_order column if it doesn't exist (for existing databases)
+    await client.query(`
+        DO $$ 
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM information_schema.columns 
+                WHERE table_name = 'ORDERS-discount-rules' 
+                AND column_name = 'sort_order'
+            ) THEN
+                ALTER TABLE "ORDERS-discount-rules" ADD COLUMN sort_order INTEGER;
+            END IF;
+        END $$;
     `);
 
     await client.query(`

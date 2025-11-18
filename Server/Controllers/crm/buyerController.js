@@ -35,8 +35,35 @@ const getBuyerById = async (req, res, next) => {
         }));
         
         // we gotta get the buyer data AND all the reps for the dropdown at the same time
-        const [buyerData] = await Promise.all([
-            Buyer.findById(buyerId)
+        const discountBuilderService = require('../../Services/discountBuilderService');
+        const { query } = require('../../config/database');
+        
+        // Fetch categories and products for discount rule editing
+        const [categoriesResult, productsResult] = await Promise.all([
+            query(`
+                SELECT DISTINCT category_name
+                FROM "ORDERS-products"
+                WHERE category_name IS NOT NULL
+                ORDER BY category_name ASC
+            `).catch(() => ({ rows: [] })),
+            query(`
+                SELECT entry_id AS product_id, name, category_name
+                FROM "ORDERS-products"
+                ORDER BY name ASC
+                LIMIT 200
+            `).catch(() => ({ rows: [] }))
+        ]);
+        
+        const [buyerData, discountAssignments, availableDiscounts] = await Promise.all([
+            Buyer.findById(buyerId),
+            discountBuilderService.getBuyerAssignments(parseInt(buyerId, 10)).catch(err => {
+                console.error('Error fetching discount assignments:', err);
+                return []; // Return empty array on error
+            }),
+            discountBuilderService.listDiscountCodes().catch(err => {
+                console.error('Error fetching available discounts:', err);
+                return []; // Return empty array on error
+            })
         ]);
 
 
@@ -53,6 +80,10 @@ const getBuyerById = async (req, res, next) => {
             title: `CRM - ${buyerData.details.name}`,
             buyer: buyerData, // the view will get an object with details, contacts, notes, etc.
             allSalesReps: allSalesReps, // pass the list of all users with Sales Rep role to the view
+            discountAssignments: discountAssignments || [], // pass discount assignments ordered by priority
+            availableDiscounts: availableDiscounts || [], // pass available discounts for assignment dropdown
+            categories: categoriesResult.rows.map(r => r.category_name), // pass categories for rule editing
+            products: productsResult.rows, // pass products for rule editing
             layout: 'layouts/main'
         });
 

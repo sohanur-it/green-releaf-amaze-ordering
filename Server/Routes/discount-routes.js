@@ -110,6 +110,22 @@ router.delete('/rules/:ruleId', auth, auditMiddleware, async (req, res) => {
     }
 });
 
+/**
+ * Reorder rules for a discount
+ * PUT /api/v1/discounts/codes/:id/rules/reorder
+ */
+router.put('/codes/:id/rules/reorder', auth, auditMiddleware, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const ordering = Array.isArray(req.body.ordering) ? req.body.ordering : [];
+        await discountBuilderService.reorderRules(parseInt(id, 10), ordering);
+        res.json({ success: true });
+    } catch (error) {
+        console.error('Error reordering rules:', error);
+        res.status(500).json({ success: false, error: 'Failed to reorder rules' });
+    }
+});
+
 router.post('/codes/:id/conflicts', auth, auditMiddleware, async (req, res) => {
     try {
         const conflictIds = Array.isArray(req.body.conflicts) ? req.body.conflicts : [];
@@ -158,6 +174,20 @@ router.put('/buyers/:buyerId/assignments/reorder', auth, auditMiddleware, async 
     } catch (error) {
         console.error('Error reordering assignments:', error);
         res.status(500).json({ success: false, error: 'Failed to reorder' });
+    }
+});
+
+router.put('/buyers/:buyerId/assignments/:assignmentId', auth, auditMiddleware, async (req, res) => {
+    try {
+        const { priority, is_active } = req.body;
+        const assignment = await discountBuilderService.updateAssignment(
+            parseInt(req.params.assignmentId, 10),
+            { priority, is_active }
+        );
+        res.json({ success: true, assignment });
+    } catch (error) {
+        console.error('Error updating assignment:', error);
+        res.status(500).json({ success: false, error: 'Failed to update assignment' });
     }
 });
 

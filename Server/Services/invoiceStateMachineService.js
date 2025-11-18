@@ -225,6 +225,24 @@ class InvoiceStateMachineService {
                     return releaseResult;
                 }
 
+                // Broadcast inventory updates for all affected batches
+                try {
+                    const allocationService = require('./allocationService');
+                    const lineItems = await client.query(`
+                        SELECT DISTINCT fk_batch_id
+                        FROM "ORDERS-invoice-line-items"
+                        WHERE fk_invoice_id = $1 AND fk_batch_id IS NOT NULL
+                    `, [invoiceId]);
+                    
+                    for (const item of lineItems.rows) {
+                        const batchId = item.fk_batch_id;
+                        const newAvailable = await allocationService.getAvailableQuantity(batchId);
+                        await allocationService.broadcastInventoryUpdate(batchId, newAvailable);
+                    }
+                } catch (wsError) {
+                    console.error('WebSocket broadcast error (non-critical) during cancellation:', wsError.message);
+                }
+
                 // Immediately expire any associated external cart session so the buyer's cart is cleared
                 await client.query(`
                     UPDATE "ORDERS-invoices"

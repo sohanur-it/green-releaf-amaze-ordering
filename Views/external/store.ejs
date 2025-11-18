@@ -754,6 +754,10 @@
                     <span class="summary-label">Discounts:</span>
                     <span class="summary-value" id="cart-discounts">$0.00</span>
                 </div>
+                <div class="summary-row">
+                    <span class="summary-label">Credits:</span>
+                    <span class="summary-value" id="cart-credits" style="color: #10b981;">$0.00</span>
+                </div>
                 <div class="summary-row summary-total">
                     <span>Total:</span>
                     <span id="cart-total">$0.00</span>
@@ -2051,7 +2055,7 @@ function renderCart() {
         }
     }
     
-    // Compute and display discounts using portal pricing API
+    // Compute and display discounts and credits using portal pricing API
     (async () => {
         try {
             const cfgEl = document.getElementById('portal-websocket-config');
@@ -2060,8 +2064,11 @@ function renderCart() {
             const hasItems = Array.isArray(cartData.items) && cartData.items.length > 0;
             let subtotalVal = Number(cartData.subtotal || 0);
             let discountsVal = 0;
+            let creditsVal = 0;
             let totalVal = Number(cartData.total || subtotalVal);
+            
             if (buyerId && hasItems) {
+                // Get pricing (discounts)
                 const payload = {
                     cartItems: cartData.items.map(i => ({
                         product_id: i.product_id,
@@ -2070,21 +2077,37 @@ function renderCart() {
                         quantity: i.quantity
                     }))
                 };
-                const res = await fetch(`/api/portal/<%= portalAccess.uuid %>/cart/pricing`, {
+                const pricingRes = await fetch(`/api/portal/<%= portalAccess.uuid %>/cart/pricing`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-                if (res.ok) {
-                    const data = await res.json();
-                    subtotalVal = Number(data.subtotal || subtotalVal);
-                    discountsVal = Number(data.discounts || 0);
-                    totalVal = Number(data.total != null ? data.total : (subtotalVal - discountsVal));
+                if (pricingRes.ok) {
+                    const pricingData = await pricingRes.json();
+                    subtotalVal = Number(pricingData.subtotal || subtotalVal);
+                    discountsVal = Number(pricingData.discounts || 0);
+                    totalVal = Number(pricingData.total != null ? pricingData.total : (subtotalVal - discountsVal));
                 }
+                
+                // Get available credits
+                const creditsRes = await fetch(`/api/portal/<%= portalAccess.uuid %>/credits/available`);
+                if (creditsRes.ok) {
+                    const creditsData = await creditsRes.json();
+                    const availableCredits = Number(creditsData?.credits?.available_total || creditsData?.credits?.available || 0);
+                    // Credits apply up to remaining after discounts
+                    creditsVal = Math.min(availableCredits, Math.max(0, subtotalVal - discountsVal));
+                }
+                
+                // Final total: subtotal - discounts - credits
+                totalVal = Math.max(0, subtotalVal - discountsVal - creditsVal);
             }
+            
+            // Update DOM
             if (cartSubtotalSpan) cartSubtotalSpan.textContent = `$${subtotalVal.toFixed(2)}`;
             const cartDiscountsSpan = document.getElementById('cart-discounts');
             if (cartDiscountsSpan) cartDiscountsSpan.textContent = `-$${discountsVal.toFixed(2)}`;
+            const cartCreditsSpan = document.getElementById('cart-credits');
+            if (cartCreditsSpan) cartCreditsSpan.textContent = `-$${creditsVal.toFixed(2)}`;
             if (cartTotalSpan) cartTotalSpan.textContent = `$${totalVal.toFixed(2)}`;
         } catch (e) {
             // Fallback to existing values
@@ -2092,7 +2115,9 @@ function renderCart() {
             if (cartTotalSpan) cartTotalSpan.textContent = `$${cartData.total.toFixed(2)}`;
             const cartDiscountsSpan = document.getElementById('cart-discounts');
             if (cartDiscountsSpan) cartDiscountsSpan.textContent = '-$0.00';
-            console.warn('Failed to compute portal discounts:', e);
+            const cartCreditsSpan = document.getElementById('cart-credits');
+            if (cartCreditsSpan) cartCreditsSpan.textContent = '-$0.00';
+            console.warn('Failed to compute portal discounts/credits:', e);
         }
     })();
 }

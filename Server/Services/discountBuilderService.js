@@ -29,7 +29,7 @@ class DiscountBuilderService {
             SELECT *
             FROM "ORDERS-discount-rules"
             WHERE fk_discount_id = $1
-            ORDER BY created_at ASC
+            ORDER BY COALESCE(sort_order, id) ASC, created_at ASC
         `, [discountId]);
         const conflictsResult = await query(`
             SELECT fk_conflicting_discount_id
@@ -150,6 +150,24 @@ class DiscountBuilderService {
         await query(`DELETE FROM "ORDERS-discount-rules" WHERE id = $1`, [ruleId]);
     }
 
+    async reorderRules(discountId, ordering = []) {
+        await query('BEGIN');
+        try {
+            for (let i = 0; i < ordering.length; i++) {
+                const ruleId = ordering[i];
+                await query(`
+                    UPDATE "ORDERS-discount-rules"
+                    SET sort_order = $1, updated_at = NOW()
+                    WHERE id = $2 AND fk_discount_id = $3
+                `, [i + 1, ruleId, discountId]);
+            }
+            await query('COMMIT');
+        } catch (err) {
+            await query('ROLLBACK');
+            throw err;
+        }
+    }
+
     async updateConflicts(discountId, conflictIds = []) {
         await query(`DELETE FROM "ORDERS-discount-conflicts" WHERE fk_discount_id = $1`, [discountId]);
         if (!conflictIds.length) return;
@@ -174,6 +192,8 @@ class DiscountBuilderService {
             FROM "ORDERS-discount-buyer-assignments" assignments
             INNER JOIN "ORDERS-discount-codes" codes ON codes.id = assignments.fk_discount_id
             WHERE assignments.fk_buyer_id = $1
+              AND assignments.is_active = true
+              AND codes.is_active = true
             ORDER BY assignments.priority ASC
         `, [buyerId]);
         return result.rows;
@@ -220,6 +240,38 @@ class DiscountBuilderService {
         }
     }
 
+    async updateAssignment(assignmentId, updates) {
+        const updatesList = [];
+        const values = [];
+        let paramIndex = 1;
+        
+        if (updates.priority !== undefined) {
+            updatesList.push(`priority = $${paramIndex++}`);
+            values.push(updates.priority);
+        }
+        
+        if (updates.is_active !== undefined) {
+            updatesList.push(`is_active = $${paramIndex++}`);
+            values.push(updates.is_active);
+        }
+        
+        if (updatesList.length === 0) {
+            throw new Error('No updates provided');
+        }
+        
+        values.push(assignmentId);
+        updatesList.push(`updated_at = NOW()`);
+        
+        const result = await query(`
+            UPDATE "ORDERS-discount-buyer-assignments"
+            SET ${updatesList.join(', ')}
+            WHERE id = $${paramIndex}
+            RETURNING *
+        `, values);
+        
+        return result.rows[0];
+    }
+
     async removeAssignment(assignmentId) {
         await query(`
             DELETE FROM "ORDERS-discount-buyer-assignments"
@@ -262,23 +314,36 @@ class DiscountBuilderService {
             }));
         } else if (payload.buyerId) {
             const assignments = await this.getBuyerAssignments(payload.buyerId);
+            console.log(`[simulatePricing] Found ${assignments.length} active assignments for buyer ${payload.buyerId}`);
             for (const assignment of assignments) {
                 const code = await this.getDiscountCodeById(assignment.fk_discount_id);
-                if (code) {
+                // Only include discount codes that are active and have at least one rule
+                if (code && code.is_active && code.rules && code.rules.length > 0) {
                     code.priority = assignment.priority;
                     discountsInPlay.push(code);
+                    console.log(`[simulatePricing] Added discount ${code.id} (${code.display_name}) with ${code.rules.length} rules`);
+                } else {
+                    console.log(`[simulatePricing] Skipped discount ${assignment.fk_discount_id}: active=${code?.is_active}, rules=${code?.rules?.length || 0}`);
                 }
             }
             discountsInPlay.sort((a, b) => (a.priority || 0) - (b.priority || 0));
+            console.log(`[simulatePricing] Total discounts in play: ${discountsInPlay.length}`);
         }
 
         if (!discountsInPlay.length) {
             const subtotal = items.reduce((sum, item) => sum + (item.unit_price * item.quantity), 0);
-            return { subtotal, totalDiscounts: 0, grandTotal: subtotal, breakdown: [] };
+            return { 
+                subtotal, 
+                totalDiscounts: 0, 
+                grandTotal: subtotal, 
+                breakdown: [],
+                warnings: ['No active discounts found for this buyer']
+            };
         }
 
         let breakdown = [];
         let globalNotes = [];
+        const skippedDueToConflicts = new Map(); // Track discounts skipped due to conflicts: discountId -> [conflicting discount IDs]
         const workingItems = items.map(item => ({
             ...item,
             original_total: item.unit_price * item.quantity,
@@ -290,54 +355,128 @@ class DiscountBuilderService {
             _specificityAddedEntire: false
         }));
 
+        // Build a conflict map for bidirectional checking
+        // Map: discountId -> [conflicting discount IDs]
+        const conflictMap = new Map();
         for (const discount of discountsInPlay) {
             const conflictIds = Array.isArray(discount.conflicts) ? discount.conflicts.map(Number) : [];
+            conflictMap.set(discount.id, conflictIds);
+            // Also add reverse conflicts: if A conflicts with B, then B conflicts with A
+            for (const conflictId of conflictIds) {
+                if (!conflictMap.has(conflictId)) {
+                    conflictMap.set(conflictId, []);
+                }
+                if (!conflictMap.get(conflictId).includes(discount.id)) {
+                    conflictMap.get(conflictId).push(discount.id);
+                }
+            }
+        }
+
+        for (const discount of discountsInPlay) {
+            console.log(`[simulatePricing] Processing discount ${discount.id} (${discount.display_name}) with ${discount.rules?.length || 0} rules`);
+            const conflictIds = conflictMap.get(discount.id) || [];
+            console.log(`[simulatePricing] Discount ${discount.id} conflicts: [${conflictIds.join(', ')}]`);
+            
             for (const rule of discount.rules) {
                 if (!rule) continue;
+                console.log(`[simulatePricing] Checking rule ${rule.id}: applies_to=${rule.applies_to}, action=${rule.action}, value=${rule.value}, category=${rule.category_name}, product_id=${rule.fk_master_product_id}`);
                 for (const item of workingItems) {
-                    // If this discount conflicts with any discount already applied to this item, skip
+                    // Check conflicts bidirectionally:
+                    // 1. If this discount conflicts with any already-applied discount, skip
+                    // 2. If any already-applied discount conflicts with this discount, skip
+                    const alreadyAppliedIds = (item.discounts || []).map(d => Number(d.discount_id));
+                    let hasConflict = false;
+                    
                     if (conflictIds.length) {
-                        const alreadyAppliedIds = (item.discounts || []).map(d => Number(d.discount_id));
-                        const hasConflict = alreadyAppliedIds.some(id => conflictIds.includes(id));
-                        if (hasConflict) {
-                            continue;
+                        // Check if this discount conflicts with any already-applied discount
+                        hasConflict = alreadyAppliedIds.some(id => conflictIds.includes(id));
+                    }
+                    
+                    if (!hasConflict && alreadyAppliedIds.length > 0) {
+                        // Check reverse: if any already-applied discount conflicts with this discount
+                        for (const appliedId of alreadyAppliedIds) {
+                            const appliedConflicts = conflictMap.get(appliedId) || [];
+                            if (appliedConflicts.includes(discount.id)) {
+                                hasConflict = true;
+                                console.log(`[simulatePricing] Reverse conflict detected: discount ${appliedId} conflicts with ${discount.id}`);
+                                break;
+                            }
                         }
                     }
+                    
+                    if (hasConflict) {
+                        // Track which discounts caused the conflict
+                        const conflictingDiscounts = alreadyAppliedIds.filter(id => {
+                            const appliedConflicts = conflictMap.get(id) || [];
+                            return conflictIds.includes(id) || appliedConflicts.includes(discount.id);
+                        });
+                        
+                        if (!skippedDueToConflicts.has(discount.id)) {
+                            skippedDueToConflicts.set(discount.id, []);
+                        }
+                        conflictingDiscounts.forEach(conflictId => {
+                            if (!skippedDueToConflicts.get(discount.id).includes(conflictId)) {
+                                skippedDueToConflicts.get(discount.id).push(conflictId);
+                            }
+                        });
+                        
+                        console.log(`[simulatePricing] Skipping rule ${rule.id} for item ${item.product_id} due to conflict with already-applied discounts: [${conflictingDiscounts.join(', ')}]`);
+                        continue;
+                    }
+                    // Check if rule applies to this item
+                    const ruleApplies = this.#ruleApplies(rule, item);
+                    console.log(`[simulatePricing] Rule ${rule.id} applies check: ${ruleApplies} (applies_to=${rule.applies_to}, item_category=${item.category_name}, item_product_id=${item.product_id})`);
+                    
+                    if (!ruleApplies) {
+                        console.log(`[simulatePricing] Rule ${rule.id} does not apply to item ${item.product_id}`);
+                        continue;
+                    }
+                    
                     // Specificity: if a Specific_Product rule applies, ignore Entire_Order and Specific_Category for that item
-                    const productRuleApplies = rule.applies_to === 'Specific_Product' && this.#ruleApplies(rule, item);
+                    const productRuleApplies = rule.applies_to === 'Specific_Product';
                     if (productRuleApplies) {
+                        console.log(`[simulatePricing] Product rule ${rule.id} applies to item ${item.product_id}`);
                         // mark note for this item
                         if (!item._specificityAddedProduct) {
                             item._notes.push('💡 Specificity: Product-specific discount');
                             item._specificityAddedProduct = true;
                         }
-                        // apply product rule and skip others for that item within this loop
+                        // Apply the product rule
                     } else {
                         // If any existing product-specific discount already applied to this item, skip non-product rules
                         const hasProductSpecific = item.discounts.some(d => d.rule_applies_to === 'Specific_Product');
-                        if (hasProductSpecific && rule.applies_to !== 'Specific_Product') {
+                        if (hasProductSpecific) {
+                            console.log(`[simulatePricing] Skipping rule ${rule.id} - product-specific discount already applied`);
                             continue;
                         }
+                        
                         // If category rule applies, note specificity and allow; later global rules are ignored
-                        const categoryRuleApplies = rule.applies_to === 'Specific_Category' && this.#ruleApplies(rule, item);
+                        const categoryRuleApplies = rule.applies_to === 'Specific_Category';
                         if (categoryRuleApplies && !item._specificityAddedCategory) {
+                            console.log(`[simulatePricing] Category rule ${rule.id} applies to item ${item.product_id} (category: ${item.category_name})`);
                             item._notes.push('💡 Specificity: Category-specific discount');
                             item._specificityAddedCategory = true;
                         }
+                        
                         // If category-specific already applied, skip Entire_Order rules
                         const hasCategorySpecific = item.discounts.some(d => d.rule_applies_to === 'Specific_Category');
                         if (hasCategorySpecific && rule.applies_to === 'Entire_Order') {
+                            console.log(`[simulatePricing] Skipping Entire_Order rule ${rule.id} - category-specific already applied`);
                             continue;
                         }
+                        
                         // Entire order specificity (only if no more specific already noted)
-                        if (rule.applies_to === 'Entire_Order' && !item._specificityAddedEntire && !item._specificityAddedProduct && !item._specificityAddedCategory && this.#ruleApplies(rule, item)) {
+                        if (rule.applies_to === 'Entire_Order' && !item._specificityAddedEntire && !item._specificityAddedProduct && !item._specificityAddedCategory) {
+                            console.log(`[simulatePricing] Entire_Order rule ${rule.id} applies to item ${item.product_id}`);
                             item._notes.push('💡 Specificity: Entire-order discount');
                             item._specificityAddedEntire = true;
                         }
-                        if (!this.#ruleApplies(rule, item)) continue;
                     }
+                    
+                    // Apply the rule to calculate new price
                     const before = item.running_total;
                     const after = this.#applyRule(discount, rule, item);
+                    console.log(`[simulatePricing] Rule ${rule.id} applied: before=$${before}, after=$${after}, diff=$${before - after}`);
                     if (after < before) {
                         const diff = before - after;
                         item.running_total = after;
@@ -350,18 +489,54 @@ class DiscountBuilderService {
                             description: desc
                         });
                         item._notes.push(desc);
+                        console.log(`[simulatePricing] Discount applied successfully: ${desc}`);
+                    } else {
+                        console.log(`[simulatePricing] Rule ${rule.id} did not reduce price (after >= before)`);
                     }
                 }
             }
+            const appliedAmount = workingItems.reduce((sum, item) => {
+                const d = item.discounts.filter(x => x.discount_id === discount.id);
+                return sum + d.reduce((dsum, entry) => dsum + entry.amount, 0);
+            }, 0);
+            
             breakdown.push({
                 discount_id: discount.id,
                 discount_name: discount.display_name,
                 stacking_behavior: discount.stacking_behavior,
-                applied_amount: workingItems.reduce((sum, item) => {
-                    const d = item.discounts.filter(x => x.discount_id === discount.id);
-                    return sum + d.reduce((dsum, entry) => dsum + entry.amount, 0);
-                }, 0)
+                applied_amount: appliedAmount,
+                rules_count: discount.rules?.length || 0,
+                matched_rules: appliedAmount > 0 ? discount.rules?.length || 0 : 0
             });
+        }
+
+        // Add warnings if discounts were found but not applied
+        const warnings = [];
+        for (const discount of discountsInPlay) {
+            const appliedAmount = breakdown.find(b => b.discount_id === discount.id)?.applied_amount || 0;
+            if (appliedAmount === 0 && discount.rules && discount.rules.length > 0) {
+                // Check if it was skipped due to conflicts
+                const conflictIds = skippedDueToConflicts.get(discount.id);
+                if (conflictIds && conflictIds.length > 0) {
+                    const conflictNames = conflictIds.map(id => {
+                        const conflictDiscount = discountsInPlay.find(d => d.id === id);
+                        return conflictDiscount ? `"${conflictDiscount.display_name}"` : `ID ${id}`;
+                    }).join(', ');
+                    warnings.push(`Discount "${discount.display_name}" (ID: ${discount.id}) was skipped due to conflict with: ${conflictNames}`);
+                } else {
+                    // No conflict, so rules just didn't match
+                    const ruleDetails = discount.rules.map(r => {
+                        if (r.applies_to === 'Specific_Category') {
+                            return `category "${r.category_name}"`;
+                        } else if (r.applies_to === 'Specific_Product') {
+                            return `product ID ${r.fk_master_product_id}`;
+                        } else {
+                            return r.applies_to;
+                        }
+                    }).join(', ');
+                    warnings.push(`Discount "${discount.display_name}" (ID: ${discount.id}) has ${discount.rules.length} rule(s) but none matched. Rules target: ${ruleDetails}`);
+                }
+            }
         }
 
         const subtotal = workingItems.reduce((sum, item) => sum + item.original_total, 0);
@@ -390,7 +565,8 @@ class DiscountBuilderService {
             items: workingItems,
             breakdown,
             notes: Array.from(new Set(globalNotes)),
-            itemNotes
+            itemNotes,
+            warnings: warnings || []
         };
     }
 

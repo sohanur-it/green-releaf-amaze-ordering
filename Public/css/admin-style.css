@@ -2052,8 +2052,57 @@ html.sidebar-is-collapsed .sidebar-title-full {
     margin-top: 10px;
 }
 
+/* Drag and Drop Styles */
 .rule-group,
-.assignment-card,
+.assignment-card {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    cursor: move;
+    transition: opacity 0.2s, transform 0.2s;
+}
+
+.rule-group.dragging,
+.assignment-card.dragging {
+    opacity: 0.5;
+    transform: scale(0.95);
+}
+
+.rule-drag-handle,
+.assignment-drag-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    min-width: 32px;
+    padding: 0 8px;
+    color: var(--text-light, #6c757d);
+    cursor: grab;
+    user-select: none;
+    background: var(--bg-color, #f8f9fa);
+    border-right: 1px solid var(--border-color, #e1e4e8);
+}
+
+.rule-drag-handle:active,
+.assignment-drag-handle:active {
+    cursor: grabbing;
+}
+
+.rule-drag-handle:hover,
+.assignment-drag-handle:hover {
+    background: var(--hover-bg, #e9ecef);
+    color: var(--text-color, #24292e);
+}
+
+.rule-content,
+.assignment-content {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px;
+}
+
 .breakdown-row,
 .cart-row {
     border: 1px solid var(--border-color);
@@ -2066,6 +2115,17 @@ html.sidebar-is-collapsed .sidebar-title-full {
 .rule-group {
     padding: 0;
     overflow: hidden;
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    background: var(--bg-color, #f8f9fb);
+}
+
+.assignment-card {
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    margin-bottom: 12px;
+    background: var(--bg-color, #f8f9fb);
 }
 
 .rule-header {
@@ -2082,13 +2142,32 @@ html.sidebar-is-collapsed .sidebar-title-full {
     color: var(--text-color);
 }
 
+.rule-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.rule-edit,
 .rule-delete {
     background: transparent;
     border: none;
     color: var(--text-light);
     cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: background-color 0.2s, color 0.2s;
 }
-.rule-delete:hover { color: var(--text-color); }
+
+.rule-edit:hover,
+.rule-delete:hover {
+    background: var(--hover-bg, #e9ecef);
+    color: var(--text-color);
+}
+
+.rule-delete:hover {
+    color: #dc3545;
+}
 
 .rule-body {
     padding: 14px;
@@ -2332,11 +2411,51 @@ html.sidebar-is-collapsed .sidebar-title-full {
 .dark-theme .conflict-manager .panel-header h4 {
     color: var(--text-color);
 }
-.dark-theme #conflictSelect,
-.dark-theme #conflictSelect option {
-    background: var(--card-bg);
-    color: var(--text-color);
+#conflictSelect {
+    min-height: 150px;
+    padding: 8px;
+    border: 2px solid var(--border-color);
+    border-radius: 8px;
+    background-color: var(--input-bg, #fff);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+#conflictSelect option {
+    padding: 8px 12px;
+    margin: 2px 0;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+#conflictSelect option:checked {
+    background-color: var(--primary-color, #4a90e2) !important;
+    color: #fff !important;
+    font-weight: 600;
+}
+
+#conflictSelect option:hover {
+    background-color: var(--hover-bg, #f0f0f0);
+}
+
+.dark-theme #conflictSelect {
+    background: var(--card-bg, #1f2937);
+    color: var(--text-color, #fff);
     border-color: var(--border-color);
+}
+
+.dark-theme #conflictSelect option {
+    background: var(--card-bg, #1f2937);
+    color: var(--text-color, #fff);
+}
+
+.dark-theme #conflictSelect option:checked {
+    background-color: var(--primary-color, #4a90e2) !important;
+    color: #fff !important;
+}
+
+.dark-theme #conflictSelect option:hover {
+    background-color: rgba(74, 144, 226, 0.2);
 }
 .dark-theme .discount-app .btn {
     background-color: #3b82f6 !important;
@@ -2399,11 +2518,7 @@ html.sidebar-is-collapsed .sidebar-title-full {
     min-height: 180px;
 }
 
-.assignment-card {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
+/* Assignment card styles are now defined above with drag-and-drop support */
 
 .breakdown-row {
     display: flex;

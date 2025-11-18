@@ -308,6 +308,65 @@ const canManagePurchaseLimits = isAdmin || isSalesAdmin;
         </div>
     </div>
 
+    <!-- Discounts Card -->
+    <div class="info-card">
+        <div class="card-header">
+            <h3>Assigned Discounts</h3>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <select id="assignDiscountSelect" class="form-select-modern" style="min-width: 200px; max-width: 300px;">
+                    <option value="">Select discount to assign…</option>
+                    <% if (typeof availableDiscounts !== 'undefined' && availableDiscounts.length > 0) { %>
+                        <% availableDiscounts.forEach(discount => { %>
+                            <option value="<%= discount.id %>"><%= discount.display_name %></option>
+                        <% }); %>
+                    <% } %>
+                </select>
+                <button class="btn btn-primary btn-sm" id="assignDiscountBtn">Assign</button>
+                <a href="/admin/discounts?mode=assignments&buyer=<%= buyer.details.entry_id %>" class="btn btn-secondary btn-sm">
+                    Manage Discounts
+                </a>
+            </div>
+        </div>
+        <div class="card-body">
+            <% if (typeof discountAssignments !== 'undefined' && discountAssignments.length > 0) { %>
+                <div id="discountAssignmentsContainer" class="assignment-list">
+                    <% discountAssignments.forEach(assignment => { %>
+                        <div class="assignment-card" data-assignment-id="<%= assignment.id %>" draggable="true">
+                            <div class="assignment-drag-handle" title="Drag to reorder">
+                                <i class="fas fa-grip-vertical"></i>
+                            </div>
+                            <div class="assignment-content">
+                                <div>
+                                    <strong><%= assignment.display_name || 'N/A' %></strong>
+                                    <div class="label-suffix">
+                                        <code><%= assignment.code_name || 'N/A' %></code>
+                                        <span class="badge bg-info"><%= assignment.stacking_behavior || 'N/A' %></span>
+                                        <span class="badge bg-secondary">Priority: <%= assignment.priority %></span>
+                                    </div>
+                                </div>
+                                <div class="assignment-actions">
+                                    <button class="action-btn" data-edit-assignment="<%= assignment.id %>" 
+                                            data-assignment-discount-id="<%= assignment.fk_discount_id %>"
+                                            data-assignment-name="<%= assignment.display_name || 'N/A' %>"
+                                            title="Edit discount rule">
+                                        <i class="fas fa-edit"></i> Edit
+                                    </button>
+                                    <button class="action-btn action-btn--danger" data-unassign-assignment="<%= assignment.id %>" 
+                                            data-assignment-name="<%= assignment.display_name || 'N/A' %>"
+                                            title="Unassign discount">
+                                        <i class="fas fa-times"></i> Unassign
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    <% }); %>
+                </div>
+            <% } else { %>
+                <p class="empty-state">No discounts assigned to this buyer.</p>
+            <% } %>
+        </div>
+    </div>
+
 </div> <!-- end .profile-main -->
 
 
@@ -360,6 +419,70 @@ const canManagePurchaseLimits = isAdmin || isSalesAdmin;
 <!-- Include the new tag modal partial -->
 <%- include('../../partials/tag-modal') %>
 
+<!-- Discount Assignment Edit Modal -->
+<div class="modal-overlay" id="editAssignmentModal" aria-hidden="true" onclick="handleModalOverlayClick(event)">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="editAssignmentModalTitle" onclick="event.stopPropagation()">
+        <form id="editAssignmentForm" class="styled-form" novalidate>
+            <div class="modal-header">
+                <h3 class="modal-title" id="editAssignmentModalTitle">Edit Discount Rule</h3>
+                <button type="button" class="modal-close-btn" data-close-modal aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editAssignmentId" name="assignment_id">
+                <input type="hidden" id="editRuleId" name="rule_id">
+                <input type="hidden" id="editDiscountId" name="discount_id">
+                <div class="form-group">
+                    <label for="editAssignmentName">Discount Name</label>
+                    <input type="text" id="editAssignmentName" class="form-input-modern" readonly>
+                </div>
+                <div class="discount-modal-grid">
+                    <div class="form-group span-2">
+                        <label>Applies To <span class="required">*</span></label>
+                        <select name="applies_to" id="editRuleAppliesTo" class="form-select-modern" required>
+                            <option value="Entire_Order">Entire Order</option>
+                            <option value="Specific_Category">Specific Category</option>
+                            <option value="Specific_Product">Specific Product</option>
+                        </select>
+                    </div>
+                    <div class="form-group span-2" id="editRuleCategoryField" style="display:none;">
+                        <label>Category</label>
+                        <select name="category_name" id="editRuleCategory" class="form-select-modern">
+                            <option value="">Select category…</option>
+                        </select>
+                    </div>
+                    <div class="form-group span-2" id="editRuleProductField" style="display:none;">
+                        <label>Product</label>
+                        <select name="fk_master_product_id" id="editRuleProduct" class="form-select-modern">
+                            <option value="">Select product…</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Action <span class="required">*</span></label>
+                        <select name="action" id="editRuleAction" class="form-select-modern" required>
+                            <option value="Percentage_Off">Percentage Off</option>
+                            <option value="Fixed_Amount_Off">Fixed Amount Off</option>
+                            <option value="Set_Fixed_Price">Set Fixed Price</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Value <span class="required">*</span></label>
+                        <input type="number" name="value" id="editRuleValue" min="0" step="0.01" inputmode="numeric" required class="form-input-modern">
+                    </div>
+                    <div class="form-group span-2">
+                        <label>Notes / Metadata</label>
+                        <textarea name="metadata" id="editRuleMetadata" rows="2" class="form-input-modern" placeholder='Optional JSON, e.g. {"unit":"gram"}'></textarea>
+                    </div>
+                </div>
+                <div class="alert alert-danger" id="editAssignmentError" style="display:none;"></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-close-modal>Cancel</button>
+                <button type="submit" class="btn btn-primary">Update Rule</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- Purchase Limit Modal -->
 <div class="modal-overlay" id="purchaseLimitModal" aria-hidden="true" onclick="handleModalOverlayClick(event)">
     <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="purchaseLimitModalTitle" onclick="event.stopPropagation()">
@@ -403,6 +526,10 @@ const canManagePurchaseLimits = isAdmin || isSalesAdmin;
 
 <script>
 window.canManagePurchaseLimits = <%= canManagePurchaseLimits ? 'true' : 'false' %>;
+window.CRM_DISCOUNT_DATA = {
+    categories: <%- JSON.stringify(typeof categories !== 'undefined' ? categories : []) %>,
+    products: <%- JSON.stringify(typeof products !== 'undefined' ? products : []) %>
+};
 </script>
 <!-- Include the profile page's specific javascript -->
 <script src="/public/js/admin/buyer-profile.js"></script>

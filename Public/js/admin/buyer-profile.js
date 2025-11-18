@@ -1386,4 +1386,400 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // === DISCOUNT ASSIGNMENTS FUNCTIONALITY ===
+    const buyerId = document.querySelector('[data-buyer-id]')?.dataset?.buyerId || 
+                    window.location.pathname.match(/\/buyers\/(\d+)/)?.[1];
+    
+    if (buyerId) {
+        // Initialize drag-and-drop for discount assignments
+        const assignmentsContainer = document.getElementById('discountAssignmentsContainer');
+        if (assignmentsContainer) {
+            initAssignmentDragAndDrop(assignmentsContainer, buyerId);
+        }
+
+        // Handle assign discount button
+        const assignDiscountBtn = document.getElementById('assignDiscountBtn');
+        const assignDiscountSelect = document.getElementById('assignDiscountSelect');
+        if (assignDiscountBtn && assignDiscountSelect) {
+            assignDiscountBtn.addEventListener('click', async () => {
+                await assignDiscountToBuyer(buyerId);
+            });
+        }
+
+        // Handle edit assignment button clicks - need to get discount ID from assignment card
+        document.querySelectorAll('[data-edit-assignment]').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const assignmentId = btn.dataset.editAssignment;
+                const discountId = btn.dataset.assignmentDiscountId;
+                const name = btn.dataset.assignmentName;
+                if (!discountId) {
+                    if (typeof notify !== 'undefined') {
+                        notify.error('Discount ID not found');
+                    } else {
+                        alert('Discount ID not found');
+                    }
+                    return;
+                }
+                await openEditAssignmentModal(buyerId, assignmentId, discountId, name);
+            });
+        });
+
+        // Handle unassign assignment button clicks
+        document.querySelectorAll('[data-unassign-assignment]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                const assignmentId = btn.dataset.unassignAssignment;
+                const assignmentName = btn.dataset.assignmentName;
+                confirmUnassignAssignment(buyerId, assignmentId, assignmentName);
+            });
+        });
+
+        // Handle edit assignment form submission
+        const editAssignmentForm = document.getElementById('editAssignmentForm');
+        if (editAssignmentForm) {
+            editAssignmentForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                await saveRule(buyerId);
+            });
+        }
+        
+        // Handle applies_to change
+        const editRuleAppliesTo = document.getElementById('editRuleAppliesTo');
+        if (editRuleAppliesTo) {
+            editRuleAppliesTo.addEventListener('change', (e) => {
+                handleEditRuleAppliesChange(e.target.value);
+            });
+        }
+
+        // Close modal handlers
+        document.querySelectorAll('[data-close-modal]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const modal = document.getElementById('editAssignmentModal');
+                if (modal) closeModal(modal);
+            });
+        });
+    }
+
+    async function assignDiscountToBuyer(buyerId) {
+        const select = document.getElementById('assignDiscountSelect');
+        const discountId = parseInt(select.value, 10);
+        
+        if (!discountId) {
+            if (typeof notify !== 'undefined') {
+                notify.error('Please select a discount to assign');
+            } else {
+                alert('Please select a discount to assign');
+            }
+            return;
+        }
+
+        try {
+            const res = await fetch(`/api/v1/discounts/buyers/${buyerId}/assignments`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ discount_id: discountId })
+            });
+            
+            const data = await res.json();
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to assign discount');
+            }
+            
+            // Reset select and reload page to show new assignment
+            select.value = '';
+            window.location.reload();
+        } catch (error) {
+            console.error('Error assigning discount:', error);
+            if (typeof notify !== 'undefined') {
+                notify.error(error.message || 'Failed to assign discount');
+            } else {
+                alert(error.message || 'Failed to assign discount');
+            }
+        }
+    }
+
+    async function openEditAssignmentModal(buyerId, assignmentId, discountId, name) {
+        const modal = document.getElementById('editAssignmentModal');
+        if (!modal) return;
+        
+        document.getElementById('editAssignmentId').value = assignmentId;
+        document.getElementById('editDiscountId').value = discountId;
+        document.getElementById('editAssignmentName').value = name;
+        document.getElementById('editAssignmentError').style.display = 'none';
+        
+        // Fetch discount details with rules
+        try {
+            const res = await fetch(`/api/v1/discounts/codes/${discountId}`);
+            const data = await res.json();
+            if (!data.success || !data.discount) {
+                throw new Error('Failed to load discount details');
+            }
+            
+            const discount = data.discount;
+            const rules = discount.rules || [];
+            
+            // If discount has rules, edit the first one (or we could show a list)
+            if (rules.length > 0) {
+                const rule = rules[0]; // Edit first rule
+                populateRuleModal(rule);
+            } else {
+                // No rules, show empty form
+                resetRuleModal();
+            }
+            
+            openModal(modal);
+        } catch (error) {
+            console.error('Error loading discount:', error);
+            if (typeof notify !== 'undefined') {
+                notify.error('Failed to load discount details');
+            } else {
+                alert('Failed to load discount details');
+            }
+        }
+    }
+    
+    function populateRuleModal(rule) {
+        document.getElementById('editRuleId').value = rule.id || '';
+        document.getElementById('editRuleAppliesTo').value = rule.applies_to || 'Entire_Order';
+        document.getElementById('editRuleAction').value = rule.action || 'Percentage_Off';
+        document.getElementById('editRuleValue').value = rule.value || '';
+        
+        if (rule.category_name) {
+            document.getElementById('editRuleCategory').value = rule.category_name;
+        }
+        if (rule.fk_master_product_id) {
+            document.getElementById('editRuleProduct').value = rule.fk_master_product_id;
+        }
+        if (rule.metadata) {
+            const metadataValue = typeof rule.metadata === 'string' ? rule.metadata : JSON.stringify(rule.metadata);
+            document.getElementById('editRuleMetadata').value = metadataValue;
+        }
+        
+        // Handle applies_to change to show/hide fields
+        handleEditRuleAppliesChange(rule.applies_to);
+        
+        // Populate dropdowns
+        populateEditRuleDropdowns();
+    }
+    
+    function resetRuleModal() {
+        document.getElementById('editRuleId').value = '';
+        document.getElementById('editRuleAppliesTo').value = 'Entire_Order';
+        document.getElementById('editRuleAction').value = 'Percentage_Off';
+        document.getElementById('editRuleValue').value = '';
+        document.getElementById('editRuleCategory').value = '';
+        document.getElementById('editRuleProduct').value = '';
+        document.getElementById('editRuleMetadata').value = '';
+        handleEditRuleAppliesChange('Entire_Order');
+        populateEditRuleDropdowns();
+    }
+    
+    function handleEditRuleAppliesChange(value) {
+        const appliesTo = value || document.getElementById('editRuleAppliesTo').value;
+        document.getElementById('editRuleCategoryField').style.display = appliesTo === 'Specific_Category' ? 'block' : 'none';
+        document.getElementById('editRuleProductField').style.display = appliesTo === 'Specific_Product' ? 'block' : 'none';
+    }
+    
+    function populateEditRuleDropdowns() {
+        const crmData = window.CRM_DISCOUNT_DATA || {};
+        const categories = crmData.categories || [];
+        const products = crmData.products || [];
+        
+        const categorySelect = document.getElementById('editRuleCategory');
+        if (categorySelect) {
+            categorySelect.innerHTML = '<option value="">Select category…</option>' + 
+                categories.map(cat => `<option value="${cat}">${cat}</option>`).join('');
+        }
+        
+        const productSelect = document.getElementById('editRuleProduct');
+        if (productSelect) {
+            productSelect.innerHTML = '<option value="">Select product…</option>' + 
+                products.map(p => `<option value="${p.product_id}">${p.name || p.product_id}</option>`).join('');
+        }
+    }
+
+    async function saveRule(buyerId) {
+        const ruleId = document.getElementById('editRuleId').value;
+        const discountId = document.getElementById('editDiscountId').value;
+        const errorDiv = document.getElementById('editAssignmentError');
+        
+        if (!discountId) {
+            errorDiv.textContent = 'Discount ID is missing';
+            errorDiv.style.display = 'block';
+            return;
+        }
+        
+        const formData = new FormData(document.getElementById('editAssignmentForm'));
+        const payload = {
+            applies_to: formData.get('applies_to'),
+            action: formData.get('action'),
+            value: parseFloat(formData.get('value')),
+            category_name: formData.get('category_name') || null,
+            fk_master_product_id: formData.get('fk_master_product_id') || null,
+            metadata: formData.get('metadata') || null
+        };
+        
+        if (Number.isNaN(payload.value)) {
+            errorDiv.textContent = 'Value must be a number';
+            errorDiv.style.display = 'block';
+            return;
+        }
+        
+        if (payload.metadata) {
+            try {
+                payload.metadata = JSON.parse(payload.metadata);
+            } catch (err) {
+                errorDiv.textContent = 'Metadata must be valid JSON';
+                errorDiv.style.display = 'block';
+                return;
+            }
+        }
+        
+        if (payload.fk_master_product_id) {
+            payload.fk_master_product_id = parseInt(payload.fk_master_product_id, 10);
+        }
+
+        try {
+            let res;
+            if (ruleId) {
+                // Update existing rule
+                res = await fetch(`/api/v1/discounts/rules/${ruleId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            } else {
+                // Create new rule
+                res = await fetch(`/api/v1/discounts/codes/${discountId}/rules`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+            }
+            
+            const data = await res.json();
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to save rule');
+            }
+            
+            // Reload the page to show updated data
+            window.location.reload();
+        } catch (error) {
+            errorDiv.textContent = error.message || 'Failed to save rule';
+            errorDiv.style.display = 'block';
+        }
+    }
+
+    function initAssignmentDragAndDrop(container, buyerId) {
+        let draggedElement = null;
+        
+        container.querySelectorAll('.assignment-card').forEach((item) => {
+            item.addEventListener('dragstart', (e) => {
+                draggedElement = item;
+                item.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+            });
+            
+            item.addEventListener('dragend', async () => {
+                item.classList.remove('dragging');
+                if (draggedElement) {
+                    await saveAssignmentOrder(container, buyerId);
+                }
+                draggedElement = null;
+            });
+            
+            item.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                
+                const afterElement = getDragAfterElement(container, e.clientY, '.assignment-card');
+                if (afterElement == null) {
+                    container.appendChild(draggedElement);
+                } else {
+                    container.insertBefore(draggedElement, afterElement);
+                }
+            });
+            
+            item.addEventListener('drop', (e) => {
+                e.preventDefault();
+            });
+        });
+    }
+
+    function getDragAfterElement(container, y, selector) {
+        const draggableElements = [...container.querySelectorAll(`${selector}:not(.dragging)`)];
+        
+        return draggableElements.reduce((closest, child) => {
+            const box = child.getBoundingClientRect();
+            const offset = y - box.top - box.height / 2;
+            
+            if (offset < 0 && offset > closest.offset) {
+                return { offset: offset, element: child };
+            } else {
+                return closest;
+            }
+        }, { offset: Number.NEGATIVE_INFINITY }).element;
+    }
+
+    async function saveAssignmentOrder(container, buyerId) {
+        const assignments = Array.from(container.querySelectorAll('.assignment-card'));
+        const ordering = assignments.map(card => parseInt(card.dataset.assignmentId, 10));
+        
+        try {
+            const res = await fetch(`/api/v1/discounts/buyers/${buyerId}/assignments/reorder`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ordering })
+            });
+            
+            const data = await res.json();
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to reorder assignments');
+            }
+            
+            // Reload to show updated priorities
+            window.location.reload();
+        } catch (error) {
+            console.error('Error saving assignment order:', error);
+            if (typeof notify !== 'undefined') {
+                notify.error('Failed to save order. Please refresh the page.');
+            } else {
+                alert('Failed to save order. Please refresh the page.');
+            }
+        }
+    }
+
+    function confirmUnassignAssignment(buyerId, assignmentId, assignmentName) {
+        if (!confirm(`Are you sure you want to unassign "${assignmentName}" from this buyer?`)) {
+            return;
+        }
+        
+        unassignDiscount(buyerId, assignmentId);
+    }
+
+    async function unassignDiscount(buyerId, assignmentId) {
+        try {
+            const res = await fetch(`/api/v1/discounts/buyers/${buyerId}/assignments/${assignmentId}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            const data = await res.json();
+            if (!data.success) {
+                throw new Error(data.error || 'Failed to unassign discount');
+            }
+            
+            // Reload page to show updated assignments
+            window.location.reload();
+        } catch (error) {
+            console.error('Error unassigning discount:', error);
+            if (typeof notify !== 'undefined') {
+                notify.error(error.message || 'Failed to unassign discount');
+            } else {
+                alert(error.message || 'Failed to unassign discount');
+            }
+        }
+    }
 });

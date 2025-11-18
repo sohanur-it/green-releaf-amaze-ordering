@@ -1,0 +1,26 @@
+{
+  "watch": [
+    "Server",
+    "Views",
+    "Public/js",
+    "Public/css"
+  ],
+  "ext": "js,ejs,json",
+  "ignore": [
+    "node_modules",
+    "cache",
+    "*.log",
+    "*.sql",
+    "docker",
+    "scripts",
+    "tests",
+    "docs",
+    "config/*.env",
+    "Public/lib",
+    "Public/images",
+    "Public/product"
+  ],
+  "delay": 1000,
+  "verbose": false
+}
+
