@@ -2026,7 +2026,8 @@ class PortalController {
                     l.line_two,
                     l.city,
                     l.state,
-                    l.zip as zip_code
+                    l.zip as zip_code,
+                    l.state_license
                 FROM "ORDERS-buyer_locations" l
                 WHERE l.entry_id = $1
             `, [portalAccess.locationId]);

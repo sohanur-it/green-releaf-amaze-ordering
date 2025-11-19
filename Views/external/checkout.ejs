@@ -177,11 +177,13 @@
                     <% if (locations && locations.length > 0) { %>
                         <% locations.forEach(loc => { %>
                             <option value="<%= loc.location_id %>" 
+                                    data-name="<%= loc.name || '' %>"
                                     data-line-one="<%= loc.line_one || '' %>"
                                     data-line-two="<%= loc.line_two || '' %>"
                                     data-city="<%= loc.city || '' %>"
                                     data-state="<%= loc.state || '' %>"
                                     data-zip="<%= loc.zip || '' %>"
+                                    data-state-license="<%= loc.state_license || '' %>"
                                     <%= (portalAccess && portalAccess.locationId == loc.location_id) ? 'selected' : '' %>>
                                 <%= loc.name %><% if (loc.state_license) { %> | <%= loc.state_license %><% } %>
                             </option>
@@ -194,11 +196,11 @@
                 <div class="shipping-form-grid">
                     <div class="form-group">
                         <label for="ship-to">Ship To</label>
-                        <input type="text" id="ship-to" name="ship_to" value="Green Releaf">
+                        <input type="text" id="ship-to" name="ship_to" value="<%= currentLocationName || shippingAddress.name || '' %>">
                     </div>
                     <div class="form-group">
                         <label for="state-license">State License Number</label>
-                        <input type="text" id="state-license" name="state_license">
+                        <input type="text" id="state-license" name="state_license" value="<%= shippingAddress.state_license || '' %>">
                     </div>
                     <div class="form-group full-width">
                         <label for="address-line-one">Address Line One</label>
@@ -743,6 +745,10 @@ async function handleLocationChange(locationId) {
     const selectedOption = select.options[select.selectedIndex];
     
     if (selectedOption && selectedOption.value) {
+        // Update ship-to name and state license when location is selected
+        document.getElementById('ship-to').value = selectedOption.getAttribute('data-name') || '';
+        document.getElementById('state-license').value = selectedOption.getAttribute('data-state-license') || '';
+        
         // Update address fields when location is selected
         document.getElementById('address-line-one').value = selectedOption.getAttribute('data-line-one') || '';
         document.getElementById('address-line-two').value = selectedOption.getAttribute('data-line-two') || '';
