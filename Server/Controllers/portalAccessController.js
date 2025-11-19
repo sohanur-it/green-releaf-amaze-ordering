@@ -66,8 +66,19 @@ class PortalAccessController {
             
             const locationAccessCode = locationResult.rows[0].access_code;
             
+            // Validation: Prevent portal access creation without a valid UUID access_code
             if (!locationAccessCode) {
-                return res.status(400).json({ error: 'Location does not have an access_code' });
+                return res.status(400).json({ 
+                    error: 'Cannot create portal access: Location does not have an access_code. Please ensure the location has a valid UUID access_code before creating portal access.' 
+                });
+            }
+            
+            // Validate that access_code is a valid UUID format
+            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+            if (!uuidRegex.test(locationAccessCode)) {
+                return res.status(400).json({ 
+                    error: 'Cannot create portal access: Location access_code is not a valid UUID format. Please ensure the location has a valid UUID access_code.' 
+                });
             }
             
             // Check if portal access already exists for this location

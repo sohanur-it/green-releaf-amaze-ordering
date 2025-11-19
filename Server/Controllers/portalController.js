@@ -346,8 +346,16 @@ class PortalController {
                                 // Get the location's access_code from CRM
                                 const locationAccessCode = rawLocation.access_code;
                                 
+                                // Validation: Prevent portal access creation without a valid UUID access_code
                                 if (!locationAccessCode) {
-                                    console.error(`Location ${locationId} does not have an access_code`);
+                                    console.error(`Location ${locationId} does not have an access_code. Cannot create portal access.`);
+                                    continue;
+                                }
+                                
+                                // Validate that access_code is a valid UUID format
+                                const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                                if (!uuidRegex.test(locationAccessCode)) {
+                                    console.error(`Location ${locationId} has an invalid access_code format. Cannot create portal access.`);
                                     continue;
                                 }
                                 
@@ -1920,8 +1928,16 @@ class PortalController {
                                 // Get the location's access_code from CRM
                                 const locationAccessCode = rawLocation.access_code;
                                 
+                                // Validation: Prevent portal access creation without a valid UUID access_code
                                 if (!locationAccessCode) {
-                                    console.error(`Location ${locationId} does not have an access_code`);
+                                    console.error(`Location ${locationId} does not have an access_code. Cannot create portal access.`);
+                                    continue;
+                                }
+                                
+                                // Validate that access_code is a valid UUID format
+                                const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+                                if (!uuidRegex.test(locationAccessCode)) {
+                                    console.error(`Location ${locationId} has an invalid access_code format. Cannot create portal access.`);
                                     continue;
                                 }
                                 

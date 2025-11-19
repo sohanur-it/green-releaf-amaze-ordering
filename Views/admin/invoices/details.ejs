@@ -293,8 +293,31 @@
                 </button>
             </div>
         </div>
-        <div style="text-align: right; margin-top: 1rem; font-size: 1.2rem; color: var(--text-color);">
-            <strong>Total: $<%= parseFloat(invoice.total || 0).toFixed(2) %></strong>
+        
+        <!-- Invoice Totals Breakdown -->
+        <div style="margin-top: 2rem; padding-top: 1.5rem; border-top: 2px solid var(--border-color, #dee2e6);">
+            <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 0.75rem;">
+                <div style="display: flex; justify-content: space-between; width: 100%; max-width: 400px;">
+                    <span style="color: var(--text-color); font-weight: 500;">Subtotal:</span>
+                    <span style="color: var(--text-color);">$<%= parseFloat(invoice.subtotal || 0).toFixed(2) %></span>
+                </div>
+                <% if (parseFloat(invoice.discount_amount || 0) > 0) { %>
+                <div style="display: flex; justify-content: space-between; width: 100%; max-width: 400px;">
+                    <span style="color: #10b981; font-weight: 500;">Discounts:</span>
+                    <span style="color: #10b981;">-$<%= parseFloat(invoice.discount_amount || 0).toFixed(2) %></span>
+                </div>
+                <% } %>
+                <% if (parseFloat(invoice.credit_applied || 0) > 0) { %>
+                <div style="display: flex; justify-content: space-between; width: 100%; max-width: 400px;">
+                    <span style="color: #10b981; font-weight: 600;">Credits Applied:</span>
+                    <span style="color: #10b981; font-weight: 600;">-$<%= parseFloat(invoice.credit_applied || 0).toFixed(2) %></span>
+                </div>
+                <% } %>
+                <div style="display: flex; justify-content: space-between; width: 100%; max-width: 400px; margin-top: 0.5rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color, #dee2e6);">
+                    <span style="color: var(--text-color); font-weight: 700; font-size: 1.1rem;">Total:</span>
+                    <span style="color: var(--text-color); font-weight: 700; font-size: 1.1rem;">$<%= parseFloat(invoice.total || 0).toFixed(2) %></span>
+                </div>
+            </div>
         </div>
     <% } else { %>
         <p>No line items</p>

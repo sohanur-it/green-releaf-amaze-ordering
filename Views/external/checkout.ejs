@@ -232,13 +232,11 @@
                 <div class="payment-illustration">
                     <div class="illustration-icon">🏪</div>
                 </div>
-                <div class="terms-text">Terms: Net 15</div>
-                <button class="sign-in-btn">Sign In</button>
                 <div class="final-total">
                     Final Total: <span class="final-total-amount">$<%= cart && cart.total ? parseFloat(cart.total).toFixed(2) : '0.00' %></span>
                 </div>
                 <button id="place-order-btn" class="place-order-guest-btn" onclick="placeOrder()" <%= (!cart || !cart.items || cart.items.length === 0) ? 'disabled' : '' %>>
-                    <span class="button-text">Place Order As Guest</span>
+                    <span class="button-text">Checkout</span>
                 </button>
             </div>
         </div>
