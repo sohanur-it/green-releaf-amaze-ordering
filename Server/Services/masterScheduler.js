@@ -132,8 +132,8 @@ class MasterScheduler {
             }
         }
 
-        // Schedule cart cleanup job (every hour, 24/7)
-        const cartCleanupJob = cron.schedule('0 * * * *', async () => {
+        // Schedule cart cleanup job (every 5 minutes, 24/7) - more frequent for immediate cleanup
+        const cartCleanupJob = cron.schedule('*/5 * * * *', async () => {
             try {
                 console.log('🧹 Running cart cleanup job...');
                 const result = await cartCleanupService.cleanupExpiredCarts();

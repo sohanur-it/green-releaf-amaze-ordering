@@ -1,5 +1,82 @@
 /* External Buyer Portal Styles - Dark Theme E-commerce Design */
 
+/* Cart Expiration Warning */
+.cart-expiration-warning {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    border: 1px solid #f59e0b;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 16px;
+    display: none;
+    animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.expiration-warning-content {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.expiration-warning-icon {
+    font-size: 24px;
+    flex-shrink: 0;
+}
+
+.expiration-warning-text {
+    flex: 1;
+    min-width: 200px;
+}
+
+.expiration-warning-text strong {
+    display: block;
+    color: #ffffff;
+    font-size: 16px;
+    margin-bottom: 4px;
+}
+
+.expiration-warning-text p {
+    margin: 0;
+    color: #fef3c7;
+    font-size: 14px;
+}
+
+.extend-cart-btn {
+    background: #ffffff;
+    color: #d97706;
+    border: none;
+    border-radius: 6px;
+    padding: 10px 20px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.extend-cart-btn:hover {
+    background: #fef3c7;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.extend-cart-btn:active {
+    transform: translateY(0);
+}
+
+/* External Buyer Portal Styles - Dark Theme E-commerce Design */
+
 :root {
     --portal-bg-dark: #0f0f0f;
     --portal-bg-secondary: #1a1a1a;

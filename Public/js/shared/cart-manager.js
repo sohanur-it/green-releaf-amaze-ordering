@@ -9,6 +9,15 @@ class CartManager {
         this.cart = this.loadCart();
         this.inventoryCache = {}; // Cache inventory data from backend
         this.lastBackendSyncAt = 0;
+        // Cart expiration tracking
+        this.cartExpiresAt = null;
+        this.cartStartedAt = null;
+        this.extendedUntil = null;
+        this.cartExtended = false;
+        this.expirationCheckInterval = null;
+        this.warningCheckInterval = null;
+        // Start expiration checking
+        this.startExpirationCheck();
     }
 
     // Load cart from localStorage
@@ -140,7 +149,306 @@ class CartManager {
     // Clear cart
     clearCart() {
         this.cart = { items: [], subtotal: 0, total: 0 };
+        this.cartExpiresAt = null;
+        this.cartStartedAt = null;
+        this.extendedUntil = null;
+        this.cartExtended = false;
         this.saveCart();
+        window.dispatchEvent(new CustomEvent('cartChanged'));
+    }
+    
+    // Check if cart has expired
+    isCartExpired() {
+        if (!this.cartExpiresAt) {
+            return false;
+        }
+        return new Date() >= new Date(this.cartExpiresAt);
+    }
+    
+    // Get hours until expiration
+    getHoursUntilExpiration() {
+        if (!this.cartExpiresAt) {
+            return null;
+        }
+        const now = new Date();
+        const expiresAt = new Date(this.cartExpiresAt);
+        const diff = expiresAt.getTime() - now.getTime();
+        if (diff <= 0) {
+            return 0; // Already expired
+        }
+        return diff / (1000 * 60 * 60); // Convert to hours
+    }
+    
+    // Check if we should show expiration warning (6 hours or less remaining)
+    shouldShowExpirationWarning() {
+        // Must have items and expiration time set
+        if (!this.cartExpiresAt || !this.cart || !this.cart.items || this.cart.items.length === 0) {
+            return false;
+        }
+        
+        // Check if expired - don't show warning if already expired
+        if (this.isCartExpired()) {
+            return false;
+        }
+        
+        const hoursRemaining = this.getHoursUntilExpiration();
+        if (hoursRemaining === null || hoursRemaining <= 0) {
+            return false;
+        }
+        
+        // Show warning ONLY when 6 hours or less remain
+        // After extension, if new expiry is more than 6 hours, this will return false
+        return hoursRemaining <= 6;
+    }
+    
+    // Check if cart can be extended (not already extended, and within 48-hour limit)
+    canExtendCart() {
+        if (this.cartExtended) {
+            return false; // Already extended
+        }
+        if (!this.extendedUntil) {
+            return true; // Can't check limit, allow extension
+        }
+        const now = new Date();
+        const maxExpiry = new Date(this.extendedUntil);
+        return now < maxExpiry; // Can extend if we haven't reached max
+    }
+    
+    // Start periodic expiration checking
+    startExpirationCheck() {
+        // Clear any existing intervals
+        if (this.expirationCheckInterval) {
+            clearInterval(this.expirationCheckInterval);
+        }
+        if (this.warningCheckInterval) {
+            clearInterval(this.warningCheckInterval);
+        }
+        
+        // Check expiration every 60 seconds
+        this.expirationCheckInterval = setInterval(() => {
+            this.checkExpiration();
+        }, 60000);
+        
+        // Check warning display every 60 seconds
+        this.warningCheckInterval = setInterval(() => {
+            this.updateExpirationWarning();
+        }, 60000);
+        
+        // Initial check
+        setTimeout(() => {
+            this.checkExpiration();
+            this.updateExpirationWarning();
+        }, 2000);
+    }
+    
+    // Check expiration and clear silently if expired
+    async checkExpiration() {
+        // Always check backend for latest expiration status
+        try {
+            const response = await fetch(`/api/portal/${this.uuid}/cart`);
+            if (response.ok) {
+                const data = await response.json();
+                
+                // Update expiration data from backend
+                if (data.cart_expires_at) {
+                    this.cartExpiresAt = new Date(data.cart_expires_at);
+                } else {
+                    this.cartExpiresAt = null;
+                }
+                
+                if (data.cart_started_at) {
+                    this.cartStartedAt = new Date(data.cart_started_at);
+                }
+                
+                if (data.extended_until) {
+                    this.extendedUntil = new Date(data.extended_until);
+                }
+                
+                this.cartExtended = data.cart_extended || false;
+                
+                // Update cart items from backend to ensure we have latest data
+                if (data.items && Array.isArray(data.items)) {
+                    this.cart.items = data.items;
+                }
+                
+                // Check if expired - clear silently (no warnings, no popups)
+                if (this.isCartExpired()) {
+                    console.log('Cart expired - clearing silently');
+                    this.clearCart();
+                    window.dispatchEvent(new CustomEvent('cartExpired', { detail: { silent: true } }));
+                    return;
+                }
+                
+                // Update warning after checking expiration
+                this.updateExpirationWarning();
+            }
+        } catch (e) {
+            console.error('Error checking cart expiration:', e);
+        }
+        
+        // Also check local expiration
+        if (this.isCartExpired()) {
+            console.log('Cart expired (local check) - clearing silently');
+            this.clearCart();
+            window.dispatchEvent(new CustomEvent('cartExpired', { detail: { silent: true } }));
+        }
+    }
+    
+    // Update expiration warning display
+    updateExpirationWarning() {
+        // Only show warning if cart has items and expiration is set
+        if (!this.shouldShowExpirationWarning()) {
+            // Hide warning (cart empty, no expiration, or more than 6 hours remaining)
+            const warningDiv = document.getElementById('cart-expiration-warning');
+            if (warningDiv) {
+                warningDiv.style.display = 'none';
+            }
+            return;
+        }
+        
+        const hoursRemaining = this.getHoursUntilExpiration();
+        if (hoursRemaining === null || hoursRemaining <= 0) {
+            // Hide warning if expired
+            const warningDiv = document.getElementById('cart-expiration-warning');
+            if (warningDiv) {
+                warningDiv.style.display = 'none';
+            }
+            return;
+        }
+        
+        // Show warning only if 6 hours or less remaining
+        // After extension, if new expiry is more than 6 hours, warning will be hidden
+        if (hoursRemaining > 6) {
+            // More than 6 hours - hide warning
+            const warningDiv = document.getElementById('cart-expiration-warning');
+            if (warningDiv) {
+                warningDiv.style.display = 'none';
+            }
+            return;
+        }
+        
+        // Show warning (6 hours or less remaining)
+        this.renderExpirationWarning(hoursRemaining);
+    }
+    
+    // Render expiration warning in cart UI
+    renderExpirationWarning(hoursRemaining) {
+        // Find the cart sidebar or cart container
+        const cartItemsDiv = document.getElementById('cart-items');
+        if (!cartItemsDiv) {
+            console.log('Cart items div not found, cannot show warning');
+            return;
+        }
+        
+        let warningDiv = document.getElementById('cart-expiration-warning');
+        
+        if (!warningDiv) {
+            // Create warning element if it doesn't exist
+            warningDiv = document.createElement('div');
+            warningDiv.id = 'cart-expiration-warning';
+            warningDiv.className = 'cart-expiration-warning';
+            // Insert before cart items
+            cartItemsDiv.parentNode.insertBefore(warningDiv, cartItemsDiv);
+        }
+        
+        const hours = Math.floor(hoursRemaining);
+        const minutes = Math.floor((hoursRemaining - hours) * 60);
+        const hoursText = hours === 1 ? 'hour' : 'hours';
+        const minutesText = minutes === 1 ? 'minute' : 'minutes';
+        const canExtend = this.canExtendCart();
+        
+        let timeText = '';
+        if (hours > 0 && minutes > 0) {
+            timeText = `${hours} ${hoursText} ${minutes} ${minutesText}`;
+        } else if (hours > 0) {
+            timeText = `${hours} ${hoursText}`;
+        } else if (minutes > 0) {
+            timeText = `${minutes} ${minutesText}`;
+        } else {
+            timeText = 'less than a minute';
+        }
+        
+        warningDiv.innerHTML = `
+            <div class="expiration-warning-content">
+                <div class="expiration-warning-icon">⏰</div>
+                <div class="expiration-warning-text">
+                    <strong>Cart expires in ${timeText}</strong>
+                    <p>Your cart will be cleared automatically when it expires.</p>
+                </div>
+                ${canExtend ? `
+                    <button class="extend-cart-btn" onclick="extendCart()">
+                        Extend Cart
+                    </button>
+                ` : ''}
+            </div>
+        `;
+        warningDiv.style.display = 'block';
+        console.log(`⚠️ Showing expiration warning: ${timeText} remaining, can extend: ${canExtend}`);
+    }
+    
+    // Extend cart expiry
+    async extendCart() {
+        try {
+            const response = await fetch(`/api/portal/${this.uuid}/cart/extend`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                // Update expiration time immediately
+                if (data.cart_expires_at) {
+                    const oldExpiry = this.cartExpiresAt;
+                    this.cartExpiresAt = new Date(data.cart_expires_at);
+                    this.cartExtended = true;
+                    
+                    const hoursRemaining = this.getHoursUntilExpiration();
+                    console.log(`✅ Cart extended: ${oldExpiry ? oldExpiry.toISOString() : 'N/A'} → ${this.cartExpiresAt.toISOString()} (${hoursRemaining ? hoursRemaining.toFixed(1) : 'N/A'} hours remaining)`);
+                    
+                    // CRITICAL: Update warning immediately with new expiry time
+                    // This ensures warning is hidden if new expiry is > 6 hours
+                    this.updateExpirationWarning();
+                }
+                
+                // Reload from backend to get updated data (including extended_until)
+                await this.loadFromBackend(true, 0);
+                
+                // Update warning again after backend sync to ensure consistency
+                this.updateExpirationWarning();
+                
+                // Also trigger a render to update the UI immediately
+                window.dispatchEvent(new CustomEvent('cartChanged'));
+                
+                // Show success notification with new expiry time
+                if (typeof window.showNotification === 'function') {
+                    const hoursRemaining = this.getHoursUntilExpiration();
+                    if (hoursRemaining && hoursRemaining > 6) {
+                        // More than 6 hours - warning is hidden, show success message
+                        window.showNotification(`Cart extended successfully. Expires in ${Math.floor(hoursRemaining)} hours.`, 'success');
+                    } else if (hoursRemaining && hoursRemaining > 0) {
+                        // Still within 6 hours - warning will show updated time
+                        const hours = Math.floor(hoursRemaining);
+                        const minutes = Math.floor((hoursRemaining - hours) * 60);
+                        window.showNotification(`Cart extended. Expires in ${hours}h ${minutes}m.`, 'success');
+                    } else {
+                        window.showNotification('Cart extended successfully', 'success');
+                    }
+                }
+                
+                return { success: true };
+            } else {
+                const error = await response.json();
+                throw new Error(error.error || 'Failed to extend cart');
+            }
+        } catch (e) {
+            console.error('Error extending cart:', e);
+            if (typeof window.showNotification === 'function') {
+                window.showNotification(e.message || 'Failed to extend cart', 'error');
+            }
+            return { success: false, error: e.message };
+        }
     }
 
     // Get cart data
@@ -353,6 +661,35 @@ class CartManager {
                     image_url: item.image_url || item.primary_image_url || '/public/images/placeholder.jpg'
                 })) : [];
                 
+                // Update expiration data from backend
+                if (data.cart_expires_at) {
+                    this.cartExpiresAt = new Date(data.cart_expires_at);
+                } else {
+                    this.cartExpiresAt = null;
+                }
+                
+                if (data.cart_started_at) {
+                    this.cartStartedAt = new Date(data.cart_started_at);
+                }
+                
+                if (data.extended_until) {
+                    this.extendedUntil = new Date(data.extended_until);
+                }
+                
+                this.cartExtended = data.cart_extended || false;
+                
+                // Check if expired - clear silently (no warnings, no popups)
+                if (this.isCartExpired()) {
+                    console.log('Cart expired in backend - clearing silently');
+                    this.clearCart();
+                    // Update warning display after clearing
+                    setTimeout(() => this.updateExpirationWarning(), 100);
+                    return true;
+                }
+                
+                // Update warning display after loading cart data
+                setTimeout(() => this.updateExpirationWarning(), 100);
+                
                 const frontendHasItems = this.cart.items && this.cart.items.length > 0;
                 const backendHasItems = items && items.length > 0;
                 const backendHasInvoice = data.invoice_id !== null && data.invoice_id !== undefined;
@@ -437,5 +774,20 @@ function initCartManager(uuid) {
 // Get cart manager instance
 function getCartManager() {
     return cartManager;
+}
+
+// Global function to extend cart (called from UI)
+if (typeof window !== 'undefined') {
+    window.extendCart = async function() {
+        const cart = getCartManager();
+        if (!cart) {
+            console.error('Cart manager not initialized');
+            if (typeof window.showNotification === 'function') {
+                window.showNotification('Cart not available', 'error');
+            }
+            return;
+        }
+        await cart.extendCart();
+    };
 }
 

@@ -81,7 +81,28 @@ class CartCleanupService {
 
             console.log(`🧹 Cleaning expired cart ${cartId}...`);
 
-            // Release all allocations
+            // Get buyer_id and location_id for WebSocket broadcast before deletion
+            const cartInfo = await client.query(`
+                SELECT fk_buyer_id, fk_location_id
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [cartId]);
+            
+            const buyerId = cartInfo.rows[0]?.fk_buyer_id;
+            const locationId = cartInfo.rows[0]?.fk_location_id;
+
+            // Get ALL line items (with their batch_ids) BEFORE deleting them
+            // We need to broadcast inventory updates for ALL batches in the cart
+            // Get distinct batch IDs that were in the cart
+            const lineItems = await client.query(`
+                SELECT DISTINCT fk_batch_id as batch_id,
+                       SUM(quantity_allocated) as total_allocated
+                FROM "ORDERS-invoice-line-items"
+                WHERE fk_invoice_id = $1
+                GROUP BY fk_batch_id
+            `, [cartId]);
+
+            // Release all allocations (updates database within transaction)
             await this.releaseAllAllocations(cartId, client);
 
             // Delete line items
@@ -90,15 +111,72 @@ class CartCleanupService {
                 WHERE fk_invoice_id = $1
             `, [cartId]);
 
-            // Delete invoice
-            await client.query(`
+            // Delete invoice completely from database (silent - no warnings)
+            // This permanently removes the invoice record
+            const deleteResult = await client.query(`
                 DELETE FROM "ORDERS-invoices"
                 WHERE id = $1
+                RETURNING id, invoice_number
             `, [cartId]);
+            
+            if (deleteResult.rows.length === 0) {
+                // Invoice was already deleted (race condition)
+                if (shouldCommit) await client.query('COMMIT');
+                return { skipped: true, reason: 'already_deleted' };
+            }
+            
+            console.log(`🗑️  Invoice ${cartId} (${deleteResult.rows[0].invoice_number}) deleted from database`);
 
             if (shouldCommit) await client.query('COMMIT');
+            
+            // CRITICAL: Broadcast inventory updates AFTER transaction commits
+            // This ensures inventory is properly updated and visible to all clients
+            // Use websocketService directly (same as manual cart clearing) for consistency
+            const websocketService = require('./websocketService');
+            const allocationService = require('./allocationService');
+            
+            // Broadcast inventory update for each unique batch that was in the cart
+            console.log(`📡 Preparing to broadcast inventory updates for ${lineItems.rows.length} batch(es) after cart expiration`);
+            
+            for (const item of lineItems.rows) {
+                // Handle both fk_batch_id and batch_id column names
+                const batchId = item.batch_id || item.fk_batch_id;
+                if (!batchId) {
+                    console.warn(`⚠️  Skipping inventory broadcast - no batch_id found in item:`, item);
+                    continue;
+                }
+                
+                try {
+                    // Get the current available quantity after allocation was released
+                    const newAvailable = await allocationService.getAvailableQuantity(batchId);
+                    
+                    console.log(`📦 Batch ${batchId}: Releasing ${item.total_allocated || 0} allocated, new available: ${newAvailable}`);
+                    
+                    // Broadcast the inventory update using websocketService directly
+                    // This matches the pattern used in removeFromCart for consistency
+                    await websocketService.broadcastInventoryUpdate(batchId, newAvailable);
+                    
+                    console.log(`✅ Broadcasted inventory update: Batch ${batchId} now has ${newAvailable} available (cart expired)`);
+                } catch (broadcastError) {
+                    console.error(`❌ Failed to broadcast inventory for batch ${batchId}:`, broadcastError.message);
+                }
+            }
 
-            console.log(`✅ Expired cart ${cartId} cleaned successfully`);
+            // Broadcast invoice deletion via WebSocket (after commit)
+            try {
+                const websocketService = require('./websocketService');
+                await websocketService.broadcastInvoiceEvent(cartId, 'invoice_deleted', {
+                    buyer_id: buyerId,
+                    location_id: locationId,
+                    reason: 'cart_expired',
+                    triggered_by: 'system',
+                    cart_expired: true
+                });
+            } catch (wsError) {
+                console.error('WebSocket broadcast error (non-critical):', wsError.message);
+            }
+
+            console.log(`✅ Expired cart ${cartId} cleaned successfully (silent deletion)`);
             return { success: true, cart_id: cartId };
         } catch (error) {
             if (shouldCommit) await client.query('ROLLBACK');
@@ -110,27 +188,59 @@ class CartCleanupService {
     }
 
     /**
-     * Release all allocations for an invoice
+     * Release all allocations for an invoice (within transaction)
+     * Inventory broadcasting happens AFTER transaction commits
      * @param {number} invoiceId - Invoice ID
-     * @param {Object} client - Database client
+     * @param {Object} client - Database client (transaction context)
      */
     async releaseAllAllocations(invoiceId, client) {
         try {
             // Get all line items with allocations
+            // CRITICAL: Get ALL items, even if quantity_allocated is 0, to ensure we process everything
             const lineItems = await client.query(`
                 SELECT id, fk_batch_id, quantity_allocated
                 FROM "ORDERS-invoice-line-items"
-                WHERE fk_invoice_id = $1 AND quantity_allocated > 0
+                WHERE fk_invoice_id = $1
+                AND quantity_allocated > 0
             `, [invoiceId]);
 
-            // Release each allocation
+            if (lineItems.rows.length === 0) {
+                console.log(`No allocations to release for invoice ${invoiceId}`);
+                return;
+            }
+
+            // Release each allocation within the transaction
+            // Note: Broadcasting happens AFTER commit in clearExpiredCart
             for (const item of lineItems.rows) {
-                // Decrement allocated_quantity on batch
-                await client.query(`
+                // Lock batch for update
+                const batch = await client.query(`
+                    SELECT allocated_quantity FROM "ORDERS-batches"
+                    WHERE id = $1
+                    FOR UPDATE
+                `, [item.fk_batch_id]);
+
+                if (batch.rows.length === 0) continue;
+
+                const currentAllocated = batch.rows[0].allocated_quantity;
+
+                // Decrement allocated_quantity on batch (within transaction)
+                const updateResult = await client.query(`
                     UPDATE "ORDERS-batches"
                     SET allocated_quantity = allocated_quantity - $1
                     WHERE id = $2
+                    RETURNING id, quantity, allocated_quantity
                 `, [item.quantity_allocated, item.fk_batch_id]);
+
+                if (updateResult.rows.length === 0) {
+                    console.warn(`⚠️  Batch ${item.fk_batch_id} not found when releasing allocation`);
+                    continue;
+                }
+
+                const newAllocated = updateResult.rows[0].allocated_quantity;
+                const batchQuantity = updateResult.rows[0].quantity;
+                const newAvailable = batchQuantity - newAllocated;
+
+                console.log(`📦 Released allocation: Batch ${item.fk_batch_id} - Allocated: ${currentAllocated} → ${newAllocated}, Available: ${newAvailable}`);
 
                 // Log batch history
                 await client.query(`
@@ -142,29 +252,14 @@ class CartCleanupService {
                               $2, $3, 'Cart expired - allocation released', $4, true)
                 `, [
                     item.fk_batch_id,
-                    item.quantity_allocated.toString(),
-                    '0',
+                    currentAllocated.toString(),
+                    newAllocated.toString(),
                     invoiceId
                 ]);
-
-                // Broadcast inventory update
-                try {
-                    const batch = await client.query(`
-                        SELECT quantity, allocated_quantity
-                        FROM "ORDERS-batches"
-                        WHERE id = $1
-                    `, [item.fk_batch_id]);
-
-                    if (batch.rows.length > 0) {
-                        const newAvailable = batch.rows[0].quantity - batch.rows[0].allocated_quantity;
-                        await allocationService.broadcastInventoryUpdate(item.fk_batch_id, newAvailable);
-                    }
-                } catch (wsError) {
-                    console.error('WebSocket broadcast error (non-critical):', wsError.message);
-                }
             }
 
-            console.log(`✅ Released ${lineItems.rows.length} allocation(s) from cart ${invoiceId}`);
+            console.log(`✅ Released ${lineItems.rows.length} allocation(s) from cart ${invoiceId} (database updated)`);
+            
         } catch (error) {
             console.error('Error releasing allocations:', error);
             throw error;
@@ -177,23 +272,27 @@ class CartCleanupService {
      */
     async cleanupExpiredCarts() {
         try {
-            // Find expired carts
+            // Find expired carts (silently delete - no warnings)
+            // CRITICAL: Delete ALL expired carts, not just first 100
             const expiredCarts = await query(`
-                SELECT id, invoice_number, fk_buyer_id, cart_expires_at
+                SELECT id, invoice_number, fk_buyer_id, fk_location_id, cart_expires_at
                 FROM "ORDERS-invoices"
                 WHERE status = 'Draft'
                   AND source = 'External'
-                  AND cart_expires_at < NOW()
                   AND cart_expires_at IS NOT NULL
+                  AND cart_expires_at < NOW()
                 ORDER BY cart_expires_at ASC
-                LIMIT 100
             `);
 
             if (expiredCarts.rows.length === 0) {
                 return { success: true, cleaned: 0, message: 'No expired carts found' };
             }
 
-            console.log(`🧹 Found ${expiredCarts.rows.length} expired cart(s) to clean`);
+            if (expiredCarts.rows.length === 0) {
+                return { success: true, cleaned: 0, message: 'No expired carts found' };
+            }
+
+            console.log(`🧹 Found ${expiredCarts.rows.length} expired cart(s) to delete from database`);
 
             let cleaned = 0;
             let failed = 0;
@@ -204,13 +303,14 @@ class CartCleanupService {
                     const result = await this.clearExpiredCart(cart.id);
                     if (result.success) {
                         cleaned++;
+                        console.log(`✅ Deleted expired invoice ${cart.id} (invoice_number: ${cart.invoice_number})`);
                     } else if (result.skipped) {
                         console.log(`⏭️  Skipped cart ${cart.id}: ${result.reason}`);
                     }
                 } catch (error) {
                     failed++;
                     errors.push({ cart_id: cart.id, error: error.message });
-                    console.error(`❌ Failed to clear cart ${cart.id}:`, error.message);
+                    console.error(`❌ Failed to delete expired cart ${cart.id}:`, error.message);
                 }
             }
 

@@ -734,6 +734,9 @@
                 Review your selected items before proceeding to checkout.
             </div>
             
+            <!-- Cart Expiration Warning (shown when 6 hours or less remain) -->
+            <div id="cart-expiration-warning" class="cart-expiration-warning" style="display: none;"></div>
+            
             <div class="cart-items" id="cart-items">
                 <div class="empty-cart">
                     <div class="empty-cart-icon">🛒</div>
@@ -1570,11 +1573,12 @@ function handlePortalWebSocketMessage(event) {
         .then(() => {
             // CRITICAL: If invoice was cancelled or deleted, explicitly clear the frontend cart
             if (payload.event === 'invoice_cancelled' || payload.event === 'invoice_deleted') {
-                // Clear frontend cart immediately
+                // Clear frontend cart immediately (silent for expired carts)
                 if (cart && typeof cart.clearCart === 'function') {
                     cart.clearCart();
                 }
-                if (typeof showNotification === 'function') {
+                // Only show notification for cancelled (not expired - expired is silent)
+                if (typeof showNotification === 'function' && !payload.metadata?.cart_expired) {
                     showNotification('Your cart was cleared because the invoice was cancelled.', 'info');
                 }
             }
@@ -1911,7 +1915,16 @@ function renderCart() {
 
     if (!renderCart.listenerBound) {
         window.addEventListener('cartChanged', renderCart);
+        window.addEventListener('cartExpired', () => {
+            // Silent expiration - just update UI (cart will appear empty)
+            renderCart();
+        });
         renderCart.listenerBound = true;
+    }
+    
+    // Update expiration warning display
+    if (cart && typeof cart.updateExpirationWarning === 'function') {
+        cart.updateExpirationWarning();
     }
     
     const cartData = cart.getCart();

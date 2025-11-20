@@ -12,6 +12,41 @@ const SYSTEM_USER_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 class PortalController {
     /**
+     * Get cart expiry time in seconds from environment variable
+     * Reads from CART_EXPIRY_TIME in production.env or local.env
+     * Defaults to 86400 seconds (24 hours) if not set
+     * @returns {number} Cart expiry time in seconds
+     */
+    static getCartExpiryTime() {
+        const envExpiryTime = process.env.CART_EXPIRY_TIME;
+        if (envExpiryTime) {
+            const expirySeconds = parseInt(envExpiryTime, 10);
+            if (!isNaN(expirySeconds) && expirySeconds > 0) {
+                // Log once on first call to show what value is being used
+                if (!PortalController._expiryTimeLogged) {
+                    const hours = (expirySeconds / 3600).toFixed(1);
+                    console.log(`📦 Cart expiry time from CART_EXPIRY_TIME env: ${expirySeconds} seconds (${hours} hours)`);
+                    PortalController._expiryTimeLogged = true;
+                }
+                return expirySeconds;
+            } else {
+                // Invalid value in env
+                if (!PortalController._expiryTimeLogged) {
+                    console.warn(`⚠️ CART_EXPIRY_TIME env var is set but invalid (${envExpiryTime}), using default: 86400 seconds (24 hours)`);
+                    PortalController._expiryTimeLogged = true;
+                }
+            }
+        } else {
+            // Not set in env
+            if (!PortalController._expiryTimeLogged) {
+                console.log(`📦 CART_EXPIRY_TIME not set in environment, using default: 86400 seconds (24 hours)`);
+                PortalController._expiryTimeLogged = true;
+            }
+        }
+        return 86400; // Default: 24 hours
+    }
+    
+    /**
      * Get system user ID with caching
      */
     static async getSystemUserId() {
@@ -571,10 +606,15 @@ class PortalController {
             if (expiredCart.rows.length > 0) {
                 const expiredCartId = expiredCart.rows[0].id;
                 try {
-                    console.log(`🧹 Detected expired cart ${expiredCartId} during portal load. Cleaning up...`);
-                    await cartCleanupService.clearExpiredCart(expiredCartId);
+                    console.log(`🧹 Detected expired cart ${expiredCartId} during getCart. Deleting immediately...`);
+                    const cleanupResult = await cartCleanupService.clearExpiredCart(expiredCartId);
+                    if (cleanupResult.success) {
+                        console.log(`✅ Expired cart ${expiredCartId} deleted successfully`);
+                    } else {
+                        console.log(`⏭️  Expired cart ${expiredCartId} cleanup skipped: ${cleanupResult.reason}`);
+                    }
                 } catch (cleanupError) {
-                    console.error(`❌ Failed to clean expired cart ${expiredCartId}:`, cleanupError.message);
+                    console.error(`❌ Failed to delete expired cart ${expiredCartId}:`, cleanupError.message);
                     // Continue gracefully so the user can still view their cart (which will be empty)
                 }
             }
@@ -661,11 +701,24 @@ class PortalController {
                 items: invoice.items
             });
             
+            // Get cart expiry information
+            const expiryInfo = await query(`
+                SELECT cart_expires_at, cart_started_at, extended_until, cart_extended
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [invoice.invoice_id]);
+            
+            const expiryData = expiryInfo.rows[0] || {};
+            
             return res.json({
                 invoice_id: invoice.invoice_id,
                 items: invoice.items || [],
                 subtotal: parseFloat(invoice.subtotal || 0),
-                total: parseFloat(invoice.total || 0)
+                total: parseFloat(invoice.total || 0),
+                cart_expires_at: expiryData.cart_expires_at,
+                cart_started_at: expiryData.cart_started_at,
+                extended_until: expiryData.extended_until,
+                cart_extended: expiryData.cart_extended || false
             });
         } catch (error) {
             console.error('Error loading cart:', error);
@@ -935,9 +988,11 @@ class PortalController {
                 // Get system user ID using cached method
                 const userId = await PortalController.getSystemUserId();
                 
-                // Set cart expiry (24 hours from now)
+                // Set cart expiry from CART_EXPIRY_TIME environment variable
+                const expirySeconds = PortalController.getCartExpiryTime();
                 const cartExpiresAt = new Date();
-                cartExpiresAt.setHours(cartExpiresAt.getHours() + 24);
+                cartExpiresAt.setSeconds(cartExpiresAt.getSeconds() + expirySeconds);
+                console.log(`📅 New cart created with expiry: ${cartExpiresAt.toISOString()} (${expirySeconds} seconds from now)`);
                 
                 const newInvoiceResult = await client.query(`
                     INSERT INTO "ORDERS-invoices" (
@@ -953,6 +1008,31 @@ class PortalController {
                 invoiceId = invoiceResult.rows[0].id;
                 invoiceNumber = invoiceResult.rows[0].invoice_number;
                 console.log('addToCart - Reusing existing Draft invoice:', { invoiceId, invoiceNumber, status: invoiceResult.rows[0].status });
+            }
+            
+            // Check if this is the first item being added (set cart_started_at and extended_until)
+            const existingItemsCount = await client.query(`
+                SELECT COUNT(*) as count
+                FROM "ORDERS-invoice-line-items"
+                WHERE fk_invoice_id = $1
+            `, [invoiceId]);
+            
+            const isFirstItem = parseInt(existingItemsCount.rows[0].count) === 0;
+            
+            if (isFirstItem) {
+                // First item: Set cart_started_at and calculate extended_until (48 hours from cart_started_at)
+                const now = new Date();
+                const extendedUntil = new Date(now);
+                extendedUntil.setHours(extendedUntil.getHours() + 48);
+                
+                await client.query(`
+                    UPDATE "ORDERS-invoices"
+                    SET cart_started_at = NOW(),
+                        extended_until = $1
+                    WHERE id = $2
+                `, [extendedUntil, invoiceId]);
+                
+                console.log('addToCart - First item added, set cart_started_at and extended_until:', { invoiceId, extendedUntil });
             }
             
             // Check if line item already exists for this batch - OPTIMIZED: Single query
@@ -1412,6 +1492,50 @@ class PortalController {
             
             const remainingCount = parseInt(itemCountResult.rows[0].count);
             if (remainingCount === 0) {
+                // CRITICAL: Before deleting invoice, ensure all allocations are released
+                // The last item's allocation was already released above, but double-check
+                // that all batches are properly updated and inventory is broadcast
+                
+                // Get any batches that might still have allocations for this invoice
+                // (This is a safety check - allocations should already be released)
+                const remainingAllocations = await query(`
+                    SELECT b.id as batch_id, b.allocated_quantity
+                    FROM "ORDERS-batches" b
+                    WHERE EXISTS (
+                        SELECT 1 FROM "ORDERS-batch-history" bh
+                        WHERE bh.batch_id = b.id
+                        AND bh.related_invoice_id = $1
+                        AND bh.change_type = 'allocation_increased'
+                        AND NOT EXISTS (
+                            SELECT 1 FROM "ORDERS-batch-history" bh2
+                            WHERE bh2.batch_id = b.id
+                            AND bh2.related_invoice_id = $1
+                            AND bh2.change_type = 'allocation_decreased'
+                            AND bh2.id > bh.id
+                        )
+                    )
+                `, [invoiceId]);
+                
+                // Broadcast inventory updates for any affected batches
+                const allocationService = require('../Services/allocationService');
+                for (const batch of remainingAllocations.rows) {
+                    try {
+                        const batchInfo = await query(`
+                            SELECT quantity, allocated_quantity
+                            FROM "ORDERS-batches"
+                            WHERE id = $1
+                        `, [batch.batch_id]);
+                        
+                        if (batchInfo.rows.length > 0) {
+                            const newAvailable = batchInfo.rows[0].quantity - batchInfo.rows[0].allocated_quantity;
+                            await allocationService.broadcastInventoryUpdate(batch.batch_id, newAvailable);
+                        }
+                    } catch (err) {
+                        console.error(`Failed to broadcast inventory for batch ${batch.batch_id}:`, err);
+                    }
+                }
+                
+                // Now delete the invoice (silent - no warnings, just like manual empty)
                 await query(`
                     DELETE FROM "ORDERS-invoices"
                     WHERE id = $1
@@ -2627,15 +2751,57 @@ class PortalController {
                 });
             }
 
-            // Extend by 24 hours using server time
+            // Get cart_started_at and extended_until to check 48-hour limit
+            const cartInfo = await query(`
+                SELECT cart_started_at, extended_until, cart_expires_at
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [invoiceId]);
+
+            if (cartInfo.rows.length === 0 || !cartInfo.rows[0].cart_started_at) {
+                return res.status(400).json({ 
+                    success: false, 
+                    error: 'Cart start time not found. Cannot extend.' 
+                });
+            }
+
+            const cartStartedAt = new Date(cartInfo.rows[0].cart_started_at);
+            const extendedUntil = cartInfo.rows[0].extended_until 
+                ? new Date(cartInfo.rows[0].extended_until) 
+                : null;
+            const currentExpiresAt = new Date(cartInfo.rows[0].cart_expires_at);
+
+            // Calculate proposed new expiry (current + expiry time from env)
+            const expirySeconds = PortalController.getCartExpiryTime();
+            const proposedExpiry = new Date(currentExpiresAt);
+            proposedExpiry.setSeconds(proposedExpiry.getSeconds() + expirySeconds);
+
+            // Check 48-hour limit: proposed expiry must not exceed extended_until
+            const maxExpiry = extendedUntil || (() => {
+                // Fallback: calculate 48 hours from cart_started_at
+                const max = new Date(cartStartedAt);
+                max.setHours(max.getHours() + 48);
+                return max;
+            })();
+
+            let finalExpiry;
+            if (proposedExpiry > maxExpiry) {
+                // Can only extend to maxExpiry
+                finalExpiry = maxExpiry;
+            } else {
+                // Can extend by full expiry time
+                finalExpiry = proposedExpiry;
+            }
+
+            // Extend cart expiry
             const result = await query(`
                 UPDATE "ORDERS-invoices"
-                SET cart_expires_at = cart_expires_at + INTERVAL '24 hours',
+                SET cart_expires_at = $1,
                     cart_extended = TRUE,
                     updated_at = NOW()
-                WHERE id = $1
+                WHERE id = $2
                 RETURNING cart_expires_at
-            `, [invoiceId]);
+            `, [finalExpiry, invoiceId]);
 
             const newExpiry = result.rows[0].cart_expires_at;
 
