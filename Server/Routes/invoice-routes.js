@@ -281,6 +281,13 @@ router.post('/:id/fulfillment/accept', auth, auditMiddleware, invoiceController.
 router.post('/:id/fulfillment/issue', auth, auditMiddleware, invoiceController.reportFulfillmentIssue);
 
 /**
+ * Void invoice (only allowed before shipping)
+ * POST /api/v1/invoices/:id/void
+ * Requires Sales Admin or Sales Representative role
+ */
+router.post('/:id/void', auth, requireRole('Sales Admin', 'Sales Representative', 'Administrator'), auditMiddleware, invoiceController.voidInvoice);
+
+/**
  * Update invoice notes (customer and internal)
  * PATCH /api/v1/invoices/:id/notes
  */

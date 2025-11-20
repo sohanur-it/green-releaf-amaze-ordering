@@ -985,6 +985,8 @@ class InvoiceController {
                 WHERE i.id = $1
             `, [id]);
             
+            // Note: i.* includes shipped_at, so it will be available in invoiceData
+            
             if (invoice.rows.length === 0) {
                 return res.status(404).send('Invoice not found');
             }
@@ -1179,12 +1181,18 @@ class InvoiceController {
 
             const requestedStatus = typeof status === 'string' ? status.trim() : 'Draft';
             const allowedStatuses = ['Draft', 'Pending_Approval'];
-            const targetStatus = allowedStatuses.includes(requestedStatus) ? requestedStatus : 'Draft';
+            let targetStatus = allowedStatuses.includes(requestedStatus) ? requestedStatus : 'Draft';
+
+            // Internal invoices should go directly to Approved, not Pending_Approval
+            // Only external invoices need approval workflow
+            if (targetStatus === 'Pending_Approval') {
+                targetStatus = 'Approved';
+            }
 
             if (targetStatus !== 'Draft' && (!Array.isArray(line_items) || line_items.length === 0)) {
                 return res.status(400).json({
                     success: false,
-                    error: 'At least one line item is required when submitting the invoice for approval'
+                    error: 'At least one line item is required when submitting the invoice'
                 });
             }
             
@@ -2159,6 +2167,115 @@ class InvoiceController {
             res.status(500).json({
                 success: false,
                 error: 'Failed to report issue',
+                details: error.message
+            });
+        }
+    }
+
+    /**
+     * Void invoice (only allowed before shipping)
+     * POST /api/v1/invoices/:id/void
+     * Requires Sales Admin or Sales Representative role
+     */
+    async voidInvoice(req, res) {
+        try {
+            const { id } = req.params;
+            const { reason } = req.body;
+            const userId = req.session.userId || req.user?.id;
+
+            if (!reason || typeof reason !== 'string' || reason.trim().length < 10) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Void reason is required and must be at least 10 characters'
+                });
+            }
+
+            // Check user permissions - must be Sales Admin or Sales Rep
+            const UserModel = require('../Models/userModel');
+            const isSuperuser = await UserModel.isSuperuser(userId);
+            const userRoles = await UserModel.getUserRoles(userId);
+            const userRoleNames = userRoles.map(r => r.name || r.role_name).filter(Boolean);
+            
+            const isAdmin = isSuperuser || userRoleNames.some(r => r.toLowerCase() === 'administrator');
+            const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
+            const isSalesRep = userRoleNames.some(r => r.toLowerCase() === 'sales representative');
+
+            if (!isAdmin && !isSalesAdmin && !isSalesRep) {
+                return res.status(403).json({
+                    success: false,
+                    error: 'Only Sales Admin or Sales Representative can void invoices'
+                });
+            }
+
+            // Get invoice and check if it has shipped
+            const invoice = await query(`
+                SELECT id, status, source, shipped_at
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [id]);
+
+            if (invoice.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Invoice not found'
+                });
+            }
+
+            const invoiceData = invoice.rows[0];
+
+            // Check if invoice has already shipped
+            if (invoiceData.shipped_at) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Cannot void an invoice that has already been shipped'
+                });
+            }
+
+            // Check if status allows voiding (before shipping)
+            const statusesBeforeShipping = [
+                'Draft',
+                'Pending_Approval',
+                'Approved',
+                'Fulfillment_Accepted',
+                'Fulfillment_Issue',
+                'Partially_Manifested',
+                'Manifested'
+            ];
+
+            if (!statusesBeforeShipping.includes(invoiceData.status)) {
+                return res.status(400).json({
+                    success: false,
+                    error: `Cannot void invoice in ${invoiceData.status} status. Voiding is only allowed before shipping.`
+                });
+            }
+
+            // Transition to Cancelled (void)
+            const invoiceStateMachine = require('../Services/invoiceStateMachineService');
+            const result = await invoiceStateMachine.transitionTo(
+                id,
+                'Cancelled',
+                userId,
+                `Invoice voided: ${reason.trim()}`
+            );
+
+            if (!result.success) {
+                return res.status(400).json({
+                    success: false,
+                    error: result.error || 'Failed to void invoice',
+                    validTransitions: result.validTransitions
+                });
+            }
+
+            res.json({
+                success: true,
+                message: 'Invoice voided successfully',
+                status: result.newStatus
+            });
+        } catch (error) {
+            console.error('Error voiding invoice:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to void invoice',
                 details: error.message
             });
         }
