@@ -446,4 +446,67 @@ router.get('/api/sync-health', async (req, res) => {
     }
 });
 
+// =============================================
+// FULFILLMENT ROUTES (Module 5)
+// =============================================
+
+// Fulfillment Queue
+router.get('/fulfillment/queue', requireRole('fulfillment_worker', 'fulfillment_admin', 'sales_admin', 'admin'), async (req, res) => {
+    try {
+        res.render('admin/fulfillment/queue', {
+            title: 'Fulfillment Queue',
+            layout: 'layouts/main',
+            currentUserId: req.session.userId
+        });
+    } catch (error) {
+        console.error('Error rendering fulfillment queue:', error);
+        res.status(500).send('Error loading fulfillment queue');
+    }
+});
+
+// Package Scanning Interface
+router.get('/fulfillment/scanning/:invoiceId', requireRole('fulfillment_worker', 'fulfillment_admin'), async (req, res) => {
+    try {
+        const invoiceId = parseInt(req.params.invoiceId);
+        res.render('admin/fulfillment/scanning', {
+            title: 'Package Scanning',
+            layout: 'layouts/main',
+            invoiceId: invoiceId
+        });
+    } catch (error) {
+        console.error('Error rendering scanning interface:', error);
+        res.status(500).send('Error loading scanning interface');
+    }
+});
+
+// Transportation Details Form
+router.get('/fulfillment/transportation/:invoiceId', requireRole('fulfillment_worker', 'fulfillment_admin'), async (req, res) => {
+    try {
+        const invoiceId = parseInt(req.params.invoiceId);
+        res.render('admin/fulfillment/transportation', {
+            title: 'Transportation Details',
+            layout: 'layouts/main',
+            invoiceId: invoiceId
+        });
+    } catch (error) {
+        console.error('Error rendering transportation form:', error);
+        res.status(500).send('Error loading transportation form');
+    }
+});
+
+// Manifest Creation/Preview
+router.get('/fulfillment/manifest/:invoiceId', requireRole('fulfillment_worker', 'fulfillment_admin'), async (req, res) => {
+    try {
+        const invoiceId = parseInt(req.params.invoiceId);
+        res.render('admin/fulfillment/manifest', {
+            title: 'Create Manifest',
+            layout: 'layouts/main',
+            invoiceId: invoiceId
+        });
+    } catch (error) {
+        console.error('Error rendering manifest creation:', error);
+        res.status(500).send('Error loading manifest creation');
+    }
+});
+
 module.exports = router;

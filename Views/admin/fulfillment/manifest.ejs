@@ -1,0 +1,193 @@
+<style>
+.manifest-container {
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.manifest-header {
+    margin-bottom: 2rem;
+}
+
+.manifest-preview {
+    background: var(--card-bg, white);
+    border-radius: 12px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    box-shadow: var(--card-shadow, 0 2px 8px rgba(0,0,0,0.1));
+}
+
+.manifest-preview h2 {
+    margin: 0 0 1.5rem 0;
+    font-size: 1.5rem;
+    color: var(--text-color);
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 0.75rem;
+}
+
+.manifest-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.summary-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.summary-item label {
+    font-size: 0.875rem;
+    color: var(--text-light);
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.summary-item span {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--text-color);
+}
+
+.manifest-warning {
+    background: #fef3c7;
+    border: 1px solid #f59e0b;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 2rem;
+    color: #92400e;
+}
+
+.manifest-warning i {
+    margin-right: 0.5rem;
+}
+
+.packages-list {
+    margin-top: 2rem;
+}
+
+.packages-list h3 {
+    margin: 0 0 1rem 0;
+    font-size: 1.1rem;
+    color: var(--text-color);
+}
+
+.package-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    background: var(--bg-color, #f9fafb);
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+}
+
+.package-item .package-label {
+    font-family: 'Courier New', monospace;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.package-item .package-details {
+    display: flex;
+    gap: 2rem;
+    color: var(--text-light);
+    font-size: 0.9rem;
+}
+
+.manifest-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 2px solid var(--border-color);
+}
+
+.btn-create {
+    background: #10b981;
+    color: white;
+    border: none;
+    padding: 1rem 2rem;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 1rem;
+    cursor: pointer;
+    flex: 1;
+    transition: background 0.2s;
+}
+
+.btn-create:hover:not(:disabled) {
+    background: #059669;
+}
+
+.btn-create:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+}
+
+.btn-back {
+    background: #6b7280;
+    color: white;
+    border: none;
+    padding: 1rem 2rem;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-back:hover {
+    background: #4b5563;
+}
+
+.loading-manifest {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-light);
+}
+
+.manifest-success {
+    background: #d1fae5;
+    border: 1px solid #10b981;
+    border-radius: 8px;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    text-align: center;
+}
+
+.manifest-success h3 {
+    margin: 0 0 1rem 0;
+    color: #065f46;
+}
+
+.manifest-success .manifest-numbers {
+    margin: 1rem 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #065f46;
+    font-family: 'Courier New', monospace;
+}
+</style>
+
+<div class="manifest-container">
+    <div class="manifest-header">
+        <h1>Create METRC Manifest</h1>
+        <p style="color: var(--text-light); margin: 0.5rem 0 0 0;">Invoice: <span id="invoice-number">Loading...</span></p>
+    </div>
+
+    <div id="manifest-content">
+        <div class="loading-manifest">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Loading manifest preview...</p>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.invoiceId = <%= invoiceId %>;
+</script>
+<script src="/public/js/admin/fulfillment-manifest.js"></script>
+

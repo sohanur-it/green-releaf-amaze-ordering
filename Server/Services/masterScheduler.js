@@ -12,6 +12,7 @@ const auditLogger = require('./auditLogger');
 const cartCleanupService = require('./cartCleanupService');
 const dealFlowAutomationService = require('./dealFlowAutomationService');
 const batchStatusService = require('./batchStatusService');
+const scanningSessionService = require('./scanningSessionService');
 
 const execAsync = promisify(exec);
 
@@ -204,6 +205,26 @@ class MasterScheduler {
         this.jobs.set('batchAutoPromotion', batchPromotionJob);
         scheduledCount++;
         console.log('📅 Scheduled batch auto-promotion job (every 15 minutes during business hours)');
+
+        // Schedule scanning session auto-abandon job (every 10 minutes, 24/7)
+        const sessionAbandonJob = cron.schedule('*/10 * * * *', async () => {
+            try {
+                console.log('🧹 Running scanning session auto-abandon job...');
+                const result = await scanningSessionService.abandonInactiveSessions();
+                if (result.abandoned > 0) {
+                    console.log(`✅ Session auto-abandon completed: ${result.abandoned} sessions abandoned`);
+                }
+            } catch (error) {
+                console.error('❌ Session auto-abandon job error:', error.message);
+            }
+        }, {
+            scheduled: true,
+            timezone: process.env.SYNC_TIMEZONE || 'America/Chicago'
+        });
+
+        this.jobs.set('sessionAutoAbandon', sessionAbandonJob);
+        scheduledCount++;
+        console.log('📅 Scheduled scanning session auto-abandon job (every 10 minutes)');
 
         // Run batch promotion immediately on startup
         try {

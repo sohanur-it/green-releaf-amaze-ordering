@@ -563,6 +563,237 @@ class WebSocketService {
         const excludeSessionId = metadata.exclude_session || null;
         this.broadcastJson(payload, excludeSessionId);
     }
+
+    /**
+     * Module 5: Broadcast package locked event
+     * @param {string} packageLabel 
+     * @param {number} invoiceId 
+     * @param {number} userId 
+     */
+    async broadcastPackageLocked(packageLabel, invoiceId, userId) {
+        if (!this.wss) return;
+
+        try {
+            // Get user name
+            const client = await pool.connect();
+            const userResult = await client.query(`
+                SELECT first_name, last_name FROM users WHERE id = $1
+            `, [userId]);
+            client.release();
+
+            const userName = userResult.rows[0] 
+                ? `${userResult.rows[0].first_name} ${userResult.rows[0].last_name}`
+                : 'Unknown';
+
+            // Get invoice number
+            const invClient = await pool.connect();
+            const invResult = await invClient.query(`
+                SELECT invoice_number FROM "ORDERS-invoices" WHERE id = $1
+            `, [invoiceId]);
+            invClient.release();
+
+            const invoiceNumber = invResult.rows[0]?.invoice_number || 'Unknown';
+
+            const payload = {
+                type: 'package:locked',
+                packageLabel,
+                userId,
+                userName,
+                invoiceId,
+                invoiceNumber,
+                timestamp: new Date().toISOString()
+            };
+
+            this.broadcastJson(payload);
+        } catch (error) {
+            console.error('Error broadcasting package locked:', error);
+        }
+    }
+
+    /**
+     * Module 5: Broadcast package released event
+     * @param {string|string[]} packageLabels 
+     * @param {number} invoiceId 
+     */
+    broadcastPackageReleased(packageLabels, invoiceId = null) {
+        if (!this.wss) return;
+
+        const labels = Array.isArray(packageLabels) ? packageLabels : [packageLabels];
+
+        const payload = {
+            type: 'package:released',
+            packageLabels: labels,
+            invoiceId,
+            timestamp: new Date().toISOString()
+        };
+
+        this.broadcastJson(payload);
+    }
+
+    /**
+     * Module 5: Broadcast order claimed event
+     * @param {number} invoiceId 
+     * @param {string} invoiceNumber 
+     * @param {number} userId 
+     */
+    async broadcastOrderClaimed(invoiceId, invoiceNumber, userId) {
+        if (!this.wss) return;
+
+        try {
+            const client = await pool.connect();
+            const result = await client.query(`
+                SELECT first_name, last_name FROM users WHERE id = $1
+            `, [userId]);
+            client.release();
+
+            const userName = result.rows[0] 
+                ? `${result.rows[0].first_name} ${result.rows[0].last_name}`
+                : 'Unknown';
+
+            const payload = {
+                type: 'order:claimed',
+                invoice_id: invoiceId,
+                invoice_number: invoiceNumber,
+                worker_id: userId,
+                worker_name: userName,
+                timestamp: new Date().toISOString()
+            };
+
+            this.broadcastJson(payload);
+        } catch (error) {
+            console.error('Error broadcasting order claimed:', error);
+        }
+    }
+
+    /**
+     * Module 5: Broadcast order released event
+     * @param {number} invoiceId 
+     * @param {string} invoiceNumber 
+     */
+    broadcastOrderReleased(invoiceId, invoiceNumber) {
+        if (!this.wss) return;
+
+        const payload = {
+            type: 'order:released',
+            invoice_id: invoiceId,
+            invoice_number: invoiceNumber,
+            timestamp: new Date().toISOString()
+        };
+
+        this.broadcastJson(payload);
+    }
+
+    /**
+     * Module 5: Broadcast order reassigned event
+     * @param {number} invoiceId 
+     * @param {string} invoiceNumber 
+     * @param {number} fromUserId 
+     * @param {number} toUserId 
+     */
+    async broadcastOrderReassigned(invoiceId, invoiceNumber, fromUserId, toUserId) {
+        if (!this.wss) return;
+
+        try {
+            const client = await pool.connect();
+            const fromResult = await client.query(`
+                SELECT first_name, last_name FROM users WHERE id = $1
+            `, [fromUserId]);
+            const toResult = await client.query(`
+                SELECT first_name, last_name FROM users WHERE id = $1
+            `, [toUserId]);
+            client.release();
+
+            const fromUserName = fromResult.rows[0] 
+                ? `${fromResult.rows[0].first_name} ${fromResult.rows[0].last_name}`
+                : 'Unknown';
+            const toUserName = toResult.rows[0] 
+                ? `${toResult.rows[0].first_name} ${toResult.rows[0].last_name}`
+                : 'Unknown';
+
+            const payload = {
+                type: 'order:reassigned',
+                invoice_id: invoiceId,
+                invoice_number: invoiceNumber,
+                from_user_id: fromUserId,
+                from_user_name: fromUserName,
+                to_user_id: toUserId,
+                to_user_name: toUserName,
+                timestamp: new Date().toISOString()
+            };
+
+            this.broadcastJson(payload);
+        } catch (error) {
+            console.error('Error broadcasting order reassigned:', error);
+        }
+    }
+
+    /**
+     * Module 5: Send persistent notification to specific user
+     * @param {number} userId 
+     * @param {Object} notification 
+     */
+    async sendPersistentNotification(userId, notification) {
+        if (!this.wss) return;
+
+        // Store notification in database first
+        try {
+            const client = await pool.connect();
+            await client.query(`
+                INSERT INTO user_notifications (
+                    user_id, notification_type, title, message, payload, 
+                    priority, requires_ack, is_read, acknowledged
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, false, false)
+            `, [
+                userId,
+                notification.type || 'fulfillment_notification',
+                notification.title || 'Fulfillment Notification',
+                notification.message || '',
+                JSON.stringify(notification.payload || {}),
+                notification.priority || 'normal',
+                notification.requiresAck || false
+            ]);
+            client.release();
+        } catch (error) {
+            console.error('Error storing persistent notification:', error);
+        }
+
+        // Send to user if connected
+        const payload = {
+            type: 'notification:persistent',
+            userId,
+            notification: {
+                ...notification,
+                timestamp: new Date().toISOString()
+            }
+        };
+
+        // Send to specific user's connections
+        this.wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN && client.userId === userId) {
+                client.send(JSON.stringify(payload));
+            }
+        });
+    }
+
+    /**
+     * Module 5: Broadcast batch inventory update
+     * @param {number} batchId 
+     * @param {number} availableQuantity 
+     * @param {number} allocatedQuantity 
+     */
+    broadcastBatchInventoryUpdate(batchId, availableQuantity, allocatedQuantity) {
+        if (!this.wss) return;
+
+        const payload = {
+            type: 'batch:updated',
+            batchId,
+            availableQuantity,
+            allocatedQuantity,
+            lastUpdated: new Date().toISOString()
+        };
+
+        this.broadcastJson(payload);
+    }
 }
 
 // Export singleton instance

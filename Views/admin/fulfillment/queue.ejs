@@ -1,0 +1,335 @@
+<style>
+.fulfillment-queue-container {
+    padding: 2rem;
+}
+
+.queue-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.queue-stats {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+.stat-card {
+    background: var(--card-bg, white);
+    padding: 1.5rem;
+    border-radius: 12px;
+    box-shadow: var(--card-shadow, 0 2px 8px rgba(0,0,0,0.1));
+    flex: 1;
+    min-width: 200px;
+}
+
+.stat-card h3 {
+    margin: 0 0 0.5rem 0;
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-color);
+}
+
+.stat-card p {
+    margin: 0;
+    color: var(--text-light);
+    font-size: 0.9rem;
+}
+
+.stat-card.pending {
+    border-left: 4px solid #f59e0b;
+}
+
+.stat-card.in-progress {
+    border-left: 4px solid #3b82f6;
+}
+
+.stat-card.issues {
+    border-left: 4px solid #ef4444;
+}
+
+.order-card {
+    background: var(--card-bg, white);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+    box-shadow: var(--card-shadow, 0 2px 8px rgba(0,0,0,0.1));
+    transition: transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+}
+
+.order-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--card-shadow, 0 4px 12px rgba(0,0,0,0.15));
+}
+
+.order-card.claimed {
+    border-left: 4px solid #3b82f6;
+}
+
+.order-card.available {
+    border-left: 4px solid #10b981;
+}
+
+.order-card.issue {
+    border-left: 4px solid #ef4444;
+}
+
+.order-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    margin-bottom: 1rem;
+}
+
+.order-title {
+    flex: 1;
+}
+
+.order-title h3 {
+    margin: 0 0 0.25rem 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.order-title p {
+    margin: 0;
+    color: var(--text-light);
+    font-size: 0.875rem;
+}
+
+.order-status {
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.order-status.approved {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.order-status.accepted {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.order-status.issue {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.order-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.order-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.order-detail label {
+    font-size: 0.75rem;
+    color: var(--text-light);
+    text-transform: uppercase;
+    font-weight: 600;
+}
+
+.order-detail span {
+    font-size: 0.9rem;
+    color: var(--text-color);
+    font-weight: 500;
+}
+
+.order-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.btn-claim {
+    background: #10b981;
+    color: white;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-claim:hover {
+    background: #059669;
+}
+
+.btn-claim:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+}
+
+.btn-view {
+    background: #3b82f6;
+    color: white;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-view:hover {
+    background: #2563eb;
+}
+
+.filter-bar {
+    background: var(--card-bg, white);
+    padding: 1.5rem;
+    border-radius: 12px;
+    margin-bottom: 2rem;
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.filter-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.filter-group label {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.filter-group select,
+.filter-group input {
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    min-width: 150px;
+}
+
+.loading {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-light);
+}
+
+.empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+    color: var(--text-light);
+}
+
+.empty-state i {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+.empty-state h3 {
+    margin: 0.5rem 0;
+    color: var(--text-color);
+}
+</style>
+
+<div class="fulfillment-queue-container">
+    <div class="queue-header">
+        <div>
+            <h1>Fulfillment Queue</h1>
+            <p style="color: var(--text-light); margin: 0.5rem 0 0 0;">Orders ready for fulfillment</p>
+        </div>
+        <div>
+            <button class="btn btn-secondary" onclick="refreshQueue()">
+                <i class="fas fa-sync-alt"></i> Refresh
+            </button>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="queue-stats">
+        <div class="stat-card pending">
+            <h3 id="stat-pending">0</h3>
+            <p>Pending Orders</p>
+        </div>
+        <div class="stat-card in-progress">
+            <h3 id="stat-in-progress">0</h3>
+            <p>In Progress</p>
+        </div>
+        <div class="stat-card issues">
+            <h3 id="stat-issues">0</h3>
+            <p>Issues</p>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="filter-bar">
+        <div class="filter-group">
+            <label>Status</label>
+            <select id="status-filter" onchange="applyFilters()">
+                <option value="">All</option>
+                <option value="Approved">Approved</option>
+                <option value="Fulfillment_Accepted">In Progress</option>
+                <option value="Fulfillment_Issue">Issues</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>Location</label>
+            <input type="text" id="location-filter" placeholder="City or State" onchange="applyFilters()">
+        </div>
+        <div class="filter-group">
+            <label>Customer</label>
+            <input type="text" id="customer-filter" placeholder="Customer name" onchange="applyFilters()">
+        </div>
+        <div class="filter-group">
+            <label>Sort By</label>
+            <select id="sort-by" onchange="applyFilters()">
+                <option value="age">Age (Oldest First)</option>
+                <option value="value">Value (Highest First)</option>
+                <option value="destination">Destination</option>
+                <option value="customer">Customer</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Queue List -->
+    <div id="queue-list">
+        <div class="loading">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Loading queue...</p>
+        </div>
+    </div>
+
+    <!-- Pagination -->
+    <div id="pagination" style="display: none; margin-top: 2rem; text-align: center;">
+        <button class="btn btn-secondary" id="prev-page" onclick="changePage(-1)">Previous</button>
+        <span id="page-info" style="margin: 0 1rem;"></span>
+        <button class="btn btn-secondary" id="next-page" onclick="changePage(1)">Next</button>
+    </div>
+</div>
+
+<script>
+    // Set current user ID for JavaScript (needed to show "Start Scanning" button)
+    <% if (typeof currentUserId !== 'undefined' && currentUserId) { %>
+    window.currentUserId = <%= currentUserId %>;
+    <% } else { %>
+    window.currentUserId = null;
+    <% } %>
+    console.log('Current User ID:', window.currentUserId); // Debug: check if it's set
+</script>
+<script src="/public/js/admin/fulfillment-queue.js"></script>
+

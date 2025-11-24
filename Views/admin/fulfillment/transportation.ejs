@@ -1,0 +1,225 @@
+<style>
+.transportation-container {
+    padding: 2rem;
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+.transportation-header {
+    margin-bottom: 2rem;
+}
+
+.form-section {
+    background: var(--card-bg, white);
+    border-radius: 12px;
+    padding: 2rem;
+    margin-bottom: 1.5rem;
+    box-shadow: var(--card-shadow, 0 2px 8px rgba(0,0,0,0.1));
+}
+
+.form-section h2 {
+    margin: 0 0 1.5rem 0;
+    font-size: 1.5rem;
+    color: var(--text-color);
+    border-bottom: 2px solid var(--border-color);
+    padding-bottom: 0.75rem;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.form-group.full-width {
+    grid-column: 1 / -1;
+}
+
+.form-group label {
+    font-weight: 600;
+    color: var(--text-color);
+    font-size: 0.9rem;
+}
+
+.form-group label .required {
+    color: #ef4444;
+}
+
+.form-group input,
+.form-group select {
+    padding: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    font-size: 1rem;
+    transition: border-color 0.2s;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.form-group .error {
+    color: #ef4444;
+    font-size: 0.875rem;
+    margin-top: 0.25rem;
+}
+
+.form-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 2px solid var(--border-color);
+}
+
+.btn-submit {
+    background: #10b981;
+    color: white;
+    border: none;
+    padding: 1rem 2rem;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 1rem;
+    cursor: pointer;
+    flex: 1;
+    transition: background 0.2s;
+}
+
+.btn-submit:hover:not(:disabled) {
+    background: #059669;
+}
+
+.btn-submit:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+}
+
+.btn-back {
+    background: #6b7280;
+    color: white;
+    border: none;
+    padding: 1rem 2rem;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.btn-back:hover {
+    background: #4b5563;
+}
+
+.loading-transporters {
+    padding: 1rem;
+    text-align: center;
+    color: var(--text-light);
+}
+</style>
+
+<div class="transportation-container">
+    <div class="transportation-header">
+        <h1>Transportation Details</h1>
+        <p style="color: var(--text-light); margin: 0.5rem 0 0 0;">Invoice: <span id="invoice-number">Loading...</span></p>
+    </div>
+
+    <form id="transportation-form">
+        <!-- Driver Information -->
+        <div class="form-section">
+            <h2>Driver Information</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Driver Name <span class="required">*</span></label>
+                    <input type="text" id="driver-name" name="driverName" required>
+                </div>
+                <div class="form-group">
+                    <label>Driver License Number <span class="required">*</span></label>
+                    <input type="text" id="driver-license" name="driverLicense" required>
+                </div>
+                <div class="form-group">
+                    <label>Driver Occupational License</label>
+                    <input type="text" id="driver-occupational-license" name="driverOccupationalLicense">
+                </div>
+            </div>
+        </div>
+
+        <!-- Vehicle Information -->
+        <div class="form-section">
+            <h2>Vehicle Information</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Vehicle Make <span class="required">*</span></label>
+                    <input type="text" id="vehicle-make" name="vehicleMake" required>
+                </div>
+                <div class="form-group">
+                    <label>Vehicle Model <span class="required">*</span></label>
+                    <input type="text" id="vehicle-model" name="vehicleModel" required>
+                </div>
+                <div class="form-group">
+                    <label>License Plate <span class="required">*</span></label>
+                    <input type="text" id="vehicle-plate" name="vehiclePlate" required>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transportation Schedule -->
+        <div class="form-section">
+            <h2>Transportation Schedule</h2>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Estimated Departure <span class="required">*</span></label>
+                    <input type="datetime-local" id="estimated-departure" name="estimatedDeparture" required>
+                </div>
+                <div class="form-group">
+                    <label>Estimated Arrival <span class="required">*</span></label>
+                    <input type="datetime-local" id="estimated-arrival" name="estimatedArrival" required>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transporter Information -->
+        <div class="form-section">
+            <h2>Transporter Information</h2>
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label>Transporter Name <span class="required">*</span></label>
+                    <select id="transporter-name" name="transporterName" required>
+                        <option value="">Loading transporters...</option>
+                    </select>
+                    <div id="transporter-loading" class="loading-transporters">
+                        <i class="fas fa-spinner fa-spin"></i> Loading available transporters...
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Phone Number for Questions</label>
+                    <input type="tel" id="phone-number" name="phoneNumber">
+                </div>
+            </div>
+        </div>
+
+        <!-- Form Actions -->
+        <div class="form-actions">
+            <button type="button" class="btn-back" onclick="goBack()">
+                <i class="fas fa-arrow-left"></i> Back
+            </button>
+            <button type="submit" class="btn-submit">
+                <i class="fas fa-save"></i> Save & Continue to Manifest
+            </button>
+        </div>
+    </form>
+</div>
+
+<script>
+    window.invoiceId = <%= invoiceId %>;
+</script>
+<script src="/public/js/admin/fulfillment-transportation.js"></script>
+
