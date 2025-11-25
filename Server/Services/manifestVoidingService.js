@@ -381,8 +381,30 @@ class ManifestVoidingService {
                 updatedBy: userId
             };
 
-            // TODO: Implement actual METRC API update call
-            // For Phase 1, we'll just update our database
+            // PHASE 1: DRY RUN - Validate update with METRC
+            const firstManifest = inv.manifest_metrc_ids[0];
+            if (!firstManifest || !firstManifest.id) {
+                throw new Error('No manifest METRC ID found');
+            }
+
+            console.log(`[Manifest Update] Dry run for manifest ${firstManifest.number}...`);
+            const dryRunResult = await this.updateManifestDryRun(firstManifest.id, firstManifest.license, updates);
+            
+            if (!dryRunResult.success) {
+                throw new Error(`Dry run failed: ${dryRunResult.error}`);
+            }
+
+            console.log(`[Manifest Update] ✓ Dry run passed`);
+
+            // PHASE 2: ACTUAL UPDATE
+            console.log(`[Manifest Update] Submitting update to METRC...`);
+            const updateResult = await this.updateManifestInMetrc(firstManifest.id, firstManifest.license, updates);
+            
+            if (!updateResult.success) {
+                throw new Error(`Update failed: ${updateResult.error}`);
+            }
+
+            console.log(`[Manifest Update] ✓ Manifest updated in METRC`);
 
             // Update transportation details in our DB
             await client.query(`
@@ -492,6 +514,111 @@ class ManifestVoidingService {
             
             return { success: false, error: error.message };
         }
+    }
+
+    /**
+     * Dry run manifest update in METRC (validation only)
+     */
+    async updateManifestDryRun(manifestMetrcId, license, updates) {
+        try {
+            // Build update payload
+            const payload = this.buildManifestUpdatePayload(updates);
+            
+            // METRC T3 API doesn't have a separate dry run endpoint for updates
+            // We'll validate the payload structure and check current status
+            const response = await metrcAuth.makeAuthenticatedRequest({
+                method: 'GET',
+                url: `${metrcAuth.apiBaseUrl}/transfers/v2/external/incoming/${manifestMetrcId}`,
+                params: {
+                    licenseNumber: license
+                },
+                timeout: 15000
+            });
+
+            const transfer = response.data;
+            
+            // Check if transfer can be updated
+            if (transfer.status === 'Delivered') {
+                return { success: false, error: 'Cannot update manifest - already delivered' };
+            }
+            if (transfer.status === 'Voided') {
+                return { success: false, error: 'Cannot update manifest - already voided' };
+            }
+
+            // Validate payload structure
+            const allowedFields = ['driverName', 'driverLicense', 'vehicleMake', 'vehicleModel', 
+                                 'vehiclePlate', 'estimatedDeparture', 'estimatedArrival'];
+            const updateFields = Object.keys(updates);
+            const disallowedFields = updateFields.filter(f => !allowedFields.includes(f));
+            
+            if (disallowedFields.length > 0) {
+                return { success: false, error: `Cannot update fields: ${disallowedFields.join(', ')}` };
+            }
+
+            return { success: true };
+        } catch (error) {
+            if (error.response && error.response.status === 404) {
+                return { success: false, error: 'Manifest not found in METRC' };
+            }
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * Actually update manifest in METRC
+     */
+    async updateManifestInMetrc(manifestMetrcId, license, updates) {
+        try {
+            const payload = this.buildManifestUpdatePayload(updates);
+            
+            const response = await metrcAuth.makeAuthenticatedRequest({
+                method: 'PUT',
+                url: `${metrcAuth.apiBaseUrl}/transfers/v2/external/incoming/${manifestMetrcId}`,
+                params: {
+                    licenseNumber: license
+                },
+                data: payload,
+                timeout: METRC_API_TIMEOUT
+            });
+
+            return { success: true, data: response.data };
+        } catch (error) {
+            if (error.response) {
+                const status = error.response.status;
+                const data = error.response.data;
+                
+                if (status === 400) {
+                    return { success: false, error: `METRC validation error: ${data.message || JSON.stringify(data)}` };
+                }
+                if (status === 404) {
+                    return { success: false, error: 'Manifest not found in METRC' };
+                }
+                if (status === 409) {
+                    return { success: false, error: 'Cannot update manifest - may already be delivered' };
+                }
+                
+                return { success: false, error: `METRC API error (${status}): ${data.message || JSON.stringify(data)}` };
+            }
+            
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * Build manifest update payload for METRC API
+     */
+    buildManifestUpdatePayload(updates) {
+        const payload = {};
+        
+        if (updates.driverName) payload.driverName = updates.driverName;
+        if (updates.driverLicense) payload.driverLicense = updates.driverLicense;
+        if (updates.vehicleMake) payload.vehicleMake = updates.vehicleMake;
+        if (updates.vehicleModel) payload.vehicleModel = updates.vehicleModel;
+        if (updates.vehiclePlate) payload.vehiclePlate = updates.vehiclePlate;
+        if (updates.estimatedDeparture) payload.estimatedDeparture = updates.estimatedDeparture;
+        if (updates.estimatedArrival) payload.estimatedArrival = updates.estimatedArrival;
+        
+        return payload;
     }
 }
 

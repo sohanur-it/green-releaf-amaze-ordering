@@ -356,11 +356,68 @@ document.addEventListener('DOMContentLoaded', () => {
             locationForm.setAttribute('data-method', 'POST');
             locationForm.setAttribute('data-action', `/api/crm/buyers/${addLocationBtn.dataset.buyerId}/locations`);
             locationIdField.value = '';
+            // Hide delivery windows section for new locations
+            const deliveryWindowsSection = document.getElementById('deliveryWindowsSection');
+            if (deliveryWindowsSection) {
+                deliveryWindowsSection.style.display = 'none';
+            }
+
             locationFormError.style.display = 'none';
             locationFormWarning.style.display = 'none';
             locationForm.dataset.targetBuyerId = addLocationBtn.dataset.buyerId;
             locationForm.dataset.existingLocationId = ''; // Will be set if DIS belongs to another buyer
             openModal(locationModal);
+        });
+    }
+
+    // === DELIVERY WINDOWS MANAGEMENT ===
+    
+    // Load delivery windows preview
+    async function loadDeliveryWindowsPreview(locationId) {
+        const preview = document.getElementById('deliveryWindowsPreview');
+        if (!preview) return;
+
+        try {
+            const response = await fetch(`/api/crm/locations/${locationId}/delivery-windows`);
+            const data = await response.json();
+            
+            if (data.success && data.windows && data.windows.length > 0) {
+                const windowsHtml = data.windows.map(w => {
+                    const daysText = w.days_display || formatDaysOfWeek(w.days_of_week);
+                    const timeText = `${w.start_time} - ${w.end_time}`;
+                    const statusBadge = w.is_active 
+                        ? '<span style="color: #28a745;">●</span>' 
+                        : '<span style="color: #dc3545;">●</span>';
+                    return `<div style="margin-bottom: 0.5rem;">${statusBadge} ${daysText}: ${timeText}</div>`;
+                }).join('');
+                preview.innerHTML = windowsHtml;
+            } else {
+                preview.innerHTML = '<em>No delivery windows configured</em>';
+            }
+        } catch (error) {
+            console.error('Error loading delivery windows:', error);
+            preview.innerHTML = '<em style="color: #dc3545;">Error loading windows</em>';
+        }
+    }
+
+    // Format days of week array to readable text
+    function formatDaysOfWeek(days) {
+        const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        if (days.length === 7) return 'Every Day';
+        if (days.length === 5 && days.every(d => [1,2,3,4,5].includes(d))) return 'Mon-Fri';
+        if (days.length === 2 && days.every(d => [0,6].includes(d))) return 'Sat-Sun';
+        return days.map(d => dayNames[d]).join(', ');
+    }
+
+    // Handle "Manage Windows" button click - navigate to dedicated page
+    const manageDeliveryWindowsBtn = document.getElementById('manageDeliveryWindowsBtn');
+    if (manageDeliveryWindowsBtn) {
+        manageDeliveryWindowsBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            const locationId = manageDeliveryWindowsBtn.dataset.locationId;
+            if (locationId) {
+                window.location.href = `/admin/crm/locations/${locationId}/delivery-windows`;
+            }
         });
     }
 
@@ -467,6 +524,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('locationState').value = target.dataset.locationState || '';
                 document.getElementById('locationZip').value = target.dataset.locationZip || '';
                 document.getElementById('locationLicense').value = target.dataset.locationState_license || '';
+                document.getElementById('locationDeliveryZone').value = target.dataset.locationDelivery_zone || '';
+
+                // Show delivery windows section for existing locations
+                const deliveryWindowsSection = document.getElementById('deliveryWindowsSection');
+                const manageWindowsBtn = document.getElementById('manageDeliveryWindowsBtn');
+                if (deliveryWindowsSection && manageWindowsBtn) {
+                    deliveryWindowsSection.style.display = 'block';
+                    manageWindowsBtn.dataset.locationId = locationId;
+                    manageWindowsBtn.href = `/admin/crm/locations/${locationId}/delivery-windows`;
+                    loadDeliveryWindowsPreview(locationId);
+                }
 
                 locationFormError.style.display = 'none';
                 openModal(locationModal);
@@ -1782,4 +1850,8 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     }
+
+    // === DELIVERY WINDOWS MANAGEMENT ===
+    // Note: Delivery windows management is now handled on a dedicated page
+    // This function only loads the preview for the location modal
 });

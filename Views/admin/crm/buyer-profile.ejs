@@ -120,29 +120,46 @@ const canManagePurchaseLimits = isAdmin || isSalesAdmin;
                             <td><%= location.state_license || 'N/A' %></td>
                             <td><code><%= location.access_code %></code></td>
                             <td class="table-actions">
-                                <button type="button" class="action-btn action-btn--primary" data-action="edit-location"
-                                        data-location-id="<%= location.entry_id %>"
-                                        data-location-name="<%= location.name %>"
-                                        data-location-line_one="<%= location.line_one %>"
-                                        data-location-line_two="<%= location.line_two || '' %>"
-                                        data-location-city="<%= location.city %>"
-                                        data-location-state="<%= location.state %>"
-                                        data-location-zip="<%= location.zip %>"
-                                        data-location-state_license="<%= location.state_license || '' %>">
-                                    Edit
-                                </button>
-                                <% if (canManagePurchaseLimits) { %>
-                                <button type="button" class="action-btn action-btn--secondary always-visible" data-action="manage-limits"
-                                        data-location-id="<%= location.entry_id %>"
-                                        data-location-name="<%= location.name %>">
-                                    Limits
-                                </button>
-                                <% } %>
-                                <button type="button" class="action-btn action-btn--danger" data-action="delete-location"
-                                        data-location-id="<%= location.entry_id %>"
-                                        data-location-name="<%= location.name %>">
-                                    Delete
-                                </button>
+                                <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                                    <div style="display: flex; gap: 0.5rem;">
+                                        <button type="button" class="action-btn action-btn--primary" data-action="edit-location"
+                                                data-location-id="<%= location.entry_id %>"
+                                                data-location-name="<%= location.name %>"
+                                                data-location-line_one="<%= location.line_one %>"
+                                                data-location-line_two="<%= location.line_two || '' %>"
+                                                data-location-city="<%= location.city %>"
+                                                data-location-state="<%= location.state %>"
+                                                data-location-zip="<%= location.zip %>"
+                                                data-location-state_license="<%= location.state_license || '' %>"
+                                                data-location-delivery_zone="<%= location.delivery_zone || '' %>"
+                                                style="flex: 1;">
+                                            Edit
+                                        </button>
+                                        <% if (canManagePurchaseLimits) { %>
+                                        <button type="button" class="action-btn action-btn--secondary always-visible" data-action="manage-limits"
+                                                data-location-id="<%= location.entry_id %>"
+                                                data-location-name="<%= location.name %>"
+                                                style="flex: 1;">
+                                            Limits
+                                        </button>
+                                        <% } else { %>
+                                        <div style="flex: 1;"></div>
+                                        <% } %>
+                                    </div>
+                                    <div style="display: flex; gap: 0.5rem;">
+                                        <a href="/admin/crm/locations/<%= location.entry_id %>/delivery-windows" 
+                                           class="action-btn action-btn--secondary" 
+                                           style="text-decoration: none; display: inline-flex; align-items: center; justify-content: center; flex: 1;">
+                                            <i class="fas fa-clock" style="margin-right: 0.25rem;"></i> Manage Windows
+                                        </a>
+                                        <button type="button" class="action-btn action-btn--danger" data-action="delete-location"
+                                                data-location-id="<%= location.entry_id %>"
+                                                data-location-name="<%= location.name %>"
+                                                style="flex: 1;">
+                                            Delete
+                                        </button>
+                                    </div>
+                                </div>
                             </td>
                         </tr>
                     <% }); %>

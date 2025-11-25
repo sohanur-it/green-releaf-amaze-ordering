@@ -71,6 +71,32 @@ router.get('/locations/check-dis', requireAuth, requireRole('Sales Admin', 'Admi
 // @desc    Move a location from one buyer to another
 router.post('/locations/:locationId/move', requireAuth, requireRole('Sales Admin', 'Administrator'), locationController.moveLocation);
 
+// --- Delivery Window Routes ---
+
+// @route   GET /api/crm/locations/:locationId/delivery-windows
+// @desc    Get all delivery windows for a location
+router.get('/locations/:locationId/delivery-windows', requireAuth, locationController.getLocationWindows);
+
+// @route   POST /api/crm/locations/:locationId/delivery-windows
+// @desc    Create a new delivery window for a location
+router.post('/locations/:locationId/delivery-windows', requireAuth, requireRole('Sales Admin', 'Administrator'), locationController.createDeliveryWindow);
+
+// @route   PATCH /api/crm/delivery-windows/:windowId
+// @desc    Update a delivery window
+router.patch('/delivery-windows/:windowId', requireAuth, requireRole('Sales Admin', 'Administrator'), locationController.updateDeliveryWindow);
+
+// @route   DELETE /api/crm/delivery-windows/:windowId
+// @desc    Delete a delivery window
+router.delete('/delivery-windows/:windowId', requireAuth, requireRole('Sales Admin', 'Administrator'), locationController.deleteDeliveryWindow);
+
+// @route   POST /api/crm/locations/:locationId/validate-delivery-time
+// @desc    Validate if a delivery time falls within active windows
+router.post('/locations/:locationId/validate-delivery-time', requireAuth, locationController.validateDeliveryTime);
+
+// @route   GET /api/crm/delivery-zones
+// @desc    Get all unique delivery zones (for filtering)
+router.get('/delivery-zones', requireAuth, locationController.getAllDeliveryZones);
+
 // Purchase limit configuration for locations (Sales Admin / Administrator only)
 router.get(
     '/locations/:locationId/purchase-limits',

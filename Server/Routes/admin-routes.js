@@ -283,6 +283,45 @@ router.get('/', async (req, res) => {
 // Route to render the CRM page, handled by our controller
 router.get('/crm', buyerController.getAllBuyers);
 
+// Delivery Windows Management Page
+router.get('/crm/locations/:locationId/delivery-windows', requireRole('Sales Admin', 'Administrator'), async (req, res) => {
+    try {
+        const locationId = parseInt(req.params.locationId);
+        const { query } = require('../config/database');
+        
+        // Get location details
+        const locationResult = await query(`
+            SELECT 
+                l.entry_id,
+                l.name,
+                l.city,
+                l.state,
+                l.delivery_zone,
+                b.entry_id as buyer_id,
+                b.name as buyer_name
+            FROM "ORDERS-buyer_locations" l
+            INNER JOIN "ORDERS-buyers" b ON l.orders_buyer_id = b.entry_id
+            WHERE l.entry_id = $1
+        `, [locationId]);
+        
+        if (locationResult.rows.length === 0) {
+            return res.status(404).send('Location not found');
+        }
+        
+        const location = locationResult.rows[0];
+        
+        res.render('admin/crm/delivery-windows', {
+            title: `Delivery Windows - ${location.name}`,
+            layout: 'layouts/main',
+            location: location,
+            locationId: locationId
+        });
+    } catch (error) {
+        console.error('Error rendering delivery windows page:', error);
+        res.status(500).send('Error loading delivery windows page');
+    }
+});
+
 // The page to manage all sales reps
 router.get('/crm/sales-reps', salesRepController.showRepsPage);
 
@@ -483,10 +522,22 @@ router.get('/fulfillment/scanning/:invoiceId', requireRole('fulfillment_worker',
 router.get('/fulfillment/transportation/:invoiceId', requireRole('fulfillment_worker', 'fulfillment_admin'), async (req, res) => {
     try {
         const invoiceId = parseInt(req.params.invoiceId);
+        const { query } = require('../config/database');
+        
+        // Get location ID for delivery window validation
+        const invoiceResult = await query(`
+            SELECT fk_location_id 
+            FROM "ORDERS-invoices" 
+            WHERE id = $1
+        `, [invoiceId]);
+        
+        const locationId = invoiceResult.rows[0]?.fk_location_id || null;
+        
         res.render('admin/fulfillment/transportation', {
             title: 'Transportation Details',
             layout: 'layouts/main',
-            invoiceId: invoiceId
+            invoiceId: invoiceId,
+            locationId: locationId
         });
     } catch (error) {
         console.error('Error rendering transportation form:', error);
@@ -523,6 +574,31 @@ router.get('/fulfillment/sessions', requireRole('fulfillment_admin', 'admin'), a
 });
 
 // Admin Issues Dashboard
+router.get('/fulfillment/cancelled-packages-verification', requireRole('fulfillment_admin', 'admin'), async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const UserModel = require('../Models/userModel');
+        
+        let user = null;
+        let userRoles = [];
+        
+        if (userId) {
+            user = await UserModel.findById(userId);
+            const roles = await UserModel.getUserRoles(userId);
+            userRoles = roles.map(r => r.name || r.role_name).filter(Boolean);
+        }
+        
+        res.render('admin/fulfillment/cancelled-packages-verification', {
+            user: user,
+            userRoles: userRoles,
+            title: 'Cancelled Packages Verification'
+        });
+    } catch (error) {
+        console.error('Error rendering cancelled packages verification:', error);
+        res.status(500).send('Error loading page');
+    }
+});
+
 router.get('/fulfillment/issues', requireRole('fulfillment_admin', 'admin'), async (req, res) => {
     try {
         res.render('admin/fulfillment/issues', {

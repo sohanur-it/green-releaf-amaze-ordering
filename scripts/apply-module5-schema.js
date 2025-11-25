@@ -67,7 +67,8 @@ async function applyModule5Schema() {
             AND table_name IN (
                 'ORDERS-scanning-sessions',
                 'ORDERS-cancelled-shipment-packages',
-                'ORDERS-manifest-packages'
+                'ORDERS-manifest-packages',
+                'ORDERS-rejected_packages'
             )
             ORDER BY table_name;
         `);
@@ -119,6 +120,7 @@ async function applyModule5Schema() {
         console.log('   ✓ Scanning sessions table created');
         console.log('   ✓ Cancelled shipment packages table created');
         console.log('   ✓ Manifest packages table created');
+        console.log('   ✓ Rejected packages table created');
         console.log('   ✓ Indexes created');
         console.log('   ✓ Modification types extended');
         console.log('');
@@ -131,18 +133,23 @@ async function applyModule5Schema() {
             AND table_name IN (
                 'ORDERS-scanning-sessions',
                 'ORDERS-cancelled-shipment-packages',
-                'ORDERS-manifest-packages'
+                'ORDERS-manifest-packages',
+                'ORDERS-rejected_packages'
             )
             ORDER BY table_name;
         `);
         
-        if (verifyTables.rows.length === 3) {
+        if (verifyTables.rows.length === 4) {
             console.log('✅ All Module 5 tables verified:');
             verifyTables.rows.forEach(row => {
                 console.log(`   ✓ ${row.table_name}`);
             });
         } else {
-            console.log(`⚠️  Warning: Expected 3 tables, found ${verifyTables.rows.length}`);
+            console.log(`⚠️  Warning: Expected 4 tables, found ${verifyTables.rows.length}`);
+            console.log('   Found tables:');
+            verifyTables.rows.forEach(row => {
+                console.log(`     - ${row.table_name}`);
+            });
         }
         
     } catch (error) {

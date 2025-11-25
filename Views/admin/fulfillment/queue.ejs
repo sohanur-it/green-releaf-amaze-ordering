@@ -296,12 +296,19 @@
             <input type="text" id="customer-filter" placeholder="Customer name" onchange="applyFilters()">
         </div>
         <div class="filter-group">
+            <label>Delivery Zone</label>
+            <select id="delivery-zone-filter" onchange="applyFilters()">
+                <option value="">All Zones</option>
+            </select>
+        </div>
+        <div class="filter-group">
             <label>Sort By</label>
             <select id="sort-by" onchange="applyFilters()">
                 <option value="age">Age (Oldest First)</option>
                 <option value="value">Value (Highest First)</option>
                 <option value="destination">Destination</option>
                 <option value="customer">Customer</option>
+                <option value="delivery_zone">Delivery Zone</option>
             </select>
         </div>
     </div>

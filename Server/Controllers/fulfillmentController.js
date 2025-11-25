@@ -742,6 +742,114 @@ class FulfillmentController {
     }
 
     /**
+     * GET /api/v1/admin/cancelled-shipments/unverified-packages
+     * Get unverified packages for admin dashboard
+     */
+    async getUnverifiedPackages(req, res) {
+        try {
+            const filters = {
+                invoice: req.query.invoice || null,
+                incident_type: req.query.incident_type || null,
+                status: req.query.status || null,
+                days: req.query.days ? parseInt(req.query.days) : null,
+                page: parseInt(req.query.page) || 1,
+                limit: parseInt(req.query.limit) || 25
+            };
+
+            const result = await cancelledShipmentService.getUnverifiedPackages(filters);
+            res.json(result);
+        } catch (error) {
+            console.error('Error getting unverified packages:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
+     * POST /api/v1/admin/cancelled-shipments/verify-package/:packageId
+     * Verify a single package
+     */
+    async verifyPackage(req, res) {
+        try {
+            const packageId = parseInt(req.params.packageId);
+            const userId = req.user.id;
+
+            const result = await cancelledShipmentService.verifyPackage(packageId, userId);
+            res.json(result);
+        } catch (error) {
+            console.error('Error verifying package:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
+     * POST /api/v1/admin/cancelled-shipments/mark-missing/:packageId
+     * Mark a package as missing
+     */
+    async markPackageMissing(req, res) {
+        try {
+            const packageId = parseInt(req.params.packageId);
+            const userId = req.user.id;
+            const { reason } = req.body;
+
+            if (!reason || reason.trim().length < 10) {
+                return res.status(400).json({ error: 'Reason is required (minimum 10 characters)' });
+            }
+
+            const result = await cancelledShipmentService.markPackageMissing(packageId, userId, reason);
+            res.json(result);
+        } catch (error) {
+            console.error('Error marking package as missing:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
+     * POST /api/v1/admin/cancelled-shipments/bulk-verify
+     * Bulk verify packages
+     */
+    async bulkVerifyPackages(req, res) {
+        try {
+            const { package_ids } = req.body;
+            const userId = req.user.id;
+
+            if (!Array.isArray(package_ids) || package_ids.length === 0) {
+                return res.status(400).json({ error: 'package_ids array is required' });
+            }
+
+            const result = await cancelledShipmentService.bulkVerifyPackages(package_ids, userId);
+            res.json(result);
+        } catch (error) {
+            console.error('Error bulk verifying packages:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
+     * POST /api/v1/admin/cancelled-shipments/bulk-mark-missing
+     * Bulk mark packages as missing
+     */
+    async bulkMarkPackagesMissing(req, res) {
+        try {
+            const { package_ids, reason } = req.body;
+            const userId = req.user.id;
+
+            if (!Array.isArray(package_ids) || package_ids.length === 0) {
+                return res.status(400).json({ error: 'package_ids array is required' });
+            }
+
+            if (!reason || reason.trim().length < 10) {
+                return res.status(400).json({ error: 'Reason is required (minimum 10 characters)' });
+            }
+
+            const result = await cancelledShipmentService.bulkMarkPackagesMissing(package_ids, userId, reason);
+            res.json(result);
+        } catch (error) {
+            console.error('Error bulk marking packages as missing:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
      * Get unaccounted packages (admin)
      * GET /api/v1/admin/cancelled-shipments/:invoiceId/unaccounted-packages
      */

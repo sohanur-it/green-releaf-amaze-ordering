@@ -248,6 +248,41 @@ router.post('/admin/issues/bulk-assign', requireAuth, requireRole('fulfillment_a
     fulfillmentController.bulkAssignIssues.bind(fulfillmentController));
 
 /**
+ * GET /api/v1/admin/cancelled-shipments/unverified-packages
+ * Get unverified packages for admin dashboard
+ */
+router.get('/admin/cancelled-shipments/unverified-packages', requireAuth, requireRole('fulfillment_admin', 'admin'),
+    fulfillmentController.getUnverifiedPackages.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/admin/cancelled-shipments/verify-package/:packageId
+ * Verify a single package
+ */
+router.post('/admin/cancelled-shipments/verify-package/:packageId', requireAuth, requireRole('fulfillment_admin', 'admin'),
+    fulfillmentController.verifyPackage.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/admin/cancelled-shipments/mark-missing/:packageId
+ * Mark a package as missing
+ */
+router.post('/admin/cancelled-shipments/mark-missing/:packageId', requireAuth, requireRole('fulfillment_admin', 'admin'),
+    fulfillmentController.markPackageMissing.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/admin/cancelled-shipments/bulk-verify
+ * Bulk verify packages
+ */
+router.post('/admin/cancelled-shipments/bulk-verify', requireAuth, requireRole('fulfillment_admin', 'admin'),
+    fulfillmentController.bulkVerifyPackages.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/admin/cancelled-shipments/bulk-mark-missing
+ * Bulk mark packages as missing
+ */
+router.post('/admin/cancelled-shipments/bulk-mark-missing', requireAuth, requireRole('fulfillment_admin', 'admin'),
+    fulfillmentController.bulkMarkPackagesMissing.bind(fulfillmentController));
+
+/**
  * POST /api/v1/admin/cancelled-shipments/:invoiceId/finalize-destroyed
  * Finalize destroyed packages (admin)
  */

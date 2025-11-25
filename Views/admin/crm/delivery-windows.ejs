@@ -1,0 +1,304 @@
+<style>
+.delivery-windows-container {
+    padding: 2rem;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.page-header h1 {
+    margin: 0;
+    color: var(--text-color);
+}
+
+.page-header .back-link {
+    color: var(--text-light);
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.page-header .back-link:hover {
+    color: var(--primary-color);
+}
+
+.location-info {
+    background: var(--card-bg);
+    padding: 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 2rem;
+    border: 1px solid var(--border-color);
+}
+
+.location-info h2 {
+    margin: 0 0 0.5rem 0;
+    color: var(--text-color);
+}
+
+.location-info p {
+    margin: 0.25rem 0;
+    color: var(--text-light);
+}
+
+.windows-section {
+    background: var(--card-bg);
+    padding: 2rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.section-header h2 {
+    margin: 0;
+    color: var(--text-color);
+}
+
+.windows-list {
+    margin-bottom: 2rem;
+}
+
+.window-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1.5rem;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.window-item.active {
+    border-left: 4px solid #28a745;
+}
+
+.window-item.inactive {
+    border-left: 4px solid #dc3545;
+    opacity: 0.7;
+}
+
+.window-info {
+    flex: 1;
+}
+
+.window-info h3 {
+    margin: 0 0 0.5rem 0;
+    color: var(--text-color);
+}
+
+.window-details {
+    display: flex;
+    gap: 2rem;
+    margin-top: 0.5rem;
+    color: var(--text-light);
+    font-size: 0.9rem;
+}
+
+.window-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.window-form {
+    background: var(--card-bg);
+    padding: 2rem;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+    margin-top: 2rem;
+}
+
+.form-group {
+    margin-bottom: 1.5rem;
+}
+
+.form-group label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: var(--text-color);
+}
+
+.days-checkbox-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 0.5rem;
+}
+
+.day-checkbox-label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    color: var(--text-color);
+}
+
+.time-inputs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+}
+
+.form-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    margin-top: 1.5rem;
+}
+
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-light);
+}
+
+.alert {
+    padding: 1rem;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+}
+
+.alert-success {
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+}
+
+.alert-danger {
+    background: #f8d7da;
+    border: 1px solid #f5c6cb;
+    color: #721c24;
+}
+
+.dark-theme .alert-success {
+    background: #1e4620;
+    border-color: #2d5a31;
+    color: #90ee90;
+}
+
+.dark-theme .alert-danger {
+    background: #4a1e1e;
+    border-color: #5a2a2a;
+    color: #ff6b6b;
+}
+</style>
+
+<div class="delivery-windows-container">
+    <div class="page-header">
+        <div>
+            <a href="/admin/crm" class="back-link">
+                <i class="fas fa-arrow-left"></i> Back to CRM
+            </a>
+            <h1>Delivery Windows Management</h1>
+        </div>
+        <button type="button" class="btn btn-primary" id="toggleFormBtn">
+            <i class="fas fa-plus"></i> Add Window
+        </button>
+    </div>
+
+    <div class="location-info">
+        <h2><%= location.name %></h2>
+        <p><strong>Buyer:</strong> <%= location.buyer_name %></p>
+        <p><strong>Location:</strong> <%= location.city || 'N/A' %>, <%= location.state || 'N/A' %></p>
+        <% if (location.delivery_zone) { %>
+        <p><strong>Delivery Zone:</strong> <%= location.delivery_zone %></p>
+        <% } %>
+    </div>
+
+    <div class="windows-section">
+        <div id="messages">
+            <div id="successMessage" class="alert alert-success" style="display: none;"></div>
+            <div id="errorMessage" class="alert alert-danger" style="display: none;"></div>
+        </div>
+
+        <div class="section-header">
+            <h2>Delivery Windows</h2>
+        </div>
+
+        <div id="windowsList" class="windows-list">
+            <div class="loading" style="text-align: center; padding: 2rem; color: var(--text-light);">
+                <i class="fas fa-spinner fa-spin"></i> Loading windows...
+            </div>
+        </div>
+
+        <!-- Add/Edit Window Form -->
+        <div id="windowForm" class="window-form" style="display: none;">
+            <h3 id="formTitle" style="margin-top: 0; color: var(--text-color);">Add Delivery Window</h3>
+            <input type="hidden" id="windowId" value="">
+            
+            <div class="form-group">
+                <label>Days of Week <span class="required">*</span></label>
+                <div class="days-checkbox-group">
+                    <label class="day-checkbox-label">
+                        <input type="checkbox" class="day-checkbox" value="0" style="margin-right: 0.5rem;"> Sunday
+                    </label>
+                    <label class="day-checkbox-label">
+                        <input type="checkbox" class="day-checkbox" value="1" style="margin-right: 0.5rem;"> Monday
+                    </label>
+                    <label class="day-checkbox-label">
+                        <input type="checkbox" class="day-checkbox" value="2" style="margin-right: 0.5rem;"> Tuesday
+                    </label>
+                    <label class="day-checkbox-label">
+                        <input type="checkbox" class="day-checkbox" value="3" style="margin-right: 0.5rem;"> Wednesday
+                    </label>
+                    <label class="day-checkbox-label">
+                        <input type="checkbox" class="day-checkbox" value="4" style="margin-right: 0.5rem;"> Thursday
+                    </label>
+                    <label class="day-checkbox-label">
+                        <input type="checkbox" class="day-checkbox" value="5" style="margin-right: 0.5rem;"> Friday
+                    </label>
+                    <label class="day-checkbox-label">
+                        <input type="checkbox" class="day-checkbox" value="6" style="margin-right: 0.5rem;"> Saturday
+                    </label>
+                </div>
+            </div>
+            
+            <div class="time-inputs">
+                <div class="form-group">
+                    <label>Start Time <span class="required">*</span></label>
+                    <input type="time" id="startTime" class="form-input-modern" required style="width: 100%;">
+                </div>
+                <div class="form-group">
+                    <label>End Time <span class="required">*</span></label>
+                    <input type="time" id="endTime" class="form-input-modern" required style="width: 100%;">
+                </div>
+            </div>
+            
+            <div style="display: flex; gap: 1rem; align-items: center;">
+                <label class="day-checkbox-label">
+                    <input type="checkbox" id="isActive" checked style="margin-right: 0.5rem;"> Active
+                </label>
+                <div class="form-group" style="flex: 1;">
+                    <label>Sort Order</label>
+                    <input type="number" id="sortOrder" value="0" class="form-input-modern" style="width: 100%;">
+                </div>
+            </div>
+            
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" id="cancelFormBtn">Cancel</button>
+                <button type="button" class="btn btn-primary" id="saveWindowBtn">Save Window</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    window.locationId = <%= locationId %>;
+</script>
+<script src="/public/js/admin/delivery-windows.js"></script>
+
+

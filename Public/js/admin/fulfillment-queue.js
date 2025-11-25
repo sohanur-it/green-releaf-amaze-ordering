@@ -7,12 +7,14 @@ let currentFilters = {
     status: '',
     location: '',
     customer: '',
+    deliveryZone: '',
     sortBy: 'age',
     sortOrder: 'asc'
 };
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
+    loadDeliveryZones();
     loadQueue();
     
     // Set up auto-refresh every 30 seconds
@@ -89,7 +91,7 @@ function renderQueue(orders) {
                 <div class="order-header">
                     <div class="order-title">
                         <h3>${order.invoice_number}</h3>
-                        <p>${order.buyer_name} • ${order.location_name || 'N/A'}</p>
+                        <p>${order.buyer_name} • ${order.location_name || 'N/A'}${order.delivery_zone ? ` • Zone: ${order.delivery_zone}` : ''}</p>
                     </div>
                     <div class="order-status ${order.status.toLowerCase().replace('_', '-')}">
                         ${statusText}
@@ -101,6 +103,18 @@ function renderQueue(orders) {
                         <label>Destination</label>
                         <span>${order.city || 'N/A'}, ${order.state || 'N/A'}</span>
                     </div>
+                    ${order.delivery_zone ? `
+                    <div class="order-detail">
+                        <label>Delivery Zone</label>
+                        <span>${order.delivery_zone}</span>
+                    </div>
+                    ` : ''}
+                    ${order.delivery_zone ? `
+                    <div class="order-detail">
+                        <label>Delivery Zone</label>
+                        <span>${order.delivery_zone}</span>
+                    </div>
+                    ` : ''}
                     <div class="order-detail">
                         <label>Total Value</label>
                         <span>$${parseFloat(order.total || 0).toFixed(2)}</span>
@@ -191,6 +205,7 @@ function applyFilters() {
         status: document.getElementById('status-filter').value,
         location: document.getElementById('location-filter').value,
         customer: document.getElementById('customer-filter').value,
+        deliveryZone: document.getElementById('delivery-zone-filter')?.value || '',
         sortBy: document.getElementById('sort-by').value,
         sortOrder: 'asc'
     };

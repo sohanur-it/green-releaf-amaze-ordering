@@ -76,6 +76,26 @@ class TransportationDetailsService {
             // Validate transportation data
             this.validateTransportationData(transportationData);
 
+            // Validate delivery window (if estimatedArrival is provided)
+            let deliveryWindowValidation = null;
+            if (transportationData.estimatedArrival) {
+                try {
+                    const deliveryWindowService = require('./deliveryWindowService');
+                    deliveryWindowValidation = await deliveryWindowService.validateDeliveryTime(
+                        inv.fk_location_id,
+                        transportationData.estimatedArrival
+                    );
+                    
+                    // Store validation result in transportation details for UI display
+                    if (!deliveryWindowValidation.isValid) {
+                        console.warn(`[Transportation] Delivery time outside window for invoice ${invoiceId}`);
+                    }
+                } catch (error) {
+                    console.warn('[Transportation] Delivery window validation failed (non-blocking):', error.message);
+                    // Non-blocking: continue even if validation fails
+                }
+            }
+
             // Get recipientId from METRC API (optional - can be null if API not available)
             let recipientId = null;
             try {
@@ -103,7 +123,13 @@ class TransportationDetailsService {
                 capturedAt: new Date().toISOString(),
                 capturedBy: userId,
                 // Flag to indicate if METRC IDs need to be looked up later
-                metrcIdsPending: !recipientId || !transporterId
+                metrcIdsPending: !recipientId || !transporterId,
+                // Delivery window validation result
+                deliveryWindowValidation: deliveryWindowValidation ? {
+                    isValid: deliveryWindowValidation.isValid,
+                    message: deliveryWindowValidation.message,
+                    matchingWindow: deliveryWindowValidation.matchingWindow
+                } : null
             };
 
             // Store on invoice

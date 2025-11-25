@@ -153,6 +153,23 @@ class ManifestStatusTrackingService {
                 if (firstEstimatedArrival) {
                     updates.estimated_delivery = firstEstimatedArrival;
                 }
+
+                // Notify customer of shipment (if external order)
+                try {
+                    const invoice = await client.query(`
+                        SELECT source, fk_buyer_id
+                        FROM "ORDERS-invoices"
+                        WHERE id = $1
+                    `, [invoiceId]);
+                    
+                    if (invoice.rows.length > 0 && invoice.rows[0].source === 'External') {
+                        const notificationService = require('./notificationService');
+                        await notificationService.notifyCustomerShipment(invoiceId);
+                    }
+                } catch (notifyError) {
+                    console.error(`[Status Sync] Error notifying customer:`, notifyError.message);
+                    // Don't fail the status update if notification fails
+                }
             }
 
             // Handle Delivered status
@@ -414,20 +431,22 @@ class ManifestStatusTrackingService {
                 // Get packages from this manifest
                 const manifestPackages = await client.query(`
                     SELECT 
-                        id,
-                        package_label,
-                        package_metrc_id,
-                        batch_id,
-                        line_item_id
-                    FROM "ORDERS-manifest-packages"
-                    WHERE fk_invoice_id = $1
-                        AND manifest_number = $2
-                        AND package_status = 'manifested'
-                    ORDER BY id
+                        mp.id,
+                        mp.package_label,
+                        mp.package_metrc_id,
+                        mp.batch_id,
+                        mp.line_item_id,
+                        mp.quantity,
+                        mp.synclicense
+                    FROM "ORDERS-manifest-packages" mp
+                    WHERE mp.fk_invoice_id = $1
+                        AND mp.manifest_number = $2
+                        AND mp.package_status = 'manifested'
+                    ORDER BY mp.id
                     LIMIT $3
                 `, [invoiceId, result.manifest.number, rejectedCount]);
 
-                // Mark packages as rejected
+                // Mark packages as rejected and restore inventory
                 for (const pkg of manifestPackages.rows) {
                     await client.query(`
                         UPDATE "ORDERS-manifest-packages"
@@ -444,19 +463,135 @@ class ManifestStatusTrackingService {
                             rejection_date,
                             rejection_reason,
                             synclicense,
+                            batch_id,
                             detected_at
-                        ) VALUES ($1, $2, $3, NOW(), $4, $5, NOW())
+                        ) VALUES ($1, $2, $3, NOW(), $4, $5, $6, NOW())
                         ON CONFLICT (synclicense, packagelabel, manifestnumber) DO NOTHING
                     `, [
                         pkg.package_label,
                         pkg.package_metrc_id,
                         result.manifest.number,
                         'Package rejected by receiving facility',
-                        result.manifest.license
+                        result.manifest.license,
+                        pkg.batch_id
                     ]);
+
+                    // Restore inventory for rejected package
+                    await this.restoreRejectedPackageInventory({
+                        ...pkg,
+                        synclicense: pkg.synclicense || result.manifest.license
+                    }, client);
                 }
             }
         }
+    }
+
+    /**
+     * Restore inventory for rejected packages
+     * Verifies package is back in activepackages, then increments batch quantity
+     */
+    async restoreRejectedPackageInventory(pkg, client) {
+        try {
+            // Check if package exists in activepackages (returned to inventory)
+            const licenseColumn = await this.getActivePackagesLicenseColumn(client);
+            const activePackage = await client.query(`
+                SELECT id, label, isarchived, isfinished
+                FROM activepackages
+                WHERE label = $1
+                    AND ${licenseColumn} = $2
+                    AND isarchived = false
+                    AND isfinished = false
+            `, [pkg.package_label, pkg.synclicense || pkg.sync_license]);
+
+            if (activePackage.rows.length > 0) {
+                // Package found in activepackages - restore to inventory
+                const quantity = parseFloat(pkg.quantity) || 1;
+                const license = pkg.synclicense || pkg.sync_license;
+
+                // Increment batch quantity (package is back in sellable inventory)
+                await client.query(`
+                    UPDATE "ORDERS-batches"
+                    SET quantity = quantity + $1
+                    WHERE id = $2
+                `, [quantity, pkg.batch_id]);
+
+                // Decrement allocated_quantity (allocation was already released at delivery)
+                await client.query(`
+                    UPDATE "ORDERS-batches"
+                    SET allocated_quantity = GREATEST(0, allocated_quantity - $1)
+                    WHERE id = $2
+                `, [quantity, pkg.batch_id]);
+
+                // Mark as returned to inventory
+                await client.query(`
+                    UPDATE "ORDERS-rejected_packages"
+                    SET 
+                        returned_to_inventory = true,
+                        inventory_restored_at = NOW(),
+                        inventory_restored_by = NULL
+                    WHERE packagelabel = $1
+                        AND synclicense = $2
+                `, [pkg.package_label, license]);
+
+                // Log to batch history
+                await client.query(`
+                    INSERT INTO "ORDERS-batch-history" (
+                        batch_id,
+                        change_type,
+                        field_name,
+                        reason,
+                        changed_by_system,
+                        change_details
+                    ) VALUES ($1, 'package_returned', 'quantity',
+                             'Rejected package returned to inventory', true, $2)
+                `, [
+                    pkg.batch_id,
+                    JSON.stringify({
+                        package_label: pkg.package_label,
+                        quantity_restored: quantity,
+                        reason: 'Package rejected and returned'
+                    })
+                ]);
+
+                // Broadcast batch update
+                const batch = await client.query(`
+                    SELECT quantity, allocated_quantity
+                    FROM "ORDERS-batches"
+                    WHERE id = $1
+                `, [pkg.batch_id]);
+
+                if (batch.rows.length > 0) {
+                    const b = batch.rows[0];
+                    websocketService.broadcastBatchInventoryUpdate(
+                        pkg.batch_id,
+                        parseFloat(b.quantity) - parseFloat(b.allocated_quantity),
+                        parseFloat(b.allocated_quantity)
+                    );
+                }
+
+                console.log(`[Rejection Recovery] Restored package ${pkg.package_label} to inventory`);
+            } else {
+                console.log(`[Rejection Recovery] Package ${pkg.package_label} not yet in activepackages - will retry on next sync`);
+            }
+        } catch (error) {
+            console.error(`[Rejection Recovery] Error restoring package ${pkg.package_label}:`, error.message);
+            // Don't throw - allow sync to continue
+        }
+    }
+
+    /**
+     * Get active packages license column name
+     */
+    async getActivePackagesLicenseColumn(client) {
+        const checkColumn = await client.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'activepackages' 
+            AND column_name IN ('sync_license', 'synclicense')
+            LIMIT 1
+        `);
+        
+        return checkColumn.rows.length > 0 ? checkColumn.rows[0].column_name : 'synclicense';
     }
 }
 

@@ -224,6 +224,25 @@ class CancelledShipmentService {
                 })
             ]);
 
+            // Check if all packages are accounted for and release allocations
+            const allPackages = await client.query(`
+                SELECT COUNT(*) as total,
+                       SUM(CASE WHEN returned_to_inventory = true THEN 1 ELSE 0 END) as returned,
+                       SUM(CASE WHEN allocation_released = true THEN 1 ELSE 0 END) as released
+                FROM "ORDERS-cancelled-shipment-packages"
+                WHERE fk_invoice_id = $1
+                    AND deleted_at IS NULL
+            `, [invoiceId]);
+
+            const totalPackages = parseInt(allPackages.rows[0].total);
+            const returnedPackages = parseInt(allPackages.rows[0].returned);
+            const releasedPackages = parseInt(allPackages.rows[0].released);
+
+            // If all packages are accounted for (returned or destroyed), release allocations
+            if (totalPackages > 0 && (returnedPackages + releasedPackages) === totalPackages && releasedPackages < totalPackages) {
+                await this.releaseAllAllocationsForCancelledShipment(invoiceId, userId, client);
+            }
+
             await client.query('COMMIT');
 
             return {
@@ -231,6 +250,7 @@ class CancelledShipmentService {
                 verified_count: verifiedCount,
                 not_found_count: notFoundPackages.length,
                 all_verified: notFoundPackages.length === 0,
+                allocations_released: (returnedPackages + releasedPackages) === totalPackages && releasedPackages < totalPackages,
                 message: `${verifiedCount} package(s) verified and returned to inventory. ${notFoundPackages.length > 0 ? `${notFoundPackages.length} package(s) not yet found in METRC.` : 'All packages accounted for.'}`
             };
 
@@ -629,6 +649,401 @@ class CancelledShipmentService {
                 }))
             };
 
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Release all allocations for cancelled shipment
+     * Only called when ALL packages are accounted for (returned or destroyed)
+     */
+    async releaseAllAllocationsForCancelledShipment(invoiceId, userId, client) {
+        // Get all packages that haven't had allocations released
+        const packages = await client.query(`
+            SELECT 
+                id,
+                package_label,
+                batch_id,
+                allocation_released
+            FROM "ORDERS-cancelled-shipment-packages"
+            WHERE fk_invoice_id = $1
+                AND allocation_released = false
+                AND deleted_at IS NULL
+        `, [invoiceId]);
+
+        // Group by batch for efficient updates
+        const batchUpdates = {};
+
+        for (const pkg of packages.rows) {
+            const batchId = pkg.batch_id;
+            if (!batchUpdates[batchId]) {
+                batchUpdates[batchId] = {
+                    allocated: 0,
+                    packages: []
+                };
+            }
+
+            // Get quantity from line item
+            const lineItem = await client.query(`
+                SELECT li.quantity_allocated
+                FROM "ORDERS-invoice-line-items" li
+                JOIN "ORDERS-manifest-packages" mp ON li.id = mp.line_item_id
+                WHERE mp.package_label = $1
+                LIMIT 1
+            `, [pkg.package_label]);
+
+            const quantity = lineItem.rows.length > 0 
+                ? parseFloat(lineItem.rows[0].quantity_allocated) || 1
+                : 1;
+
+            batchUpdates[batchId].allocated += quantity;
+            batchUpdates[batchId].packages.push(pkg);
+
+            // Mark package allocation as released
+            await client.query(`
+                UPDATE "ORDERS-cancelled-shipment-packages"
+                SET 
+                    allocation_released = true,
+                    allocation_released_at = NOW(),
+                    allocation_released_by = $1
+                WHERE id = $2
+            `, [userId, pkg.id]);
+        }
+
+        // Apply batch updates
+        for (const [batchId, updates] of Object.entries(batchUpdates)) {
+            // Decrement allocated_quantity
+            await client.query(`
+                UPDATE "ORDERS-batches"
+                SET allocated_quantity = GREATEST(0, allocated_quantity - $1)
+                WHERE id = $2
+            `, [updates.allocated, batchId]);
+
+            // Log to batch history
+            await client.query(`
+                INSERT INTO "ORDERS-batch-history" (
+                    batch_id,
+                    change_type,
+                    field_name,
+                    reason,
+                    related_invoice_id,
+                    changed_by_system,
+                    change_details
+                ) VALUES ($1, 'allocation_released_cancelled_shipment', 'allocated_quantity',
+                         'Allocations released - cancelled shipment packages accounted for', $2, false, $3)
+            `, [
+                batchId,
+                invoiceId,
+                JSON.stringify({
+                    packages: updates.packages.map(p => p.package_label),
+                    quantity_released: updates.allocated
+                })
+            ]);
+
+            // Broadcast batch update
+            const batch = await client.query(`
+                SELECT quantity, allocated_quantity
+                FROM "ORDERS-batches"
+                WHERE id = $1
+            `, [batchId]);
+
+            if (batch.rows.length > 0) {
+                const b = batch.rows[0];
+                websocketService.broadcastBatchInventoryUpdate(
+                    batchId,
+                    parseFloat(b.quantity) - parseFloat(b.allocated_quantity),
+                    parseFloat(b.allocated_quantity)
+                );
+            }
+        }
+
+        // Check if invoice can be finalized
+        const remaining = await client.query(`
+            SELECT COUNT(*) as count
+            FROM "ORDERS-cancelled-shipment-packages"
+            WHERE fk_invoice_id = $1
+                AND allocation_released = false
+                AND deleted_at IS NULL
+        `, [invoiceId]);
+
+        if (remaining.rows[0].count === 0) {
+            // All packages accounted for and allocations released
+            await client.query(`
+                UPDATE "ORDERS-invoices"
+                SET status = 'Cancelled'
+                WHERE id = $1
+            `, [invoiceId]);
+        }
+
+        console.log(`[Cancelled Shipment] Released allocations for ${packages.rows.length} packages`);
+    }
+
+    /**
+     * Get unverified packages for admin dashboard
+     * GET /api/v1/admin/cancelled-shipments/unverified-packages
+     */
+    async getUnverifiedPackages(filters) {
+        const client = await pool.connect();
+
+        try {
+            let query = `
+                SELECT 
+                    csp.id,
+                    csp.package_label,
+                    csp.batch_id,
+                    csp.incident_type,
+                    csp.returned_to_inventory,
+                    csp.allocation_released,
+                    csp.created_at,
+                    i.invoice_number
+                FROM "ORDERS-cancelled-shipment-packages" csp
+                JOIN "ORDERS-invoices" i ON csp.fk_invoice_id = i.id
+                WHERE csp.deleted_at IS NULL
+            `;
+
+            const params = [];
+            let paramCount = 1;
+
+            if (filters.invoice) {
+                query += ` AND i.invoice_number ILIKE $${paramCount}`;
+                params.push(`%${filters.invoice}%`);
+                paramCount++;
+            }
+
+            if (filters.incident_type) {
+                query += ` AND csp.incident_type = $${paramCount}`;
+                params.push(filters.incident_type);
+                paramCount++;
+            }
+
+            if (filters.status === 'unverified') {
+                query += ` AND csp.returned_to_inventory = false AND csp.allocation_released = false`;
+            } else if (filters.status === 'verified') {
+                query += ` AND csp.returned_to_inventory = true`;
+            } else if (filters.status === 'missing') {
+                query += ` AND csp.allocation_released = true AND csp.returned_to_inventory = false`;
+            }
+
+            if (filters.days) {
+                query += ` AND csp.created_at >= NOW() - INTERVAL '${filters.days} days'`;
+            }
+
+            query += ` ORDER BY csp.created_at DESC`;
+
+            // Get total count
+            const countQuery = query.replace(/SELECT.*FROM/, 'SELECT COUNT(*) as total FROM');
+            const countResult = await client.query(countQuery, params);
+            const total = parseInt(countResult.rows[0].total);
+
+            // Add pagination
+            const offset = (filters.page - 1) * filters.limit;
+            query += ` LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
+            params.push(filters.limit, offset);
+
+            const result = await client.query(query, params);
+
+            return {
+                packages: result.rows,
+                pagination: {
+                    page: filters.page,
+                    limit: filters.limit,
+                    total: total,
+                    totalPages: Math.ceil(total / filters.limit)
+                }
+            };
+
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Verify a single package
+     */
+    async verifyPackage(packageId, userId) {
+        const client = await pool.connect();
+
+        try {
+            await client.query('BEGIN');
+
+            // Get package details
+            const pkg = await client.query(`
+                SELECT 
+                    id,
+                    package_label,
+                    batch_id,
+                    fk_invoice_id,
+                    synclicense
+                FROM "ORDERS-cancelled-shipment-packages"
+                WHERE id = $1
+            `, [packageId]);
+
+            if (pkg.rows.length === 0) {
+                throw new Error('Package not found');
+            }
+
+            const packageData = pkg.rows[0];
+
+            // Check if package exists in activepackages
+            const licenseColumn = await this.getActivePackagesLicenseColumn(client);
+            const activePackage = await client.query(`
+                SELECT id, label
+                FROM activepackages
+                WHERE label = $1
+                    AND ${licenseColumn} = $2
+                    AND isarchived = false
+                    AND isfinished = false
+            `, [packageData.package_label, packageData.synclicense]);
+
+            if (activePackage.rows.length === 0) {
+                throw new Error('Package not found in METRC activepackages - cannot verify');
+            }
+
+            // Mark as verified and restore inventory
+            await client.query(`
+                UPDATE "ORDERS-cancelled-shipment-packages"
+                SET 
+                    verified_in_metrc = true,
+                    returned_to_inventory = true,
+                    verified_at = NOW(),
+                    verified_by = $1
+                WHERE id = $2
+            `, [userId, packageId]);
+
+            // Restore inventory
+            await this.restorePackageToInventory(packageData.batch_id, packageId, packageData.fk_invoice_id, client);
+
+            // Update invoice count
+            await client.query(`
+                UPDATE "ORDERS-invoices"
+                SET packages_returned_count = packages_returned_count + 1
+                WHERE id = $1
+            `, [packageData.fk_invoice_id]);
+
+            await client.query('COMMIT');
+
+            return { success: true, message: 'Package verified and returned to inventory' };
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Mark a package as missing
+     */
+    async markPackageMissing(packageId, userId, reason) {
+        const client = await pool.connect();
+
+        try {
+            await client.query('BEGIN');
+
+            // Get package details
+            const pkg = await client.query(`
+                SELECT 
+                    id,
+                    fk_invoice_id,
+                    package_label
+                FROM "ORDERS-cancelled-shipment-packages"
+                WHERE id = $1
+            `, [packageId]);
+
+            if (pkg.rows.length === 0) {
+                throw new Error('Package not found');
+            }
+
+            // Mark as missing (will be finalized later)
+            await client.query(`
+                UPDATE "ORDERS-cancelled-shipment-packages"
+                SET 
+                    returned_to_inventory = false,
+                    verified_in_metrc = false,
+                    admin_notes = $1
+                WHERE id = $2
+            `, [reason, packageId]);
+
+            // Update invoice count
+            await client.query(`
+                UPDATE "ORDERS-invoices"
+                SET packages_missing_count = packages_missing_count + 1
+                WHERE id = $1
+            `, [pkg.rows[0].fk_invoice_id]);
+
+            await client.query('COMMIT');
+
+            return { success: true, message: 'Package marked as missing' };
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Bulk verify packages
+     */
+    async bulkVerifyPackages(packageIds, userId) {
+        const client = await pool.connect();
+        let verifiedCount = 0;
+
+        try {
+            await client.query('BEGIN');
+
+            for (const packageId of packageIds) {
+                try {
+                    await this.verifyPackage(packageId, userId);
+                    verifiedCount++;
+                } catch (error) {
+                    console.error(`Error verifying package ${packageId}:`, error.message);
+                    // Continue with other packages
+                }
+            }
+
+            await client.query('COMMIT');
+
+            return { success: true, verified_count: verifiedCount };
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Bulk mark packages as missing
+     */
+    async bulkMarkPackagesMissing(packageIds, userId, reason) {
+        const client = await pool.connect();
+        let markedCount = 0;
+
+        try {
+            await client.query('BEGIN');
+
+            for (const packageId of packageIds) {
+                try {
+                    await this.markPackageMissing(packageId, userId, reason);
+                    markedCount++;
+                } catch (error) {
+                    console.error(`Error marking package ${packageId} as missing:`, error.message);
+                    // Continue with other packages
+                }
+            }
+
+            await client.query('COMMIT');
+
+            return { success: true, marked_count: markedCount };
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
         } finally {
             client.release();
         }

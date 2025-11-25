@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initializeForm();
     loadTransporters();
     setupFormValidation();
+    setupDeliveryWindowValidation();
 });
 
 /**
@@ -253,5 +254,61 @@ function goBack() {
     if (confirm('Go back? Unsaved changes will be lost.')) {
         window.location.href = `/admin/fulfillment/scanning/${window.invoiceId}`;
     }
+}
+
+/**
+ * Setup delivery window validation
+ */
+function setupDeliveryWindowValidation() {
+    const arrivalInput = document.getElementById('estimated-arrival');
+    const warningDiv = document.getElementById('delivery-window-warning');
+    const warningText = document.getElementById('delivery-window-warning-text');
+    
+    if (!arrivalInput || !warningDiv || !window.locationId) {
+        return; // No location ID, skip validation
+    }
+    
+    let validationTimeout;
+    
+    arrivalInput.addEventListener('change', () => {
+        clearTimeout(validationTimeout);
+        
+        const arrivalValue = arrivalInput.value;
+        if (!arrivalValue) {
+            warningDiv.style.display = 'none';
+            return;
+        }
+        
+        // Debounce validation
+        validationTimeout = setTimeout(async () => {
+            try {
+                const arrivalDate = new Date(arrivalValue);
+                const response = await fetch(`/api/crm/locations/${window.locationId}/validate-delivery-time`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        deliveryDateTime: arrivalDate.toISOString()
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    if (!result.isValid) {
+                        warningText.textContent = result.message || 'Delivery time falls outside active delivery windows';
+                        warningDiv.style.display = 'block';
+                        warningDiv.className = 'alert alert-warning';
+                    } else {
+                        warningDiv.style.display = 'none';
+                    }
+                }
+            } catch (error) {
+                console.error('Error validating delivery window:', error);
+                // Don't show error to user, just log it
+            }
+        }, 500);
+    });
 }
 

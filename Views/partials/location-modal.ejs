@@ -57,6 +57,26 @@
                             <small class="form-hint">State-issued license number. If this DIS number belongs to another buyer, you can move that location here.</small>
                         </div>
                     </div>
+                    <div class="col-md-12" style="padding: 0; margin-bottom: 1.5rem;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="locationDeliveryZone" style="display: block; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-color);">Delivery Zone</label>
+                            <input type="text" id="locationDeliveryZone" name="delivery_zone" class="form-input-modern" placeholder="e.g., North Zone, Downtown, etc." style="width: 100%; box-sizing: border-box;">
+                            <small class="form-hint">Internal tracking field for delivery zone assignment. Used for filtering and sorting in fulfillment queue.</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Delivery Windows Section (only show when editing existing location) -->
+                <div id="deliveryWindowsSection" style="display: none; margin-top: 2rem; padding-top: 2rem; border-top: 1px solid #e0e0e0;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                        <h4 style="margin: 0; color: var(--text-color);">Delivery Windows</h4>
+                        <button type="button" id="manageDeliveryWindowsBtn" class="btn btn-secondary" style="font-size: 0.875rem;">
+                            <i class="fas fa-clock"></i> Manage Windows
+                        </button>
+                    </div>
+                    <div id="deliveryWindowsPreview" style="color: var(--text-light); font-size: 0.875rem;">
+                        <em>No delivery windows configured</em>
+                    </div>
                 </div>
 
                 <div id="locationFormWarning" class="alert alert-warning" style="display: none; margin-top: 1rem;">

@@ -303,6 +303,56 @@ COMMENT ON TABLE "ORDERS-manifest-packages" IS
     'Junction table recording which packages were on each manifest. Critical for rejection detection and cancelled shipment verification. Populated immediately after successful manifest creation.';
 
 -- =====================================================
+-- 2.6 Rejected Package Tracking Table
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS "ORDERS-rejected_packages" (
+    id SERIAL PRIMARY KEY,
+    
+    -- Package Info
+    packagelabel VARCHAR(255) NOT NULL,
+    package_metrc_id INTEGER,
+    batch_id INTEGER REFERENCES "ORDERS-batches"(id),
+    
+    -- Manifest Info
+    manifestnumber VARCHAR(100) NOT NULL,
+    synclicense VARCHAR(50) NOT NULL,
+    
+    -- Rejection Details
+    rejection_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    rejection_reason TEXT,
+    detected_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    
+    -- Inventory Recovery
+    returned_to_inventory BOOLEAN DEFAULT false,
+    inventory_restored_at TIMESTAMPTZ,
+    inventory_restored_by INTEGER REFERENCES users(id),
+    
+    -- Metadata
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    
+    -- Unique constraint: same package can't be rejected twice for same manifest
+    CONSTRAINT uq_rejected_package UNIQUE (synclicense, packagelabel, manifestnumber)
+);
+
+CREATE INDEX IF NOT EXISTS idx_rejected_packages_label 
+    ON "ORDERS-rejected_packages"(packagelabel, synclicense);
+
+CREATE INDEX IF NOT EXISTS idx_rejected_packages_manifest 
+    ON "ORDERS-rejected_packages"(manifestnumber, synclicense);
+
+CREATE INDEX IF NOT EXISTS idx_rejected_packages_batch 
+    ON "ORDERS-rejected_packages"(batch_id);
+
+CREATE INDEX IF NOT EXISTS idx_rejected_packages_not_restored 
+    ON "ORDERS-rejected_packages"(returned_to_inventory) 
+    WHERE returned_to_inventory = false;
+
+COMMENT ON TABLE "ORDERS-rejected_packages" IS 
+    'Tracks packages that were rejected by receiving facility. Used for inventory recovery tracking.';
+
+-- =====================================================
 -- 6. Update Invoice History Modification Type Enum
 -- =====================================================
 

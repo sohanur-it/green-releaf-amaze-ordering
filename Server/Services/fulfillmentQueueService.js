@@ -14,6 +14,7 @@ class FulfillmentQueueService {
             status,
             location,
             customer,
+            deliveryZone,
             minTotal,
             maxTotal,
             sortBy = 'age',
@@ -41,6 +42,7 @@ class FulfillmentQueueService {
                 bl.name as location_name,
                 bl.city,
                 bl.state,
+                bl.delivery_zone,
                 
                 -- Order Summary
                 COUNT(DISTINCT li.id) as line_item_count,
@@ -93,6 +95,13 @@ class FulfillmentQueueService {
             paramCount++;
         }
 
+        // Delivery zone filter
+        if (deliveryZone) {
+            sql += ` AND bl.delivery_zone = $${paramCount}`;
+            params.push(deliveryZone);
+            paramCount++;
+        }
+
         // Value filters
         if (minTotal) {
             sql += ` AND i.total >= $${paramCount}`;
@@ -109,7 +118,7 @@ class FulfillmentQueueService {
         // Group by
         sql += `
             GROUP BY i.id, i.location_license_number, b.name, bl.name, 
-                     bl.city, bl.state, u.first_name, u.last_name
+                     bl.city, bl.state, bl.delivery_zone, u.first_name, u.last_name
         `;
 
         // Sorting
@@ -118,7 +127,8 @@ class FulfillmentQueueService {
             'value': 'i.total',
             'destination': 'bl.city',
             'customer': 'b.name',
-            'item_count': 'line_item_count'
+            'item_count': 'line_item_count',
+            'delivery_zone': 'bl.delivery_zone'
         };
 
         const sortColumn = sortColumnMap[sortBy] || 'i.approved_at';

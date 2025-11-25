@@ -214,10 +214,90 @@ const moveLocation = async (req, res) => {
     }
 };
 
+// Delivery Window Management
+const deliveryWindowService = require('../../Services/deliveryWindowService');
+
+// Get all delivery windows for a location
+const getLocationWindows = async (req, res) => {
+    try {
+        const { locationId } = req.params;
+        const windows = await deliveryWindowService.getLocationWindows(locationId);
+        res.json({ success: true, windows });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Failed to get delivery windows", error: err.message });
+    }
+};
+
+// Create a new delivery window
+const createDeliveryWindow = async (req, res) => {
+    try {
+        const { locationId } = req.params;
+        const window = await deliveryWindowService.createWindow(locationId, req.body);
+        res.status(201).json({ success: true, window });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Failed to create delivery window", error: err.message });
+    }
+};
+
+// Update a delivery window
+const updateDeliveryWindow = async (req, res) => {
+    try {
+        const { windowId } = req.params;
+        const window = await deliveryWindowService.updateWindow(windowId, req.body);
+        res.json({ success: true, window });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Failed to update delivery window", error: err.message });
+    }
+};
+
+// Delete a delivery window
+const deleteDeliveryWindow = async (req, res) => {
+    try {
+        const { windowId } = req.params;
+        await deliveryWindowService.deleteWindow(windowId);
+        res.status(204).send();
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Failed to delete delivery window", error: err.message });
+    }
+};
+
+// Validate delivery time for a location
+const validateDeliveryTime = async (req, res) => {
+    try {
+        const { locationId } = req.params;
+        const { deliveryDateTime } = req.body;
+        
+        if (!deliveryDateTime) {
+            return res.status(400).json({ success: false, message: "deliveryDateTime is required" });
+        }
+        
+        const validation = await deliveryWindowService.validateDeliveryTime(locationId, deliveryDateTime);
+        res.json({ success: true, ...validation });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Failed to validate delivery time", error: err.message });
+    }
+};
+
+// Get all delivery zones (for filtering)
+const getAllDeliveryZones = async (req, res) => {
+    try {
+        const zones = await deliveryWindowService.getAllDeliveryZones();
+        res.json({ success: true, zones });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Failed to get delivery zones", error: err.message });
+    }
+};
+
 module.exports = {
     createLocation,
     updateLocation,
     deleteLocation,
     checkDisNumber,
-    moveLocation
+    moveLocation,
+    getLocationWindows,
+    createDeliveryWindow,
+    updateDeliveryWindow,
+    deleteDeliveryWindow,
+    validateDeliveryTime,
+    getAllDeliveryZones
 };
