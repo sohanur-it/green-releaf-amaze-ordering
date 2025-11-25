@@ -123,7 +123,22 @@ class CartCleanupService {
                 throw new Error(`Cannot delete cart ${cartId}: credit applications exist and cannot be deleted - ${creditError.message}`);
             }
 
-            // 2. Delete invoice history
+            // 2. Delete account credit history (if any)
+            try {
+                const creditHistoryDeleted = await client.query(`
+                    DELETE FROM "orders-account-credit-history"
+                    WHERE related_invoice_id = $1
+                `, [cartId]);
+                if (creditHistoryDeleted.rowCount > 0) {
+                    console.log(`🗑️  Deleted ${creditHistoryDeleted.rowCount} account credit history record(s) for cart ${cartId}`);
+                }
+            } catch (creditHistoryError) {
+                console.warn(`⚠️  Error deleting account credit history:`, creditHistoryError.message);
+                // If this fails, we can't delete the invoice - throw error
+                throw new Error(`Cannot delete cart ${cartId}: account credit history exists and cannot be deleted - ${creditHistoryError.message}`);
+            }
+
+            // 3. Delete invoice history
             try {
                 const historyDeleted = await client.query(`
                     DELETE FROM "ORDERS-invoice-history"
@@ -137,7 +152,7 @@ class CartCleanupService {
                 // History deletion failure is non-critical - continue
             }
 
-            // 3. Delete scanning sessions (if any)
+            // 4. Delete scanning sessions (if any)
             try {
                 const sessionsDeleted = await client.query(`
                     DELETE FROM "ORDERS-scanning-sessions"
@@ -150,7 +165,7 @@ class CartCleanupService {
                 console.warn(`⚠️  Error deleting scanning sessions (non-critical):`, sessionError.message);
             }
 
-            // 4. Delete cancelled shipment packages (if any)
+            // 5. Delete cancelled shipment packages (if any)
             try {
                 const cancelledPkgsDeleted = await client.query(`
                     DELETE FROM "ORDERS-cancelled-shipment-packages"
@@ -163,7 +178,7 @@ class CartCleanupService {
                 console.warn(`⚠️  Error deleting cancelled shipment packages (non-critical):`, cancelledError.message);
             }
 
-            // 5. Delete manifest packages (if any)
+            // 6. Delete manifest packages (if any)
             try {
                 const manifestPkgsDeleted = await client.query(`
                     DELETE FROM "ORDERS-manifest-packages"
