@@ -24,6 +24,41 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /**
+ * Load delivery zones for filter dropdown
+ */
+async function loadDeliveryZones() {
+    const deliveryZoneFilter = document.getElementById('delivery-zone-filter');
+    if (!deliveryZoneFilter) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/crm/delivery-zones');
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Failed to load delivery zones');
+        }
+
+        // Clear existing options except "All Zones"
+        deliveryZoneFilter.innerHTML = '<option value="">All Zones</option>';
+
+        // Add zones to dropdown
+        if (data.zones && data.zones.length > 0) {
+            data.zones.forEach(zone => {
+                const option = document.createElement('option');
+                option.value = zone;
+                option.textContent = zone;
+                deliveryZoneFilter.appendChild(option);
+            });
+        }
+    } catch (error) {
+        console.error('Error loading delivery zones:', error);
+        // Keep the default "All Zones" option if loading fails
+    }
+}
+
+/**
  * Load fulfillment queue
  */
 async function loadQueue() {
@@ -103,12 +138,6 @@ function renderQueue(orders) {
                         <label>Destination</label>
                         <span>${order.city || 'N/A'}, ${order.state || 'N/A'}</span>
                     </div>
-                    ${order.delivery_zone ? `
-                    <div class="order-detail">
-                        <label>Delivery Zone</label>
-                        <span>${order.delivery_zone}</span>
-                    </div>
-                    ` : ''}
                     ${order.delivery_zone ? `
                     <div class="order-detail">
                         <label>Delivery Zone</label>
