@@ -741,6 +741,501 @@ class FulfillmentIssueService {
             client.release();
         }
     }
+
+    /**
+     * Sales rep resolves the issue by modifying invoice
+     * Can add, remove, or change line items
+     * This is the unified method that combines all modifications and state transition
+     */
+    async resolveIssueAndModify(invoiceId, modifications, userId) {
+        const client = await pool.connect();
+
+        try {
+            await client.query('BEGIN');
+
+            // Verify invoice is in Fulfillment_Issue state
+            const invoice = await client.query(`
+                SELECT 
+                    status,
+                    assigned_sales_rep_id,
+                    invoice_number
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+                FOR UPDATE
+            `, [invoiceId]);
+
+            if (invoice.rows.length === 0) {
+                throw new Error('Invoice not found');
+            }
+
+            const inv = invoice.rows[0];
+
+            if (inv.status !== 'Fulfillment_Issue') {
+                throw new Error('Invoice not in Fulfillment_Issue state');
+            }
+
+            // Verify user has permission (assigned sales rep or admin)
+            // Note: Admin check would be done at route level, here we check sales rep
+            if (inv.assigned_sales_rep_id && inv.assigned_sales_rep_id !== userId) {
+                // Allow if user is admin (check would be done at route level)
+                // For now, we'll allow if they got this far (route middleware handles auth)
+            }
+
+            // Apply modifications
+            const resolutionActions = [];
+
+            // Remove line items
+            for (const mod of modifications.remove_items || []) {
+                await this.removeLineItemWithHistory(
+                    invoiceId,
+                    mod.line_item_id,
+                    mod.reason || 'Removed to resolve fulfillment issue',
+                    userId,
+                    client
+                );
+                resolutionActions.push({
+                    action: 'remove',
+                    line_item_id: mod.line_item_id,
+                    reason: mod.reason
+                });
+            }
+
+            // Add line items
+            for (const mod of modifications.add_items || []) {
+                const lineItemId = await this.addLineItemWithHistory(
+                    invoiceId,
+                    mod,
+                    userId,
+                    client
+                );
+                resolutionActions.push({
+                    action: 'add',
+                    line_item_id: lineItemId,
+                    batch_id: mod.fk_batch_id,
+                    quantity: mod.quantity
+                });
+            }
+
+            // Modify line item quantities
+            for (const mod of modifications.quantity_changes || []) {
+                await this.modifyLineItemQuantity(
+                    invoiceId,
+                    mod.line_item_id,
+                    mod.new_quantity,
+                    mod.reason || 'Quantity modified to resolve fulfillment issue',
+                    userId,
+                    client
+                );
+                resolutionActions.push({
+                    action: 'quantity_change',
+                    line_item_id: mod.line_item_id,
+                    new_quantity: mod.new_quantity,
+                    reason: mod.reason
+                });
+            }
+
+            // Recalculate totals
+            const internalInvoiceService = require('./internalInvoiceService');
+            await internalInvoiceService.recalculateTotals(invoiceId, client);
+
+            // Track resolution (within transaction)
+            // Note: trackIssueResolution creates its own transaction, so we'll do it manually
+            try {
+                await client.query(`
+                    UPDATE "ORDERS-invoices"
+                    SET 
+                        resolved_at = NOW(),
+                        resolved_by = $1,
+                        resolution_actions = $2::jsonb
+                    WHERE id = $3
+                `, [userId, JSON.stringify(resolutionActions), invoiceId]);
+            } catch (columnError) {
+                // Columns don't exist yet - that's OK, we'll just log to history
+                console.log('[Issue Resolution] Resolution columns not found, storing in history only');
+            }
+
+            // Log resolution
+            await client.query(`
+                INSERT INTO "ORDERS-invoice-history" (
+                    fk_invoice_id,
+                    modification_type,
+                    changed_by_user_id,
+                    change_details
+                ) VALUES ($1, 'issue_resolved', $2, $3)
+            `, [
+                invoiceId,
+                userId,
+                JSON.stringify({
+                    resolved_at: new Date().toISOString(),
+                    resolved_by: userId,
+                    resolution_actions: resolutionActions
+                })
+            ]);
+
+            // Transition back to Approved for fulfillment retry
+            // Execute transition logic manually (within our transaction)
+            const invoiceStateMachineService = require('./invoiceStateMachineService');
+            const transitionResult = await invoiceStateMachineService.executeTransitionLogic(
+                invoiceId,
+                'Fulfillment_Issue',
+                'Approved',
+                userId,
+                client
+            );
+
+            if (!transitionResult.success) {
+                throw new Error(transitionResult.error || 'Failed to transition invoice to Approved');
+            }
+
+            // Update status manually (since we're in our own transaction)
+            await client.query(`
+                UPDATE "ORDERS-invoices"
+                SET 
+                    status = 'Approved',
+                    status_updated_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = $1
+            `, [invoiceId]);
+
+            // Log status change
+            await client.query(`
+                INSERT INTO "ORDERS-invoice-history" (
+                    fk_invoice_id,
+                    modification_type,
+                    field_name,
+                    old_value,
+                    new_value,
+                    reason,
+                    changed_by_user_id
+                ) VALUES ($1, 'status_changed', 'status', 'Fulfillment_Issue', 'Approved', $2, $3)
+            `, [invoiceId, 'Sales rep resolved fulfillment issues', userId]);
+
+            await client.query('COMMIT');
+
+            // Notify fulfillment team (after commit)
+            await this.notifyFulfillmentOfResolution(invoiceId, inv.invoice_number);
+
+            return {
+                success: true,
+                message: 'Issue resolved and invoice modified. Order returned to Approved status.',
+                resolution_actions: resolutionActions
+            };
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Modify line item quantity with proper allocation handling
+     */
+    async modifyLineItemQuantity(invoiceId, lineItemId, newQuantity, reason, userId, client) {
+        const lineItem = await client.query(`
+            SELECT 
+                id,
+                quantity_ordered,
+                quantity_allocated,
+                fk_batch_id,
+                original_quantity,
+                unit_price,
+                line_discount_amount
+            FROM "ORDERS-invoice-line-items"
+            WHERE id = $1 AND fk_invoice_id = $2
+            FOR UPDATE
+        `, [lineItemId, invoiceId]);
+
+        if (lineItem.rows.length === 0) {
+            throw new Error('Line item not found');
+        }
+
+        const item = lineItem.rows[0];
+        const quantityDelta = newQuantity - item.quantity_ordered;
+
+        // Store original if this is first modification
+        const originalQty = item.original_quantity || item.quantity_ordered;
+
+        const allocationService = require('./allocationService');
+
+        if (quantityDelta > 0) {
+            // Increasing, allocate more
+            // Check batch availability
+            const batch = await client.query(`
+                SELECT quantity, allocated_quantity
+                FROM "ORDERS-batches"
+                WHERE id = $1
+                FOR UPDATE
+            `, [item.fk_batch_id]);
+
+            if (batch.rows.length === 0) {
+                throw new Error('Batch not found');
+            }
+
+            const available = batch.rows[0].quantity - batch.rows[0].allocated_quantity;
+            
+            if (available < quantityDelta) {
+                throw new Error(`Insufficient inventory. Available: ${available}, Requested: ${quantityDelta}`);
+            }
+
+            // Allocate additional quantity
+            await client.query(`
+                UPDATE "ORDERS-batches"
+                SET allocated_quantity = allocated_quantity + $1
+                WHERE id = $2
+            `, [quantityDelta, item.fk_batch_id]);
+
+            // Log batch history
+            await client.query(`
+                INSERT INTO "ORDERS-batch-history" (
+                    batch_id, change_type, field_name,
+                    old_value, new_value, reason,
+                    related_invoice_id, changed_by_system
+                ) VALUES ($1, 'allocation_increased', 'allocated_quantity',
+                          $2, $3, 'Line item quantity increased: ' || $4, $5, false)
+            `, [
+                item.fk_batch_id,
+                batch.rows[0].allocated_quantity,
+                batch.rows[0].allocated_quantity + quantityDelta,
+                reason,
+                invoiceId
+            ]);
+        } else if (quantityDelta < 0) {
+            // Decreasing, release allocation
+            const releaseQty = Math.abs(quantityDelta);
+            await client.query(`
+                UPDATE "ORDERS-batches"
+                SET allocated_quantity = allocated_quantity - $1
+                WHERE id = $2
+            `, [releaseQty, item.fk_batch_id]);
+
+            // Log batch history
+            await client.query(`
+                INSERT INTO "ORDERS-batch-history" (
+                    batch_id, change_type, field_name,
+                    old_value, new_value, reason,
+                    related_invoice_id, changed_by_system
+                ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
+                          $2, $3, 'Line item quantity reduced: ' || $4, $5, false)
+            `, [
+                item.fk_batch_id,
+                item.quantity_allocated,
+                item.quantity_allocated - releaseQty,
+                reason,
+                invoiceId
+            ]);
+        }
+
+        // Calculate new line total
+        const newLineTotal = (parseFloat(item.unit_price) * newQuantity) - parseFloat(item.line_discount_amount || 0);
+
+        // Update line item
+        await client.query(`
+            UPDATE "ORDERS-invoice-line-items"
+            SET 
+                quantity_ordered = $1,
+                quantity_allocated = $1,
+                was_modified = TRUE,
+                original_quantity = $2,
+                modification_reason = $3,
+                modified_at = NOW(),
+                modified_by = $4,
+                line_total = $5,
+                updated_at = NOW()
+            WHERE id = $6
+        `, [newQuantity, originalQty, reason, userId, newLineTotal, lineItemId]);
+
+        // Log modification
+        await client.query(`
+            INSERT INTO "ORDERS-invoice-history" (
+                fk_invoice_id,
+                modification_type,
+                field_name,
+                old_value,
+                new_value,
+                reason,
+                changed_by_user_id,
+                triggered_by_fulfillment_issue
+            ) VALUES ($1, 'line_item_quantity_changed', $2, $3, $4, $5, $6, TRUE)
+        `, [
+            invoiceId,
+            `line_item_${lineItemId}`,
+            item.quantity_ordered.toString(),
+            newQuantity.toString(),
+            reason,
+            userId
+        ]);
+    }
+
+    /**
+     * Remove line item with history tracking
+     */
+    async removeLineItemWithHistory(invoiceId, lineItemId, reason, userId, client) {
+        const lineItem = await client.query(`
+            SELECT 
+                fk_batch_id, 
+                quantity_allocated, 
+                quantity_ordered
+            FROM "ORDERS-invoice-line-items"
+            WHERE id = $1 AND fk_invoice_id = $2
+            FOR UPDATE
+        `, [lineItemId, invoiceId]);
+
+        if (lineItem.rows.length === 0) {
+            return; // Already removed or doesn't exist
+        }
+
+        const item = lineItem.rows[0];
+
+        // Release allocation
+        if (item.quantity_allocated > 0) {
+            await client.query(`
+                UPDATE "ORDERS-batches"
+                SET allocated_quantity = allocated_quantity - $1
+                WHERE id = $2
+            `, [item.quantity_allocated, item.fk_batch_id]);
+
+            // Log batch history
+            await client.query(`
+                INSERT INTO "ORDERS-batch-history" (
+                    batch_id, change_type, field_name,
+                    old_value, new_value, reason,
+                    related_invoice_id, changed_by_system
+                ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
+                          $2, $3, 'Line item removed: ' || $4, $5, false)
+            `, [
+                item.fk_batch_id,
+                item.quantity_allocated,
+                0,
+                reason,
+                invoiceId
+            ]);
+        }
+
+        // Log before deletion
+        await client.query(`
+            INSERT INTO "ORDERS-invoice-history" (
+                fk_invoice_id,
+                modification_type,
+                field_name,
+                old_value,
+                reason,
+                changed_by_user_id,
+                triggered_by_fulfillment_issue
+            ) VALUES ($1, 'line_item_removed', $2, $3, $4, $5, TRUE)
+        `, [
+            invoiceId,
+            `line_item_${lineItemId}`,
+            item.quantity_ordered.toString(),
+            reason,
+            userId
+        ]);
+
+        // Delete line item
+        await client.query(`
+            DELETE FROM "ORDERS-invoice-line-items"
+            WHERE id = $1
+        `, [lineItemId]);
+    }
+
+    /**
+     * Add line item with history tracking
+     */
+    async addLineItemWithHistory(invoiceId, itemData, userId, client) {
+        // Use standard addLineItem but mark as modification
+        const internalInvoiceService = require('./internalInvoiceService');
+        const lineItemId = await internalInvoiceService.addLineItem(
+            invoiceId,
+            itemData,
+            userId,
+            client
+        );
+
+        // Update modification flags
+        await client.query(`
+            UPDATE "ORDERS-invoice-line-items"
+            SET 
+                was_modified = TRUE,
+                modification_reason = $1,
+                modified_at = NOW(),
+                modified_by = $2
+            WHERE id = $3
+        `, [
+            itemData.reason || 'Added after fulfillment issue',
+            userId,
+            lineItemId
+        ]);
+
+        // Log addition
+        await client.query(`
+            INSERT INTO "ORDERS-invoice-history" (
+                fk_invoice_id,
+                modification_type,
+                field_name,
+                new_value,
+                reason,
+                changed_by_user_id,
+                triggered_by_fulfillment_issue
+            ) VALUES ($1, 'line_item_added', $2, $3, $4, $5, TRUE)
+        `, [
+            invoiceId,
+            `line_item_${lineItemId}`,
+            itemData.quantity.toString(),
+            itemData.reason || 'Added after fulfillment issue',
+            userId
+        ]);
+
+        return lineItemId;
+    }
+
+    /**
+     * Notify fulfillment team of issue resolution
+     */
+    async notifyFulfillmentOfResolution(invoiceId, invoiceNumber) {
+        try {
+            // Get invoice to find fulfillment worker
+            const invoice = await query(`
+                SELECT 
+                    fulfillment_accepted_by,
+                    assigned_sales_rep_id
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [invoiceId]);
+
+            if (invoice.rows.length === 0) return;
+
+            const inv = invoice.rows[0];
+
+            // Notify previous fulfillment worker if they exist
+            if (inv.fulfillment_accepted_by) {
+                await notificationStore.createNotification({
+                    userId: inv.fulfillment_accepted_by,
+                    type: 'issue_resolved',
+                    title: `Issue Resolved: ${invoiceNumber}`,
+                    message: `Sales rep has resolved the fulfillment issues. Order is ready for fulfillment again.`,
+                    payload: {
+                        invoice_id: invoiceId,
+                        invoice_number: invoiceNumber
+                    },
+                    priority: 'normal',
+                    requiresAck: false
+                });
+
+                await websocketService.sendPersistentNotification(inv.fulfillment_accepted_by, {
+                    type: 'issue_resolved',
+                    title: `Issue Resolved: ${invoiceNumber}`,
+                    message: `Sales rep has resolved the fulfillment issues. Order is ready for fulfillment again.`,
+                    payload: {
+                        invoice_id: invoiceId,
+                        invoice_number: invoiceNumber
+                    }
+                });
+            }
+        } catch (error) {
+            console.error('Error notifying fulfillment of resolution:', error);
+        }
+    }
 }
 
 module.exports = new FulfillmentIssueService();

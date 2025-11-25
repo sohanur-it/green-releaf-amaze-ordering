@@ -1367,10 +1367,13 @@ class InvoiceController {
                 });
             }
 
-            if (invoice.rows[0].status !== 'Draft') {
+            // Allow adding line items if invoice is in Draft, Pending_Approval, or Fulfillment_Issue status
+            // (same as updateLineItem to allow editing invoices that haven't been manifested)
+            const editableStatuses = ['Draft', 'Pending_Approval', 'Fulfillment_Issue'];
+            if (!editableStatuses.includes(invoice.rows[0].status)) {
                 return res.status(400).json({
                     success: false,
-                    error: 'Line items can only be added to draft invoices'
+                    error: `Line items can only be added when invoice is in Draft, Pending Approval, or Fulfillment Issue status. Current status: ${invoice.rows[0].status}`
                 });
             }
 
@@ -1478,7 +1481,7 @@ class InvoiceController {
                         i.status,
                         i.fk_location_id,
                         i.fk_buyer_id,
-                        i.metrc_manifest_number,
+                        i.metrc_manifest_numbers,
                         i.manifest_created_at
                     FROM "ORDERS-invoice-line-items" li
                     INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
@@ -1497,7 +1500,15 @@ class InvoiceController {
                 const item = lineItem.rows[0];
 
                 // CRITICAL: Prevent modifications after manifest creation (Module 4 compliance requirement)
-                if (item.metrc_manifest_number || item.manifest_created_at) {
+                // Check if manifest_numbers array exists and has entries, or if manifest_created_at is set
+                const hasManifest = (item.metrc_manifest_numbers && 
+                    (Array.isArray(item.metrc_manifest_numbers) 
+                        ? item.metrc_manifest_numbers.length > 0 
+                        : (typeof item.metrc_manifest_numbers === 'string' 
+                            ? JSON.parse(item.metrc_manifest_numbers || '[]').length > 0 
+                            : false))) || item.manifest_created_at;
+                
+                if (hasManifest) {
                     await client.query('ROLLBACK');
                     return res.status(400).json({
                         success: false,
@@ -1743,7 +1754,7 @@ class InvoiceController {
                         i.status,
                         i.fk_buyer_id,
                         i.fk_location_id,
-                        i.metrc_manifest_number,
+                        i.metrc_manifest_numbers,
                         i.manifest_created_at
                     FROM "ORDERS-invoice-line-items" li
                     INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
@@ -1762,7 +1773,15 @@ class InvoiceController {
                 const item = lineItem.rows[0];
 
                 // CRITICAL: Prevent modifications after manifest creation (Module 4 compliance requirement)
-                if (item.metrc_manifest_number || item.manifest_created_at) {
+                // Check if manifest_numbers array exists and has entries, or if manifest_created_at is set
+                const hasManifest = (item.metrc_manifest_numbers && 
+                    (Array.isArray(item.metrc_manifest_numbers) 
+                        ? item.metrc_manifest_numbers.length > 0 
+                        : (typeof item.metrc_manifest_numbers === 'string' 
+                            ? JSON.parse(item.metrc_manifest_numbers || '[]').length > 0 
+                            : false))) || item.manifest_created_at;
+                
+                if (hasManifest) {
                     await client.query('ROLLBACK');
                     return res.status(400).json({
                         success: false,

@@ -473,6 +473,38 @@ class FulfillmentController {
     }
 
     /**
+     * Sales rep resolves issue by modifying invoice
+     * POST /api/v1/fulfillment/issues/resolve
+     */
+    async resolveIssueAndModify(req, res) {
+        try {
+            const { invoice_id, modifications } = req.body;
+            const userId = req.user.id;
+
+            if (!invoice_id) {
+                return res.status(400).json({ error: 'invoice_id is required' });
+            }
+
+            if (!modifications) {
+                return res.status(400).json({ error: 'modifications object is required' });
+            }
+
+            // Validate modifications structure
+            if (!modifications.remove_items && !modifications.add_items && !modifications.quantity_changes) {
+                return res.status(400).json({ 
+                    error: 'At least one modification type is required (remove_items, add_items, or quantity_changes)' 
+                });
+            }
+
+            const result = await fulfillmentIssueService.resolveIssueAndModify(invoice_id, modifications, userId);
+            res.json(result);
+        } catch (error) {
+            console.error('[Fulfillment] Error resolving issue:', error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
      * Process cancellation
      * POST /api/v1/fulfillment/cancelled-shipments/cancel
      */

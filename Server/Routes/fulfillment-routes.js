@@ -166,8 +166,16 @@ router.post('/issues/add-note', requireAuth, requireRole('fulfillment_worker', '
  * POST /api/v1/fulfillment/issues/cancel
  * Cancel issue report
  */
-router.post('/issues/cancel', requireAuth, requireRole('fulfillment_worker', 'fulfillment_admin'), 
+router.post('/issues/cancel', requireAuth, requireRole('fulfillment_worker', 'fulfillment_admin'),
     fulfillmentController.cancelIssueReport.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/fulfillment/issues/resolve
+ * Sales rep resolves issue by modifying invoice
+ * Requires: sales_admin, sales_rep, or admin role
+ */
+router.post('/issues/resolve', requireAuth, requireRole('sales_admin', 'sales_rep', 'admin'),
+    fulfillmentController.resolveIssueAndModify.bind(fulfillmentController));
 
 // =====================================================
 // Cancelled Shipment Routes

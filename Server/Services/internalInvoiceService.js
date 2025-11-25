@@ -312,15 +312,24 @@ class InternalInvoiceService {
      * Applies account credits if available (Module 4 requirement)
      */
     async recalculateTotals(invoiceId, client) {
-        // Calculate subtotal from line items
+        // Calculate subtotal and discount_amount from line items
+        // Note: line_total already has discounts applied, so we need to calculate:
+        // - subtotal = sum of (unit_price * quantity) = original subtotal before discounts
+        // - discount_amount = sum of line_discount_amount
+        // - total = subtotal - discount_amount - credit_applied
         const totals = await client.query(`
             SELECT 
-                COALESCE(SUM(line_total), 0) as subtotal
+                COALESCE(SUM(line_total), 0) as discounted_subtotal,
+                COALESCE(SUM(line_discount_amount), 0) as discount_amount
             FROM "ORDERS-invoice-line-items"
             WHERE fk_invoice_id = $1
         `, [invoiceId]);
         
-        const subtotal = parseFloat(totals.rows[0].subtotal);
+        const discountedSubtotal = parseFloat(totals.rows[0].discounted_subtotal);
+        const discountAmount = parseFloat(totals.rows[0].discount_amount);
+        
+        // Original subtotal (before discounts) = discounted_subtotal + discount_amount
+        const subtotal = discountedSubtotal + discountAmount;
         
         // Get invoice location for credit check
         const invoiceResult = await client.query(`
@@ -353,16 +362,20 @@ class InternalInvoiceService {
             }
         }
         
-        // Calculate final total (subtotal minus credits)
-        const total = subtotal - creditApplied;
+        // Calculate final total: total = subtotal - discount_amount - credit_applied
+        // This matches the constraint: total = subtotal - discount_amount - credit_applied
+        const total = subtotal - discountAmount - creditApplied;
         
         await client.query(`
             UPDATE "ORDERS-invoices"
-            SET subtotal = $1, 
-                credit_applied = $2,
-                total = $3
-            WHERE id = $4
-        `, [subtotal, creditApplied, total, invoiceId]);
+            SET 
+                subtotal = $1,
+                discount_amount = $2,
+                total = $3,
+                credit_applied = $4,
+                updated_at = NOW()
+            WHERE id = $5
+        `, [subtotal, discountAmount, total, creditApplied, invoiceId]);
     }
 
     /**

@@ -359,6 +359,20 @@
             </table>
         </div>
         <div id="line-items-edit" style="display: none;">
+            <!-- Product Search Section (only shown in edit mode) -->
+            <div style="margin-bottom: 1.5rem; padding: 1rem; background: var(--bg-color, #f8f9fa); border-radius: 8px; border: 1px solid var(--border-color, #dee2e6);">
+                <h4 style="margin-bottom: 0.75rem; color: var(--text-color);">Add New Products</h4>
+                <div class="form-group" style="margin-bottom: 0; position: relative;">
+                    <label for="product-search-edit" style="display: block; margin-bottom: 0.5rem; color: var(--text-color);">Search Products</label>
+                    <input type="text" 
+                           id="product-search-edit" 
+                           placeholder="Search by product name, brand, or batch..." 
+                           autocomplete="off"
+                           style="width: 100%; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border-color, #dee2e6); background: var(--card-bg, white); color: var(--text-color);">
+                    <div id="product-search-results-edit" class="product-search-results" style="display: none; position: absolute; z-index: 1000; background: var(--card-bg, white); border: 1px solid var(--border-color, #dee2e6); border-radius: 4px; max-height: 300px; overflow-y: auto; width: 100%; margin-top: 0.25rem; box-shadow: 0 4px 6px rgba(0,0,0,0.1);"></div>
+                </div>
+            </div>
+            
             <table class="line-items-table">
                 <thead>
                     <tr>
@@ -832,6 +846,14 @@ async function saveInternalNotes() {
 }
 
 // Line items editing functions
+<% if (typeof invoice !== 'undefined' && invoice.fk_location_id) { %>
+const locationId = <%= invoice.fk_location_id %>;
+<% } else { %>
+const locationId = null;
+<% } %>
+let productSearchTimeout;
+let productCache = [];
+
 function toggleEditMode() {
     isEditMode = !isEditMode;
     if (isEditMode) {
@@ -846,8 +868,262 @@ function toggleEditMode() {
         document.querySelectorAll('.line-item-quantity').forEach(input => {
             input.addEventListener('input', updateLineItemTotal);
         });
+        
+        // Setup product search
+        setupProductSearch();
     } else {
         cancelEditLineItems();
+    }
+}
+
+function setupProductSearch() {
+    const searchInput = document.getElementById('product-search-edit');
+    if (!searchInput) return;
+    
+    // Clear any existing listeners
+    searchInput.removeEventListener('input', handleProductSearch);
+    searchInput.addEventListener('input', handleProductSearch);
+    
+    // Close search results on outside click
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('#product-search-edit') && !e.target.closest('#product-search-results-edit')) {
+            const resultsDiv = document.getElementById('product-search-results-edit');
+            if (resultsDiv) resultsDiv.style.display = 'none';
+        }
+    });
+}
+
+function handleProductSearch(e) {
+    clearTimeout(productSearchTimeout);
+    const query = e.target.value.trim();
+    const resultsDiv = document.getElementById('product-search-results-edit');
+    
+    if (query.length === 0) {
+        if (resultsDiv) resultsDiv.style.display = 'none';
+        return;
+    }
+    
+    productSearchTimeout = setTimeout(() => {
+        searchProductsForEdit(query);
+    }, 300);
+}
+
+async function searchProductsForEdit(query) {
+    if (!locationId) {
+        if (typeof showNotification === 'function') {
+            showNotification('Location ID not found. Cannot search products.', 'error');
+        } else {
+            alert('Location ID not found. Cannot search products.');
+        }
+        return;
+    }
+    
+    try {
+        const searchParam = query.trim().length > 0 ? `&search=${encodeURIComponent(query)}` : '';
+        const response = await fetch(`/api/v1/invoices/products?location_id=${locationId}${searchParam}`);
+        const data = await response.json();
+        
+        const resultsDiv = document.getElementById('product-search-results-edit');
+        if (!resultsDiv) return;
+        
+        if (data.success && data.products && data.products.length > 0) {
+            // Cache products
+            productCache = data.products;
+            
+            resultsDiv.innerHTML = data.products.map(product => {
+                // Products don't include batches - we'll fetch them when clicked
+                const productName = escapeHtml((product.brand_name || 'AMAZE') + ' ' + product.name);
+                return `
+                    <div class="product-result-item" onclick="selectProductForEdit(${product.product_id})" style="padding: 0.75rem; border-bottom: 1px solid var(--border-color, #eee); cursor: pointer; transition: background-color 0.2s; color: var(--text-color);" onmouseover="this.style.backgroundColor='var(--bg-hover, #f8f9fa)'" onmouseout="this.style.backgroundColor='var(--card-bg, white)'">
+                        <strong>${productName}</strong>
+                        <div style="font-size: 0.9rem; color: var(--text-light, #666);">
+                            ${product.product_type_name || ''} | $${parseFloat(product.default_price || 0).toFixed(2)}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            resultsDiv.style.display = 'block';
+        } else {
+            resultsDiv.innerHTML = '<div class="product-result-item" style="padding: 0.75rem; color: var(--text-color);">No products found. Try a different search term.</div>';
+            resultsDiv.style.display = 'block';
+        }
+    } catch (error) {
+        console.error('Error searching products:', error);
+        const resultsDiv = document.getElementById('product-search-results-edit');
+        if (resultsDiv) {
+            resultsDiv.innerHTML = '<div class="product-result-item" style="padding: 0.75rem; color: var(--error-color, #dc3545);">Error loading products. Please try again.</div>';
+            resultsDiv.style.display = 'block';
+        }
+    }
+}
+
+function escapeHtml(str = '') {
+    return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+async function selectProductForEdit(productId) {
+    // Hide search results
+    const resultsDiv = document.getElementById('product-search-results-edit');
+    if (resultsDiv) resultsDiv.style.display = 'none';
+    
+    // Clear search input
+    const searchInput = document.getElementById('product-search-edit');
+    if (searchInput) searchInput.value = '';
+    
+    const productInfo = productCache.find(p => p.product_id === productId);
+    const productLabel = productInfo
+        ? `${productInfo.brand_name || 'AMAZE'} ${productInfo.name}`
+        : 'Selected Product';
+    
+    // Load batches for this product
+    try {
+        const response = await fetch(`/api/v1/invoices/products/${productId}/batches?location_id=${locationId}`);
+        const data = await response.json();
+        
+        if (data.success && data.batches && data.batches.length > 0) {
+            showBatchSelectionModalForEdit(productId, productLabel, data.batches);
+        } else {
+            if (typeof showNotification === 'function') {
+                showNotification('No available batches found for this product', 'warning');
+            } else {
+                alert('No available batches found for this product');
+            }
+        }
+    } catch (error) {
+        console.error('Error loading batches:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Error loading batches. Please try again.', 'error');
+        } else {
+            alert('Error loading batches. Please try again.');
+        }
+    }
+}
+
+function showBatchSelectionModalForEdit(productId, productLabel, batches) {
+    closeBatchModalForEdit();
+    
+    const overlay = document.createElement('div');
+    overlay.id = 'batch-selection-modal-edit';
+    overlay.className = 'invoice-modal-overlay';
+    overlay.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;';
+    overlay.innerHTML = `
+        <div class="invoice-modal" style="background: var(--card-bg, white); border-radius: 8px; padding: 1.5rem; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+            <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color, #dee2e6); padding-bottom: 0.75rem;">
+                <h3 style="margin: 0; color: var(--text-color);">Select Batch</h3>
+                <button type="button" class="btn btn-secondary" id="batch-modal-close-edit" style="padding: 0.5rem 1rem; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-color, #f8f9fa); color: var(--text-color); cursor: pointer;">Close</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-top: 0; margin-bottom: 12px; color: var(--text-light, #6b7280); font-size: 0.95rem;">
+                    ${escapeHtml(productLabel)}
+                </p>
+                <div id="batch-card-container-edit"></div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    document.body.style.overflow = 'hidden';
+    
+    const cardContainer = overlay.querySelector('#batch-card-container-edit');
+    cardContainer.innerHTML = batches.map(batch => `
+        <div class="batch-card" style="border: 1px solid var(--border-color, #dee2e6); border-radius: 8px; padding: 1rem; margin-bottom: 1rem; background: var(--card-bg, white);">
+            <h4 style="margin: 0 0 0.5rem 0; color: var(--text-color);">${escapeHtml(batch.batch_name)}</h4>
+            <div class="batch-meta" style="font-size: 0.9rem; color: var(--text-light, #666); margin-bottom: 1rem;">
+                Available: ${batch.available_quantity} • Unit Price: $${parseFloat(batch.unit_price || 0).toFixed(2)}
+            </div>
+            <div class="batch-actions" style="display: flex; gap: 0.5rem; align-items: center;">
+                <label for="batch-qty-${batch.id}" style="font-weight: 600; color: var(--text-color);">Quantity:</label>
+                <input type="number"
+                       id="batch-qty-${batch.id}"
+                       min="1"
+                       value="1"
+                       max="${batch.available_quantity}"
+                       style="width: 80px; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border-color); background: var(--card-bg, white); color: var(--text-color);">
+                <button type="button" class="btn btn-primary" data-add-batch-edit="${batch.id}" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; background: #007bff; color: white; cursor: pointer;">
+                    Add Batch
+                </button>
+            </div>
+        </div>
+    `).join('');
+    
+    // Add event listeners
+    overlay.querySelector('#batch-modal-close-edit').addEventListener('click', closeBatchModalForEdit);
+    
+    cardContainer.querySelectorAll('[data-add-batch-edit]').forEach(btn => {
+        btn.addEventListener('click', function() {
+            const batchId = parseInt(this.dataset.addBatchEdit);
+            const qtyInput = document.getElementById(`batch-qty-${batchId}`);
+            const quantity = parseInt(qtyInput.value) || 1;
+            const batch = batches.find(b => b.id === batchId);
+            
+            if (batch) {
+                addProductToInvoice(productId, batchId, productLabel, batch.batch_name, batch.unit_price, quantity);
+            }
+        });
+    });
+}
+
+function closeBatchModalForEdit() {
+    const existing = document.getElementById('batch-selection-modal-edit');
+    if (existing) {
+        existing.remove();
+        document.body.style.overflow = '';
+    }
+}
+
+async function addProductToInvoice(productId, batchId, productName, batchName, unitPrice, quantity = null) {
+    // Close batch modal
+    closeBatchModalForEdit();
+    
+    // Use provided quantity or prompt
+    let finalQuantity = quantity;
+    if (!finalQuantity || finalQuantity <= 0) {
+        const qtyInput = prompt(`Enter quantity for ${productName} (Batch: ${batchName}):`, '1');
+        if (!qtyInput || isNaN(qtyInput) || parseInt(qtyInput) <= 0) {
+            return;
+        }
+        finalQuantity = parseInt(qtyInput);
+    }
+    
+    try {
+        const response = await fetch(`/api/v1/invoices/${invoiceId}/line-items`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                fk_batch_id: batchId,
+                quantity: finalQuantity
+            })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            if (typeof showNotification === 'function') {
+                showNotification('Product added successfully!', 'success');
+            } else {
+                alert('Product added successfully!');
+            }
+            setTimeout(() => window.location.reload(), 1000);
+        } else {
+            if (typeof showNotification === 'function') {
+                showNotification('Error: ' + (data.error || 'Failed to add product'), 'error');
+            } else {
+                alert('Error: ' + (data.error || 'Failed to add product'));
+            }
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to add product. Please try again.', 'error');
+        } else {
+            alert('Failed to add product. Please try again.');
+        }
     }
 }
 
