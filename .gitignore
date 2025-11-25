@@ -46,3 +46,4 @@ backups/*
 
 # Lock files (keep for consistency across environments)
 # package-lock.json
+docs/guides/*
