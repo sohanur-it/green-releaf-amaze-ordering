@@ -168,6 +168,12 @@ async function scanPackage(packageLabel) {
             return;
         }
 
+        if (data.requiresRemovalConfirmation) {
+            // Show package removal confirmation modal
+            showPackageRemovalConfirmation(data.alert, packageLabel);
+            return;
+        }
+
         if (!response.ok) {
             throw new Error(data.error || 'Scan failed');
         }
@@ -365,6 +371,82 @@ function skipRejectedPackage() {
     document.getElementById('rejection-modal').classList.remove('active');
     window.currentPackageLabel = null;
     window.rejectionAlert = null;
+    
+    const scannerInput = document.getElementById('scanner-input');
+    scannerInput.focus();
+}
+
+/**
+ * Show package removal confirmation modal
+ */
+function showPackageRemovalConfirmation(alert, packageLabel) {
+    window.currentPackageLabel = packageLabel;
+    window.packageRemovalAlert = alert;
+
+    const modal = document.getElementById('package-removal-modal');
+    const details = document.getElementById('removal-details');
+
+    details.innerHTML = `
+        <p><strong>Package Label:</strong> ${alert.details.packageLabel}</p>
+        <p><strong>Batch:</strong> ${alert.details.batchName}</p>
+        <p><strong>Item:</strong> ${alert.details.itemName}</p>
+        <p style="margin-top: 1rem; padding: 1rem; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px;">
+            <strong>⚠️ Warning:</strong> This package does not belong to this order. You must confirm that you have physically removed this package from the order before continuing.
+        </p>
+    `;
+
+    modal.classList.add('active');
+}
+
+/**
+ * Acknowledge package removal
+ */
+async function acknowledgePackageRemoval() {
+    if (!window.currentPackageLabel) return;
+
+    try {
+        // Log the acknowledgment
+        const response = await fetch('/api/v1/fulfillment/scanning/acknowledge-removal', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                invoice_id: window.invoiceId,
+                package_label: window.currentPackageLabel,
+                session_id: window.sessionId,
+                acknowledged: true
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to acknowledge removal');
+        }
+
+        // Close modal and continue scanning
+        document.getElementById('package-removal-modal').classList.remove('active');
+        showScannerStatus('info', `Package ${window.currentPackageLabel} removal acknowledged. Please continue scanning.`);
+        window.currentPackageLabel = null;
+        window.packageRemovalAlert = null;
+
+        const scannerInput = document.getElementById('scanner-input');
+        scannerInput.focus();
+
+    } catch (error) {
+        console.error('Error acknowledging package removal:', error);
+        alert(`Error: ${error.message}`);
+    }
+}
+
+/**
+ * Cancel package removal acknowledgment
+ */
+function cancelPackageRemoval() {
+    document.getElementById('package-removal-modal').classList.remove('active');
+    window.currentPackageLabel = null;
+    window.packageRemovalAlert = null;
     
     const scannerInput = document.getElementById('scanner-input');
     scannerInput.focus();

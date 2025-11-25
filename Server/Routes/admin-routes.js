@@ -486,11 +486,73 @@ router.get('/api/sync-health', async (req, res) => {
 });
 
 // =============================================
+// NOTIFICATIONS ROUTES (Module 12)
+// =============================================
+
+// Notifications page
+router.get('/notifications', requireAuth, async (req, res) => {
+    try {
+        const userId = req.session.userId;
+        const UserModel = require('../Models/userModel');
+        
+        // Get user info and roles
+        let user = null;
+        let userRoles = [];
+        let isAdmin = false;
+        let isSalesAdmin = false;
+        let isSalesRep = false;
+        let primaryRole = 'User';
+        
+        if (userId) {
+            user = await UserModel.findById(userId);
+            const roles = await UserModel.getUserRoles(userId);
+            userRoles = roles.map(r => r.name || r.role_name).filter(Boolean);
+            const isSuperuser = await UserModel.isSuperuser(userId);
+            
+            isAdmin = isSuperuser || userRoles.some(r => r.toLowerCase() === 'administrator');
+            isSalesAdmin = userRoles.some(r => r.toLowerCase() === 'sales admin');
+            isSalesRep = userRoles.some(r => r.toLowerCase() === 'sales representative');
+            
+            if (isSuperuser) {
+                primaryRole = 'Superuser';
+            } else if (userRoles.some(r => r.toLowerCase() === 'administrator')) {
+                primaryRole = 'Administrator';
+            } else if (isSalesAdmin) {
+                primaryRole = 'Sales Admin';
+            } else if (isSalesRep) {
+                primaryRole = 'Sales Representative';
+            } else if (userRoles.length > 0) {
+                primaryRole = userRoles[0];
+            }
+        }
+        
+        res.render('admin/notifications', {
+            title: 'Notifications',
+            layout: 'layouts/main',
+            user: user,
+            username: user ? (user.first_name + ' ' + user.last_name).trim() || user.email : 'User',
+            userEmail: user ? user.email : '',
+            userRoles: userRoles,
+            isSuperuser: user ? await UserModel.isSuperuser(userId) : false,
+            primaryRole: primaryRole,
+            hideSidebar: false
+        });
+    } catch (error) {
+        console.error('Error rendering notifications page:', error);
+        res.status(500).render('error', {
+            title: 'Error',
+            layout: 'layouts/main',
+            error: error.message
+        });
+    }
+});
+
+// =============================================
 // FULFILLMENT ROUTES (Module 5)
 // =============================================
 
 // Fulfillment Queue
-router.get('/fulfillment/queue', requireRole('fulfillment_worker', 'fulfillment_admin', 'sales_admin', 'admin'), async (req, res) => {
+router.get('/fulfillment/queue', requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Administrator'), async (req, res) => {
     try {
         res.render('admin/fulfillment/queue', {
             title: 'Fulfillment Queue',
@@ -504,7 +566,7 @@ router.get('/fulfillment/queue', requireRole('fulfillment_worker', 'fulfillment_
 });
 
 // Package Scanning Interface
-router.get('/fulfillment/scanning/:invoiceId', requireRole('fulfillment_worker', 'fulfillment_admin'), async (req, res) => {
+router.get('/fulfillment/scanning/:invoiceId', requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Administrator'), async (req, res) => {
     try {
         const invoiceId = parseInt(req.params.invoiceId);
         res.render('admin/fulfillment/scanning', {
@@ -519,7 +581,7 @@ router.get('/fulfillment/scanning/:invoiceId', requireRole('fulfillment_worker',
 });
 
 // Transportation Details Form
-router.get('/fulfillment/transportation/:invoiceId', requireRole('fulfillment_worker', 'fulfillment_admin'), async (req, res) => {
+router.get('/fulfillment/transportation/:invoiceId', requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Administrator'), async (req, res) => {
     try {
         const invoiceId = parseInt(req.params.invoiceId);
         const { query } = require('../config/database');
@@ -546,7 +608,7 @@ router.get('/fulfillment/transportation/:invoiceId', requireRole('fulfillment_wo
 });
 
 // Manifest Creation/Preview
-router.get('/fulfillment/manifest/:invoiceId', requireRole('fulfillment_worker', 'fulfillment_admin'), async (req, res) => {
+router.get('/fulfillment/manifest/:invoiceId', requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Administrator'), async (req, res) => {
     try {
         const invoiceId = parseInt(req.params.invoiceId);
         res.render('admin/fulfillment/manifest', {
@@ -561,7 +623,7 @@ router.get('/fulfillment/manifest/:invoiceId', requireRole('fulfillment_worker',
 });
 
 // Admin Session Management
-router.get('/fulfillment/sessions', requireRole('fulfillment_admin', 'admin'), async (req, res) => {
+router.get('/fulfillment/sessions', requireRole('fulfillment_admin', 'Sales Admin', 'Administrator'), async (req, res) => {
     try {
         res.render('admin/fulfillment/sessions', {
             title: 'Active Scanning Sessions',
@@ -574,7 +636,7 @@ router.get('/fulfillment/sessions', requireRole('fulfillment_admin', 'admin'), a
 });
 
 // Admin Issues Dashboard
-router.get('/fulfillment/cancelled-packages-verification', requireRole('fulfillment_admin', 'admin'), async (req, res) => {
+router.get('/fulfillment/cancelled-packages-verification', requireRole('fulfillment_admin', 'Sales Admin', 'Administrator'), async (req, res) => {
     try {
         const userId = req.session.userId;
         const UserModel = require('../Models/userModel');
@@ -599,7 +661,7 @@ router.get('/fulfillment/cancelled-packages-verification', requireRole('fulfillm
     }
 });
 
-router.get('/fulfillment/issues', requireRole('fulfillment_admin', 'admin'), async (req, res) => {
+router.get('/fulfillment/issues', requireRole('fulfillment_admin', 'Sales Admin', 'Administrator'), async (req, res) => {
     try {
         res.render('admin/fulfillment/issues', {
             title: 'Fulfillment Issues',

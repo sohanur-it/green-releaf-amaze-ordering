@@ -1,0 +1,608 @@
+<div class="notifications-page">
+    <div class="main-header">
+        <h1>Notifications</h1>
+        <p style="color: var(--text-light, #666); margin-top: 0.5rem;">Manage your notifications and preferences</p>
+    </div>
+
+    <div class="notifications-container" style="display: grid; grid-template-columns: 1fr 300px; gap: 2rem; margin-top: 2rem;">
+        <!-- Main Notifications List -->
+        <div class="notifications-list-container">
+            <div class="notifications-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <div>
+                    <h2 style="margin: 0; font-size: 1.5rem; color: var(--text-color);">All Notifications</h2>
+                    <p style="margin: 0.5rem 0 0 0; color: var(--text-light, #666); font-size: 0.875rem;" id="notificationCount">
+                        Loading...
+                    </p>
+                </div>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-secondary" id="markAllReadBtn" style="display: none;">
+                        <i class="fas fa-check-double"></i> Mark All Read
+                    </button>
+                    <button class="btn btn-primary" id="refreshBtn">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+            </div>
+
+            <div class="notifications-filters" style="margin-bottom: 1.5rem; display: flex; gap: 0.5rem;">
+                <button class="filter-btn active" data-filter="all">All</button>
+                <button class="filter-btn" data-filter="unread">Unread</button>
+                <button class="filter-btn" data-filter="read">Read</button>
+            </div>
+
+            <div id="notificationsList" style="background: var(--card-bg, #fff); border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden;">
+                <div class="notification-loading" style="padding: 2rem; text-align: center; color: var(--text-light, #666);">
+                    <i class="fas fa-spinner fa-spin"></i> Loading notifications...
+                </div>
+            </div>
+
+            <div id="pagination" style="margin-top: 1.5rem; display: flex; justify-content: center; gap: 0.5rem;">
+                <!-- Pagination will be inserted here -->
+            </div>
+        </div>
+
+        <!-- Preferences Sidebar -->
+        <div class="notifications-preferences">
+            <div style="background: var(--card-bg, #fff); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.5rem;">
+                <h3 style="margin: 0 0 1rem 0; font-size: 1.25rem; color: var(--text-color);">Preferences</h3>
+                <p style="margin: 0 0 1rem 0; color: var(--text-light, #666); font-size: 0.875rem;">
+                    Configure which notifications you want to receive
+                </p>
+                <div id="preferencesList">
+                    <div class="notification-loading" style="padding: 1rem; text-align: center; color: var(--text-light, #666);">
+                        <i class="fas fa-spinner fa-spin"></i> Loading...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.notifications-page {
+    padding: 0;
+}
+
+.notification-item {
+    padding: 1.25rem;
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.notification-item:last-child {
+    border-bottom: none;
+}
+
+.notification-item:hover {
+    background-color: var(--bg-color, #f8f9fa);
+}
+
+.notification-item.unread {
+    background-color: var(--bg-color, #f8f9fa);
+    font-weight: 500;
+    border-left: 3px solid var(--primary-color, #007bff);
+    padding-left: calc(1.25rem - 3px);
+}
+
+.notification-item-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+}
+
+.notification-item-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-color);
+    margin: 0;
+    flex: 1;
+}
+
+.notification-item-time {
+    font-size: 12px;
+    color: var(--text-light, #999);
+    white-space: nowrap;
+}
+
+.notification-item-message {
+    font-size: 14px;
+    color: var(--text-light, #666);
+    margin: 0;
+    line-height: 1.5;
+}
+
+.notification-item-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.notification-item-link {
+    color: var(--primary-color, #007bff);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.notification-item-link:hover {
+    text-decoration: underline;
+}
+
+.notification-empty {
+    padding: 3rem 2rem;
+    text-align: center;
+    color: var(--text-light, #666);
+}
+
+.filter-btn {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border-color);
+    background: var(--card-bg, #fff);
+    color: var(--text-color);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.filter-btn:hover {
+    background: var(--bg-color, #f8f9fa);
+    border-color: var(--primary-color, #007bff);
+}
+
+.filter-btn.active {
+    background: var(--primary-color, #007bff);
+    color: white;
+    border-color: var(--primary-color, #007bff);
+}
+
+.btn {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.btn-primary {
+    background: var(--primary-color, #007bff);
+    color: white;
+}
+
+.btn-primary:hover {
+    background: var(--primary-color-dark, #0056b3);
+}
+
+.btn-secondary {
+    background: var(--bg-color, #f8f9fa);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+}
+
+.btn-secondary:hover {
+    background: var(--border-color, #dee2e6);
+}
+
+.preference-item {
+    padding: 1rem 0;
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.preference-item:last-child {
+    border-bottom: none;
+}
+
+.preference-item-label {
+    flex: 1;
+}
+
+.preference-item-label strong {
+    display: block;
+    font-size: 14px;
+    color: var(--text-color);
+    margin-bottom: 0.25rem;
+}
+
+.preference-item-label small {
+    display: block;
+    font-size: 12px;
+    color: var(--text-light, #666);
+}
+
+.preference-toggle {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    background: var(--border-color, #dee2e6);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.preference-toggle.active {
+    background: var(--primary-color, #007bff);
+}
+
+.preference-toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.2s ease;
+}
+
+.preference-toggle.active::after {
+    transform: translateX(20px);
+}
+
+@media (max-width: 768px) {
+    .notifications-container {
+        grid-template-columns: 1fr !important;
+    }
+    
+    .notifications-preferences {
+        order: -1;
+    }
+}
+</style>
+
+<script>
+let currentFilter = 'all';
+let currentPage = 1;
+let pageSize = 20;
+let totalNotifications = 0;
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadNotificationsPage();
+    loadPreferencesPage();
+    
+    // Filter buttons
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            currentFilter = this.dataset.filter;
+            currentPage = 1;
+            loadNotificationsPage();
+        });
+    });
+    
+    // Mark all read button
+    const markAllReadBtn = document.getElementById('markAllReadBtn');
+    if (markAllReadBtn) {
+        markAllReadBtn.addEventListener('click', markAllNotificationsReadPage);
+    }
+    
+    // Refresh button
+    const refreshBtn = document.getElementById('refreshBtn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', function() {
+            loadNotificationsPage();
+            loadPreferencesPage();
+        });
+    }
+});
+
+async function loadNotificationsPage() {
+    const notificationsList = document.getElementById('notificationsList');
+    if (!notificationsList) {
+        console.error('Notifications list element not found');
+        return;
+    }
+    
+    try {
+        notificationsList.innerHTML = '<div class="notification-loading" style="padding: 2rem; text-align: center; color: var(--text-light, #666);"><i class="fas fa-spinner fa-spin"></i> Loading notifications...</div>';
+        
+        const onlyUnread = currentFilter === 'unread';
+        const onlyRead = currentFilter === 'read';
+        const offset = (currentPage - 1) * pageSize;
+        
+        let url = `/api/v1/notifications?limit=${pageSize}&offset=${offset}`;
+        if (onlyUnread) {
+            url += '&unread=true';
+        }
+        
+        console.log('Fetching notifications from:', url);
+        
+        const response = await fetch(url, {
+            credentials: 'same-origin',
+            headers: {
+                'Accept': 'application/json'
+            }
+        });
+        
+        console.log('Response status:', response.status, response.statusText);
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('API Error:', errorText);
+            throw new Error(`HTTP error! status: ${response.status} - ${errorText}`);
+        }
+        
+        const data = await response.json();
+        console.log('Notifications API response:', data);
+        
+        if (data.success) {
+            let notifications = data.notifications || [];
+            
+            // Filter read notifications if needed
+            if (onlyRead) {
+                notifications = notifications.filter(n => n.is_read);
+            }
+            
+            totalNotifications = data.total || 0;
+            
+            // Update count
+            const countEl = document.getElementById('notificationCount');
+            if (countEl) {
+                const unreadCount = notifications.filter(n => !n.is_read).length;
+                countEl.textContent = `${notifications.length} notification${notifications.length !== 1 ? 's' : ''}${unreadCount > 0 ? ` (${unreadCount} unread)` : ''}`;
+            }
+            
+            // Show/hide mark all read button
+            const markAllReadBtn = document.getElementById('markAllReadBtn');
+            if (markAllReadBtn) {
+                const unreadCount = notifications.filter(n => !n.is_read).length;
+                markAllReadBtn.style.display = unreadCount > 0 ? 'inline-flex' : 'none';
+            }
+            
+            if (notifications.length > 0) {
+                notificationsList.innerHTML = notifications.map(notif => {
+                    const timeAgo = formatTimeAgo(new Date(notif.created_at));
+                    const invoiceLink = notif.payload && notif.payload.invoice_id 
+                        ? `<a href="/admin/invoices/${notif.payload.invoice_id}" class="notification-item-link">View Invoice <i class="fas fa-arrow-right"></i></a>`
+                        : '';
+                    
+                    return `
+                        <div class="notification-item ${notif.is_read ? '' : 'unread'}" data-notification-id="${notif.id}">
+                            <div class="notification-item-header">
+                                <div class="notification-item-title">${escapeHtml(notif.title || 'Notification')}</div>
+                                <div class="notification-item-time">${timeAgo}</div>
+                            </div>
+                            <div class="notification-item-message">${escapeHtml(notif.message || '')}</div>
+                            ${invoiceLink ? `<div class="notification-item-actions">${invoiceLink}</div>` : ''}
+                        </div>
+                    `;
+                }).join('');
+                
+                // Add click handlers
+                notificationsList.querySelectorAll('.notification-item').forEach(item => {
+                    item.addEventListener('click', function(e) {
+                        // Don't navigate if clicking on a link
+                        if (e.target.closest('a')) return;
+                        
+                        const notificationId = this.dataset.notificationId;
+                        markNotificationReadPage(notificationId);
+                    });
+                });
+                
+                // Update pagination
+                updatePagination();
+            } else {
+                notificationsList.innerHTML = '<div class="notification-empty"><i class="fas fa-bell-slash" style="font-size: 3rem; color: var(--text-light, #ccc); margin-bottom: 1rem;"></i><p>No notifications found</p><p style="color: var(--text-light, #666); font-size: 0.875rem; margin-top: 0.5rem;">Notifications will appear here when invoice statuses change or fulfillment issues are reported.</p></div>';
+                const markAllReadBtn = document.getElementById('markAllReadBtn');
+                if (markAllReadBtn) markAllReadBtn.style.display = 'none';
+                const pagination = document.getElementById('pagination');
+                if (pagination) pagination.innerHTML = '';
+            }
+        } else {
+            throw new Error(data.error || 'Failed to load notifications');
+        }
+    } catch (error) {
+        console.error('Error loading notifications:', error);
+        const errorMessage = error.message || 'Unknown error occurred';
+        notificationsList.innerHTML = `
+            <div class="notification-empty">
+                <i class="fas fa-exclamation-triangle" style="font-size: 3rem; color: var(--text-light, #ccc); margin-bottom: 1rem;"></i>
+                <p style="color: var(--text-color);">Error loading notifications</p>
+                <p style="color: var(--text-light, #666); font-size: 0.875rem; margin-top: 0.5rem;">${escapeHtml(errorMessage)}</p>
+                <button class="btn btn-primary" onclick="loadNotificationsPage()" style="margin-top: 1rem;">
+                    <i class="fas fa-redo"></i> Retry
+                </button>
+            </div>
+        `;
+        const markAllReadBtn = document.getElementById('markAllReadBtn');
+        if (markAllReadBtn) markAllReadBtn.style.display = 'none';
+        const pagination = document.getElementById('pagination');
+        if (pagination) pagination.innerHTML = '';
+    }
+}
+
+async function loadPreferencesPage() {
+    const preferencesList = document.getElementById('preferencesList');
+    if (!preferencesList) return;
+    
+    try {
+        const response = await fetch('/api/v1/notifications/preferences');
+        const data = await response.json();
+        
+        if (data.success && data.preferences) {
+            const notificationTypes = [
+                { key: 'invoice_pending_approval', label: 'Pending Approval', desc: 'New orders pending your approval' },
+                { key: 'invoice_approved', label: 'Order Approved', desc: 'Orders approved and ready for fulfillment' },
+                { key: 'fulfillment_issue', label: 'Fulfillment Issues', desc: 'Issues reported by fulfillment team' },
+                { key: 'invoice_shipped', label: 'Order Shipped', desc: 'Orders that have been shipped' },
+                { key: 'invoice_delivered', label: 'Order Delivered', desc: 'Orders that have been delivered' },
+                { key: 'invoice_cancelled', label: 'Order Cancelled', desc: 'Orders that have been cancelled' },
+                { key: 'accounting_credit_event', label: 'Credit Events', desc: 'Account credit changes' }
+            ];
+            
+            preferencesList.innerHTML = notificationTypes.map(type => {
+                const pref = data.preferences[type.key] || { enabled: true, send_email: false };
+                return `
+                    <div class="preference-item">
+                        <div class="preference-item-label">
+                            <strong>${type.label}</strong>
+                            <small>${type.desc}</small>
+                        </div>
+                        <div class="preference-toggle ${pref.enabled ? 'active' : ''}" 
+                             data-type="${type.key}" 
+                             onclick="togglePreference('${type.key}')">
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            preferencesList.innerHTML = '<div class="notification-empty">Error loading preferences</div>';
+        }
+    } catch (error) {
+        console.error('Error loading preferences:', error);
+        preferencesList.innerHTML = '<div class="notification-empty">Error loading preferences</div>';
+    }
+}
+
+async function togglePreference(type) {
+    const toggle = document.querySelector(`[data-type="${type}"]`);
+    if (!toggle) return;
+    
+    const isActive = toggle.classList.contains('active');
+    const newState = !isActive;
+    
+    try {
+        const response = await fetch('/api/v1/notifications/preferences', {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                preferences: [{
+                    notification_type: type,
+                    enabled: newState,
+                    send_email: false
+                }]
+            })
+        });
+        
+        const data = await response.json();
+        if (data.success) {
+            toggle.classList.toggle('active');
+        } else {
+            throw new Error(data.error || 'Failed to update preference');
+        }
+    } catch (error) {
+        console.error('Error updating preference:', error);
+        alert('Failed to update preference: ' + error.message);
+    }
+}
+
+async function markNotificationReadPage(notificationId) {
+    try {
+        await fetch(`/api/v1/notifications/${notificationId}/read`, {
+            method: 'POST'
+        });
+        
+        // Update UI
+        const item = document.querySelector(`[data-notification-id="${notificationId}"]`);
+        if (item) {
+            item.classList.remove('unread');
+        }
+        
+        // Reload if filtering
+        if (currentFilter === 'unread') {
+            loadNotificationsPage();
+        }
+    } catch (error) {
+        console.error('Error marking notification as read:', error);
+    }
+}
+
+async function markAllNotificationsReadPage() {
+    try {
+        const response = await fetch('/api/v1/notifications?unread=true&limit=100');
+        const data = await response.json();
+        
+        if (data.success && data.notifications) {
+            for (const notif of data.notifications) {
+                await fetch(`/api/v1/notifications/${notif.id}/read`, {
+                    method: 'POST'
+                });
+            }
+            
+            loadNotificationsPage();
+        }
+    } catch (error) {
+        console.error('Error marking all notifications as read:', error);
+        alert('Failed to mark all as read: ' + error.message);
+    }
+}
+
+function updatePagination() {
+    const pagination = document.getElementById('pagination');
+    if (!pagination) return;
+    
+    const totalPages = Math.ceil(totalNotifications / pageSize);
+    
+    if (totalPages <= 1) {
+        pagination.innerHTML = '';
+        return;
+    }
+    
+    let html = '';
+    
+    // Previous button
+    html += `<button class="btn btn-secondary" ${currentPage === 1 ? 'disabled' : ''} onclick="changePage(${currentPage - 1})">
+        <i class="fas fa-chevron-left"></i> Previous
+    </button>`;
+    
+    // Page numbers
+    for (let i = 1; i <= totalPages; i++) {
+        if (i === 1 || i === totalPages || (i >= currentPage - 2 && i <= currentPage + 2)) {
+            html += `<button class="btn ${i === currentPage ? 'btn-primary' : 'btn-secondary'}" onclick="changePage(${i})">${i}</button>`;
+        } else if (i === currentPage - 3 || i === currentPage + 3) {
+            html += `<span style="padding: 0.5rem;">...</span>`;
+        }
+    }
+    
+    // Next button
+    html += `<button class="btn btn-secondary" ${currentPage === totalPages ? 'disabled' : ''} onclick="changePage(${currentPage + 1})">
+        Next <i class="fas fa-chevron-right"></i>
+    </button>`;
+    
+    pagination.innerHTML = html;
+}
+
+function changePage(page) {
+    currentPage = page;
+    loadNotificationsPage();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function formatTimeAgo(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    
+    if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
+    if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+    return 'Just now';
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+</script>
+

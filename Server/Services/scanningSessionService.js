@@ -14,6 +14,21 @@ class ScanningSessionService {
         try {
             await client.query('BEGIN');
 
+            // Check if user has admin privileges (Sales Admin or Administrator)
+            const userRoles = await client.query(`
+                SELECT r.name as role_name
+                FROM user_roles ur
+                JOIN roles r ON ur.role_id = r.id
+                WHERE ur.user_id = $1
+            `, [userId]);
+            
+            const roleNames = userRoles.rows.map(r => (r.role_name || '').toLowerCase().trim());
+            const isAdmin = roleNames.some(r => 
+                r === 'sales admin' || 
+                r === 'administrator' || 
+                r === 'fulfillment_admin'
+            );
+
             // Verify invoice is in correct state
             const invoice = await client.query(`
                 SELECT 
@@ -25,16 +40,20 @@ class ScanningSessionService {
             `, [invoiceId]);
 
             if (invoice.rows.length === 0) {
+                await client.query('ROLLBACK');
                 throw new Error('Invoice not found');
             }
 
             const inv = invoice.rows[0];
 
             if (inv.status !== 'Fulfillment_Accepted') {
+                await client.query('ROLLBACK');
                 throw new Error(`Cannot start scanning - invoice status is ${inv.status}`);
             }
 
-            if (inv.fulfillment_accepted_by !== userId) {
+            // Allow admins to scan even if not assigned, but regular workers must be assigned
+            if (!isAdmin && inv.fulfillment_accepted_by !== userId) {
+                await client.query('ROLLBACK');
                 throw new Error('You are not assigned to this order');
             }
 
@@ -59,6 +78,9 @@ class ScanningSessionService {
                     };
                 }
                 
+                // Admins can resume their own sessions even if not assigned
+                // (This handles the case where admin started scanning but order was reassigned)
+                
                 // If it's a different user, check if session is stale (older than 30 minutes)
                 const lastActivity = existingSession.last_activity || existingSession.started_at;
                 const minutesSinceActivity = (new Date() - new Date(lastActivity)) / (1000 * 60);
@@ -74,15 +96,33 @@ class ScanningSessionService {
                     // Continue to create new session below
                 } else {
                     // Active session by another user
-                    const otherUser = await client.query(`
-                        SELECT first_name, last_name FROM users WHERE id = $1
-                    `, [existingSession.fk_user_id]);
-                    
-                    const otherUserName = otherUser.rows[0] 
-                        ? `${otherUser.rows[0].first_name} ${otherUser.rows[0].last_name}`
-                        : 'Another worker';
-                    
-                    throw new Error(`An active scanning session exists for this order (started by ${otherUserName}). Please wait for them to finish or contact an admin.`);
+                    // Admins can take over active sessions, but regular workers cannot
+                    if (!isAdmin) {
+                        let otherUserName = 'Another worker';
+                        try {
+                            const otherUser = await client.query(`
+                                SELECT first_name, last_name FROM users WHERE id = $1
+                            `, [existingSession.fk_user_id]);
+                            
+                            if (otherUser.rows.length > 0) {
+                                otherUserName = `${otherUser.rows[0].first_name} ${otherUser.rows[0].last_name}`;
+                            }
+                        } catch (err) {
+                            console.error('[Scanning] Error fetching other user name:', err);
+                            // Continue with default name
+                        }
+                        
+                        await client.query('ROLLBACK');
+                        throw new Error(`An active scanning session exists for this order (started by ${otherUserName}). Please wait for them to finish or contact an admin.`);
+                    } else {
+                        // Admin can take over - abandon the existing session
+                        await client.query(`
+                            UPDATE "ORDERS-scanning-sessions"
+                            SET session_status = 'abandoned', abandoned_at = NOW()
+                            WHERE id = $1
+                        `, [existingSession.id]);
+                        // Continue to create new session below
+                    }
                 }
             }
 
@@ -107,7 +147,12 @@ class ScanningSessionService {
             };
 
         } catch (error) {
-            await client.query('ROLLBACK');
+            console.error('[Scanning] Error in startScanningSession:', error.message, error.stack);
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                console.error('[Scanning] Error during ROLLBACK:', rollbackError.message);
+            }
             throw error;
         } finally {
             client.release();

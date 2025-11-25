@@ -191,6 +191,28 @@ class FulfillmentController {
     }
 
     /**
+     * Acknowledge package removal (package not on order)
+     * POST /api/v1/fulfillment/scanning/acknowledge-removal
+     */
+    async acknowledgePackageRemoval(req, res) {
+        try {
+            const { invoice_id, package_label, session_id } = req.body;
+            const userId = req.user.id;
+
+            if (!invoice_id || !package_label) {
+                return res.status(400).json({ error: 'invoice_id and package_label are required' });
+            }
+
+            const packageScanService = require('../Services/packageScanService');
+            const result = await packageScanService.acknowledgePackageRemoval(invoice_id, package_label, userId, session_id);
+            res.json(result);
+        } catch (error) {
+            console.error('[Fulfillment] Error acknowledging package removal:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
      * Cancel scanning session
      * POST /api/v1/fulfillment/scanning/cancel/:sessionId
      */

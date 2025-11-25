@@ -15,15 +15,24 @@ const notificationStore = require('../Services/notificationStoreService');
 router.get('/', auth, async (req, res) => {
     try {
         const userId = req.session.userId || req.user?.id;
+        
+        if (!userId) {
+            return res.status(401).json({ success: false, error: 'User not authenticated' });
+        }
+        
         const limit = Math.min(parseInt(req.query.limit, 10) || 20, 100);
         const offset = parseInt(req.query.offset, 10) || 0;
         const onlyUnread = req.query.unread === 'true';
+
+        console.log(`[Notifications] Fetching notifications for user ${userId}, limit: ${limit}, offset: ${offset}, onlyUnread: ${onlyUnread}`);
 
         const result = await notificationStore.getUserNotifications(userId, {
             limit,
             offset,
             onlyUnread
         });
+
+        console.log(`[Notifications] Found ${result.notifications.length} notifications, total: ${result.total}`);
 
         res.json({
             success: true,
@@ -33,8 +42,12 @@ router.get('/', auth, async (req, res) => {
             offset
         });
     } catch (error) {
-        console.error('Error fetching notifications:', error);
-        res.status(500).json({ success: false, error: 'Failed to fetch notifications' });
+        console.error('[Notifications] Error fetching notifications:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to fetch notifications',
+            details: error.message 
+        });
     }
 });
 

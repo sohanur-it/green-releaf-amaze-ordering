@@ -169,10 +169,36 @@ class AuthController {
      * Handle logout
      */
     static async logout(req, res) {
+        const userId = req.session?.userId;
+        const username = req.session?.username;
+        
+        // Clear session data first
+        if (req.session) {
+            req.session.userId = null;
+            req.session.username = null;
+            req.session.userRoles = null;
+            req.session.isSuperuser = null;
+            req.session.userEmail = null;
+        }
+        
+        // Destroy session
         req.session.destroy((err) => {
             if (err) {
                 console.error('Logout error:', err);
+                // Even if destroy fails, try to redirect
+                res.clearCookie('connect.sid', { path: '/' });
+                return res.redirect('/auth/login');
             }
+            
+            // Clear the session cookie explicitly
+            res.clearCookie('connect.sid', { 
+                path: '/',
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'lax'
+            });
+            
+            console.log(`[LOGOUT] User ${username || userId || 'unknown'} logged out successfully`);
             res.redirect('/auth/login');
         });
     }

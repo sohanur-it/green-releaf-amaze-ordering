@@ -140,12 +140,11 @@ if (isSuperuser) {
                     <span class="nav-link-text">Invoices</span>
                 </a>
                 
-                <% if (hasRole('Fulfillment Team') || hasRole('fulfillment_worker') || hasRole('fulfillment_admin') || isAdmin) { %>
+                <!-- Fulfillment menu for Sales Admin -->
                 <a href="/admin/fulfillment/queue" class="nav-link <%= title === 'Fulfillment Queue' || title === 'Package Scanning' || title === 'Transportation Details' || title === 'Create Manifest' ? 'active' : '' %>" title="Fulfillment">
                     <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="7.5 4.21 12 6.81 16.5 4.21"></polyline><polyline points="7.5 19.79 7.5 14.6 3 12"></polyline><polyline points="21 12 16.5 14.6 16.5 19.79"></polyline><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
                     <span class="nav-link-text">Fulfillment</span>
                 </a>
-                <% } %>
                 <% if ((hasRole('fulfillment_admin') || isAdmin) && (title === 'Active Scanning Sessions' || title === 'Fulfillment Issues')) { %>
                 <a href="/admin/fulfillment/sessions" class="nav-link <%= title === 'Active Scanning Sessions' ? 'active' : '' %>" title="Session Management">
                     <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
@@ -259,6 +258,32 @@ if (isSuperuser) {
                 <button class="top-bar-icon theme-toggle-btn" id="themeToggleBtn" title="Toggle Theme">
                     <i class="fas fa-lightbulb" id="themeIcon"></i>
                 </button>
+                <!-- Notifications -->
+                <div class="top-bar-icon notification-dropdown" id="notificationDropdown">
+                    <button class="notification-btn" title="Notifications" id="notificationBellBtn">
+                        <i class="fas fa-bell"></i>
+                        <span class="notification-badge" id="notificationBadge" style="display: none;">0</span>
+                    </button>
+                    <div class="notification-menu" id="notificationMenu">
+                        <div class="notification-menu-header">
+                            <h4 style="margin: 0; color: var(--text-color);">Notifications</h4>
+                            <button class="notification-mark-all-read" id="markAllReadBtn" style="display: none; padding: 0.25rem 0.5rem; font-size: 0.875rem; border: none; background: transparent; color: var(--primary-color, #007bff); cursor: pointer;">
+                                Mark all read
+                            </button>
+                        </div>
+                        <div class="notification-menu-divider"></div>
+                        <div class="notification-list" id="notificationList">
+                            <div class="notification-loading" style="padding: 1rem; text-align: center; color: var(--text-light, #666);">
+                                <i class="fas fa-spinner fa-spin"></i> Loading...
+                            </div>
+                        </div>
+                        <div class="notification-menu-footer">
+                            <a href="/admin/notifications" style="display: block; padding: 0.75rem; text-align: center; color: var(--primary-color, #007bff); text-decoration: none; border-top: 1px solid var(--border-color, #dee2e6);">
+                                View all notifications
+                            </a>
+                        </div>
+                    </div>
+                </div>
                 <!-- Settings -->
                 <a href="/admin/settings" class="top-bar-icon settings-btn <%= title === 'Settings' ? 'active' : '' %>" title="Settings">
                     <i class="fas fa-cog"></i>
@@ -288,7 +313,7 @@ if (isSuperuser) {
                             <i class="fas fa-cog"></i>
                             <span>Settings</span>
                         </a>
-                        <a href="/auth/logout" class="profile-menu-item">
+                        <a href="/auth/logout" class="profile-menu-item" onclick="event.preventDefault(); window.location.href='/auth/logout'; return false;">
                             <i class="fas fa-sign-out-alt"></i>
                             <span>Logout</span>
                         </a>
@@ -355,6 +380,9 @@ document.addEventListener('DOMContentLoaded', function() {
         profileDropdown.addEventListener('click', function(e) {
             e.stopPropagation();
             profileMenu.classList.toggle('active');
+            // Close notification menu if open
+            const notificationMenu = document.getElementById('notificationMenu');
+            if (notificationMenu) notificationMenu.classList.remove('active');
         });
         
         // Close dropdown when clicking outside
@@ -364,7 +392,204 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+    
+    // Notification dropdown toggle
+    const notificationDropdown = document.getElementById('notificationDropdown');
+    const notificationMenu = document.getElementById('notificationMenu');
+    const notificationBellBtn = document.getElementById('notificationBellBtn');
+    
+    if (notificationDropdown && notificationMenu && notificationBellBtn) {
+        notificationBellBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const isActive = notificationMenu.classList.contains('active');
+            notificationMenu.classList.toggle('active');
+            // Close profile menu if open
+            if (profileMenu) profileMenu.classList.remove('active');
+            
+            // Load notifications when opening (not when closing)
+            if (!isActive) {
+                loadNotifications();
+            }
+        });
+        
+        // Close dropdown when clicking outside
+        document.addEventListener('click', function(e) {
+            if (!notificationDropdown.contains(e.target)) {
+                notificationMenu.classList.remove('active');
+            }
+        });
+        
+        // Load unread count on page load
+        updateNotificationBadge();
+    } else {
+        console.warn('Notification elements not found:', {
+            dropdown: !!notificationDropdown,
+            menu: !!notificationMenu,
+            button: !!notificationBellBtn
+        });
+    }
 });
+
+// Notification management functions
+async function loadNotifications() {
+    const notificationList = document.getElementById('notificationList');
+    if (!notificationList) {
+        console.error('Notification list element not found');
+        return;
+    }
+    
+    try {
+        notificationList.innerHTML = '<div class="notification-loading"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+        
+        const response = await fetch('/api/v1/notifications?limit=10');
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        
+        console.log('Notifications API response:', data);
+        
+        if (data.success && data.notifications && data.notifications.length > 0) {
+            notificationList.innerHTML = data.notifications.map(notif => {
+                const timeAgo = formatTimeAgo(new Date(notif.created_at));
+                const invoiceLink = notif.payload && notif.payload.invoice_id 
+                    ? `<a href="/admin/invoices/${notif.payload.invoice_id}" class="notification-item-link">View Invoice</a>`
+                    : '';
+                
+                return `
+                    <div class="notification-item ${notif.is_read ? '' : 'unread'}" data-notification-id="${notif.id}">
+                        <div class="notification-item-title">${escapeHtml(notif.title || 'Notification')}</div>
+                        <div class="notification-item-message">${escapeHtml(notif.message || '')}</div>
+                        <div class="notification-item-time">${timeAgo}</div>
+                        ${invoiceLink}
+                    </div>
+                `;
+            }).join('');
+            
+            // Add click handlers
+            notificationList.querySelectorAll('.notification-item').forEach(item => {
+                item.addEventListener('click', function() {
+                    const notificationId = this.dataset.notificationId;
+                    markNotificationRead(notificationId);
+                    
+                    // Navigate to invoice if link exists
+                    const link = this.querySelector('.notification-item-link');
+                    if (link) {
+                        window.location.href = link.href;
+                    }
+                });
+            });
+            
+            // Show mark all read button if there are unread
+            const unreadCount = data.notifications.filter(n => !n.is_read).length;
+            const markAllReadBtn = document.getElementById('markAllReadBtn');
+            if (markAllReadBtn) {
+                if (unreadCount > 0) {
+                    markAllReadBtn.style.display = 'block';
+                    markAllReadBtn.onclick = markAllNotificationsRead;
+                } else {
+                    markAllReadBtn.style.display = 'none';
+                }
+            }
+        } else {
+            notificationList.innerHTML = '<div class="notification-empty">No notifications</div>';
+            const markAllReadBtn = document.getElementById('markAllReadBtn');
+            if (markAllReadBtn) markAllReadBtn.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error loading notifications:', error);
+        notificationList.innerHTML = '<div class="notification-empty">Error loading notifications: ' + escapeHtml(error.message) + '</div>';
+    }
+}
+
+async function updateNotificationBadge() {
+    const badge = document.getElementById('notificationBadge');
+    if (!badge) return;
+    
+    try {
+        // Fetch with limit=0 to get total count without data, or use a small limit and check total
+        const response = await fetch('/api/v1/notifications?limit=1&unread=true');
+        const data = await response.json();
+        
+        if (data.success) {
+            // Use the total count from API response, not the array length
+            const unreadCount = data.total || 0;
+            if (unreadCount > 0) {
+                badge.textContent = unreadCount > 99 ? '99+' : unreadCount;
+                badge.style.display = 'flex';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+    } catch (error) {
+        console.error('Error updating notification badge:', error);
+    }
+}
+
+async function markNotificationRead(notificationId) {
+    try {
+        await fetch(`/api/v1/notifications/${notificationId}/read`, {
+            method: 'POST'
+        });
+        
+        // Update UI
+        const item = document.querySelector(`[data-notification-id="${notificationId}"]`);
+        if (item) {
+            item.classList.remove('unread');
+        }
+        
+        // Update badge
+        updateNotificationBadge();
+    } catch (error) {
+        console.error('Error marking notification as read:', error);
+    }
+}
+
+async function markAllNotificationsRead() {
+    try {
+        // Get all unread notifications
+        const response = await fetch('/api/v1/notifications?unread=true&limit=100');
+        const data = await response.json();
+        
+        if (data.success && data.notifications) {
+            // Mark all as read
+            for (const notif of data.notifications) {
+                await fetch(`/api/v1/notifications/${notif.id}/read`, {
+                    method: 'POST'
+                });
+            }
+            
+            // Reload notifications
+            loadNotifications();
+            updateNotificationBadge();
+        }
+    } catch (error) {
+        console.error('Error marking all notifications as read:', error);
+    }
+}
+
+function formatTimeAgo(date) {
+    const now = new Date();
+    const diff = now - date;
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    
+    if (days > 0) return `${days} day${days > 1 ? 's' : ''} ago`;
+    if (hours > 0) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    if (minutes > 0) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
+    return 'Just now';
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Poll for new notifications every 30 seconds
+setInterval(updateNotificationBadge, 30000);
 </script>
 </body>
 </html>

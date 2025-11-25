@@ -1367,13 +1367,50 @@ class InvoiceController {
                 });
             }
 
-            // Allow adding line items if invoice is in Draft, Pending_Approval, or Fulfillment_Issue status
-            // (same as updateLineItem to allow editing invoices that haven't been manifested)
-            const editableStatuses = ['Draft', 'Pending_Approval', 'Fulfillment_Issue'];
-            if (!editableStatuses.includes(invoice.rows[0].status)) {
+            const invoiceStatus = invoice.rows[0].status;
+            
+            // Explicitly block terminal states
+            const terminalStates = ['Paid', 'Cancelled', 'Fully_Rejected'];
+            if (terminalStates.includes(invoiceStatus)) {
+                return res.status(403).json({
+                    success: false,
+                    error: `Cannot modify invoice in terminal state: ${invoiceStatus}. Invoice is locked.`
+                });
+            }
+
+            // Check if fulfillment has started work on this invoice
+            const fulfillmentCheck = await query(`
+                SELECT 
+                    i.fulfillment_accepted_by,
+                    EXISTS(
+                        SELECT 1 FROM "ORDERS-scanning-sessions" ss
+                        WHERE ss.fk_invoice_id = i.id 
+                        AND ss.session_status = 'active'
+                    ) as has_active_scanning_session
+                FROM "ORDERS-invoices" i
+                WHERE i.id = $1
+            `, [id]);
+
+            const fulfillmentStarted = fulfillmentCheck.rows.length > 0 && 
+                (fulfillmentCheck.rows[0].fulfillment_accepted_by !== null || 
+                 fulfillmentCheck.rows[0].has_active_scanning_session === true);
+
+            // Allow adding line items if:
+            // 1. Status is Draft, Pending_Approval, Approved (before fulfillment starts)
+            // 2. Status is Fulfillment_Issue (fulfillment kicked it back)
+            const editableStatuses = ['Draft', 'Pending_Approval', 'Approved', 'Fulfillment_Issue'];
+            if (!editableStatuses.includes(invoiceStatus)) {
                 return res.status(400).json({
                     success: false,
-                    error: `Line items can only be added when invoice is in Draft, Pending Approval, or Fulfillment Issue status. Current status: ${invoice.rows[0].status}`
+                    error: `Line items can only be added when invoice is in Draft, Pending Approval, Approved, or Fulfillment Issue status. Current status: ${invoiceStatus}`
+                });
+            }
+
+            // Block if fulfillment has started (unless it's Fulfillment_Issue - fulfillment kicked it back)
+            if (fulfillmentStarted && invoiceStatus !== 'Fulfillment_Issue') {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Cannot modify invoice - fulfillment team has started working on this order. If changes are needed, fulfillment must report an issue first.'
                 });
             }
 
@@ -1460,11 +1497,19 @@ class InvoiceController {
             const { quantity, modification_reason } = req.body;
             const userId = req.session.userId || req.user?.id;
 
-            if (!quantity || quantity <= 0) {
+            // Handle quantity = 0 as remove line item
+            if (!quantity || quantity < 0) {
                 return res.status(400).json({
                     success: false,
-                    error: 'Valid quantity is required'
+                    error: 'Valid quantity is required (use DELETE endpoint to remove line item)'
                 });
+            }
+
+            // If quantity is 0, treat as remove line item
+            if (parseInt(quantity) === 0) {
+                // Call removeLineItem method directly with same request/response
+                // This handles the removal properly with all the same validations
+                return this.removeLineItem(req, res);
             }
 
             const internalInvoiceService = require('../Services/internalInvoiceService');
@@ -1499,30 +1544,55 @@ class InvoiceController {
 
                 const item = lineItem.rows[0];
 
-                // CRITICAL: Prevent modifications after manifest creation (Module 4 compliance requirement)
-                // Check if manifest_numbers array exists and has entries, or if manifest_created_at is set
-                const hasManifest = (item.metrc_manifest_numbers && 
-                    (Array.isArray(item.metrc_manifest_numbers) 
-                        ? item.metrc_manifest_numbers.length > 0 
-                        : (typeof item.metrc_manifest_numbers === 'string' 
-                            ? JSON.parse(item.metrc_manifest_numbers || '[]').length > 0 
-                            : false))) || item.manifest_created_at;
-                
-                if (hasManifest) {
+                // Explicitly block terminal states
+                const terminalStates = ['Paid', 'Cancelled', 'Fully_Rejected'];
+                if (terminalStates.includes(item.status)) {
                     await client.query('ROLLBACK');
-                    return res.status(400).json({
+                    return res.status(403).json({
                         success: false,
-                        error: 'Cannot modify invoice after manifest has been created. The order is locked for compliance reasons.'
+                        error: `Cannot modify invoice in terminal state: ${item.status}. Invoice is locked.`
                     });
                 }
 
-                // Allow editing if invoice is in Draft, Pending_Approval, or Fulfillment_Issue status
-                const editableStatuses = ['Draft', 'Pending_Approval', 'Fulfillment_Issue'];
-                if (!editableStatuses.includes(item.status)) {
+                // Check if fulfillment has started work on this invoice
+                // Fulfillment starts when: fulfillment_accepted_by is set OR there's an active scanning session
+                const fulfillmentCheck = await client.query(`
+                    SELECT 
+                        i.fulfillment_accepted_by,
+                        EXISTS(
+                            SELECT 1 FROM "ORDERS-scanning-sessions" ss
+                            WHERE ss.fk_invoice_id = i.id 
+                            AND ss.session_status = 'active'
+                        ) as has_active_scanning_session
+                    FROM "ORDERS-invoices" i
+                    WHERE i.id = $1
+                `, [id]);
+
+                const fulfillmentStarted = fulfillmentCheck.rows.length > 0 && 
+                    (fulfillmentCheck.rows[0].fulfillment_accepted_by !== null || 
+                     fulfillmentCheck.rows[0].has_active_scanning_session === true);
+
+                // Allow editing if:
+                // 1. Status is Draft, Pending_Approval, Approved (before fulfillment starts)
+                // 2. Status is Fulfillment_Issue (fulfillment kicked it back)
+                // 3. Status is Approved but fulfillment hasn't started yet
+                const editableStatuses = ['Draft', 'Pending_Approval', 'Approved', 'Fulfillment_Issue'];
+                const isEditableStatus = editableStatuses.includes(item.status);
+                
+                if (!isEditableStatus) {
                     await client.query('ROLLBACK');
                     return res.status(400).json({
                         success: false,
-                        error: `Line items can only be updated when invoice is in Draft, Pending Approval, or Fulfillment Issue status. Current status: ${item.status}`
+                        error: `Line items can only be updated when invoice is in Draft, Pending Approval, Approved, or Fulfillment Issue status. Current status: ${item.status}`
+                    });
+                }
+
+                // Block if fulfillment has started (unless it's Fulfillment_Issue - fulfillment kicked it back)
+                if (fulfillmentStarted && item.status !== 'Fulfillment_Issue') {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({
+                        success: false,
+                        error: 'Cannot modify invoice - fulfillment team has started working on this order. If changes are needed, fulfillment must report an issue first.'
                     });
                 }
 
@@ -1622,21 +1692,51 @@ class InvoiceController {
                 // Update line item with modification tracking (Module 4 requirement)
                 const unitPrice = parseFloat(item.unit_price);
                 const newLineTotal = unitPrice * newQuantity - parseFloat(item.line_discount_amount || 0);
+                
+                // Set fulfillment_issue_modification flag if invoice is in Fulfillment_Issue status
+                const isFulfillmentIssueMod = item.status === 'Fulfillment_Issue';
+                
+                // Check if fulfillment_issue_modification column exists
+                const columnCheck = await client.query(`
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'ORDERS-invoice-line-items' 
+                    AND column_name = 'fulfillment_issue_modification'
+                `);
+                const hasColumn = columnCheck.rows.length > 0;
 
-                await client.query(`
-                    UPDATE "ORDERS-invoice-line-items"
-                    SET 
-                        quantity_ordered = $1,
-                        quantity_allocated = $1,
-                        line_total = $2,
-                        was_modified = true,
-                        original_quantity = $3,
-                        modification_reason = $4,
-                        modified_at = NOW(),
-                        modified_by = $5,
-                        updated_at = NOW()
-                    WHERE id = $6
-                `, [newQuantity, newLineTotal, originalQuantity, modReason, userId, lineItemId]);
+                if (hasColumn && isFulfillmentIssueMod) {
+                    await client.query(`
+                        UPDATE "ORDERS-invoice-line-items"
+                        SET 
+                            quantity_ordered = $1,
+                            quantity_allocated = $1,
+                            line_total = $2,
+                            was_modified = true,
+                            original_quantity = $3,
+                            modification_reason = $4,
+                            modified_at = NOW(),
+                            modified_by = $5,
+                            updated_at = NOW(),
+                            fulfillment_issue_modification = true
+                        WHERE id = $6
+                    `, [newQuantity, newLineTotal, originalQuantity, modReason, userId, lineItemId]);
+                } else {
+                    await client.query(`
+                        UPDATE "ORDERS-invoice-line-items"
+                        SET 
+                            quantity_ordered = $1,
+                            quantity_allocated = $1,
+                            line_total = $2,
+                            was_modified = true,
+                            original_quantity = $3,
+                            modification_reason = $4,
+                            modified_at = NOW(),
+                            modified_by = $5,
+                            updated_at = NOW()
+                        WHERE id = $6
+                    `, [newQuantity, newLineTotal, originalQuantity, modReason, userId, lineItemId]);
+                }
 
                 await lineItemHistoryService.addLineItemHistoryEntry({
                     client,
@@ -1772,30 +1872,51 @@ class InvoiceController {
 
                 const item = lineItem.rows[0];
 
-                // CRITICAL: Prevent modifications after manifest creation (Module 4 compliance requirement)
-                // Check if manifest_numbers array exists and has entries, or if manifest_created_at is set
-                const hasManifest = (item.metrc_manifest_numbers && 
-                    (Array.isArray(item.metrc_manifest_numbers) 
-                        ? item.metrc_manifest_numbers.length > 0 
-                        : (typeof item.metrc_manifest_numbers === 'string' 
-                            ? JSON.parse(item.metrc_manifest_numbers || '[]').length > 0 
-                            : false))) || item.manifest_created_at;
-                
-                if (hasManifest) {
+                // Explicitly block terminal states
+                const terminalStates = ['Paid', 'Cancelled', 'Fully_Rejected'];
+                if (terminalStates.includes(item.status)) {
                     await client.query('ROLLBACK');
-                    return res.status(400).json({
+                    return res.status(403).json({
                         success: false,
-                        error: 'Cannot modify invoice after manifest has been created. The order is locked for compliance reasons.'
+                        error: `Cannot modify invoice in terminal state: ${item.status}. Invoice is locked.`
                     });
                 }
 
-                // Allow removing line items if invoice is in Draft, Pending_Approval, or Fulfillment_Issue status
-                const editableStatuses = ['Draft', 'Pending_Approval', 'Fulfillment_Issue'];
+                // Check if fulfillment has started work on this invoice
+                const fulfillmentCheck = await client.query(`
+                    SELECT 
+                        i.fulfillment_accepted_by,
+                        EXISTS(
+                            SELECT 1 FROM "ORDERS-scanning-sessions" ss
+                            WHERE ss.fk_invoice_id = i.id 
+                            AND ss.session_status = 'active'
+                        ) as has_active_scanning_session
+                    FROM "ORDERS-invoices" i
+                    WHERE i.id = $1
+                `, [id]);
+
+                const fulfillmentStarted = fulfillmentCheck.rows.length > 0 && 
+                    (fulfillmentCheck.rows[0].fulfillment_accepted_by !== null || 
+                     fulfillmentCheck.rows[0].has_active_scanning_session === true);
+
+                // Allow removing line items if:
+                // 1. Status is Draft, Pending_Approval, Approved (before fulfillment starts)
+                // 2. Status is Fulfillment_Issue (fulfillment kicked it back)
+                const editableStatuses = ['Draft', 'Pending_Approval', 'Approved', 'Fulfillment_Issue'];
                 if (!editableStatuses.includes(item.status)) {
                     await client.query('ROLLBACK');
                     return res.status(400).json({
                         success: false,
-                        error: `Line items can only be removed when invoice is in Draft, Pending Approval, or Fulfillment Issue status. Current status: ${item.status}`
+                        error: `Line items can only be removed when invoice is in Draft, Pending Approval, Approved, or Fulfillment Issue status. Current status: ${item.status}`
+                    });
+                }
+
+                // Block if fulfillment has started (unless it's Fulfillment_Issue - fulfillment kicked it back)
+                if (fulfillmentStarted && item.status !== 'Fulfillment_Issue') {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({
+                        success: false,
+                        error: 'Cannot modify invoice - fulfillment team has started working on this order. If changes are needed, fulfillment must report an issue first.'
                     });
                 }
 
@@ -1835,12 +1956,14 @@ class InvoiceController {
                 await internalInvoiceService.recalculateTotals(parseInt(id), client);
 
                 // Log to invoice history
+                // Mark as triggered by fulfillment issue if invoice is in that state
+                const triggeredByIssue = item.status === 'Fulfillment_Issue';
                 await client.query(`
                     INSERT INTO "ORDERS-invoice-history" (
                         fk_invoice_id, modification_type, field_name,
-                        old_value, new_value, reason, changed_by_user_id
-                    ) VALUES ($1, 'line_item_removed', $2, $3, NULL, 'Line item removed', $4)
-                `, [id, `line_item_${lineItemId}`, item.quantity_ordered.toString(), userId]);
+                        old_value, new_value, reason, changed_by_user_id, triggered_by_fulfillment_issue
+                    ) VALUES ($1, 'line_item_removed', $2, $3, NULL, 'Line item removed', $4, $5)
+                `, [id, `line_item_${lineItemId}`, item.quantity_ordered.toString(), userId, triggeredByIssue]);
 
                 await client.query('COMMIT');
 
@@ -2227,11 +2350,21 @@ class InvoiceController {
                 });
             }
 
-            // Get invoice and check if it has shipped
+            // Get invoice and check if it has shipped or if fulfillment is scanning
             const invoice = await query(`
-                SELECT id, status, source, shipped_at
-                FROM "ORDERS-invoices"
-                WHERE id = $1
+                SELECT 
+                    i.id, 
+                    i.status, 
+                    i.source, 
+                    i.shipped_at,
+                    i.fulfillment_accepted_by,
+                    EXISTS(
+                        SELECT 1 FROM "ORDERS-scanning-sessions" ss
+                        WHERE ss.fk_invoice_id = i.id 
+                        AND ss.session_status = 'active'
+                    ) as has_active_scanning_session
+                FROM "ORDERS-invoices" i
+                WHERE i.id = $1
             `, [id]);
 
             if (invoice.rows.length === 0) {
@@ -2248,6 +2381,14 @@ class InvoiceController {
                 return res.status(400).json({
                     success: false,
                     error: 'Cannot void an invoice that has already been shipped'
+                });
+            }
+
+            // Check if fulfillment is currently scanning this invoice
+            if (invoiceData.has_active_scanning_session) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Cannot void invoice - fulfillment team is currently scanning packages for this order. Please wait until scanning is complete.'
                 });
             }
 

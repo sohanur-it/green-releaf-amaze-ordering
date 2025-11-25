@@ -478,12 +478,38 @@
     </div>
 </div>
 
+<!-- Package Removal Confirmation Modal -->
+<div class="rejection-alert-modal" id="package-removal-modal">
+    <div class="rejection-alert-content">
+        <h3><i class="fas fa-exclamation-circle" style="color: #f59e0b;"></i> Package Not On Order</h3>
+        <p style="font-weight: 600; color: #991b1b; margin-bottom: 1rem;">This package does not belong to this order.</p>
+        <div class="alert-details" id="removal-details"></div>
+        <div style="margin-top: 1.5rem; padding: 1rem; background: #fef2f2; border-left: 4px solid #ef4444; border-radius: 4px;">
+            <p style="margin: 0; font-weight: 600; color: #991b1b;">
+                <i class="fas fa-hand-paper"></i> Required Action:
+            </p>
+            <p style="margin: 0.5rem 0 0 0; color: #7f1d1d;">
+                You must confirm that you have physically removed this package from the order before you can continue scanning.
+            </p>
+        </div>
+        <div class="alert-actions" style="margin-top: 1.5rem;">
+            <button class="btn-verify" onclick="acknowledgePackageRemoval()" style="background: #f59e0b; border-color: #f59e0b;">
+                <i class="fas fa-check-circle"></i> I Have Removed This Package
+            </button>
+            <button class="btn-skip" onclick="cancelPackageRemoval()">
+                <i class="fas fa-times"></i> Cancel
+            </button>
+        </div>
+    </div>
+</div>
+
 <script>
     // Pass invoice ID to JavaScript
     window.invoiceId = <%= invoiceId %>;
     window.sessionId = null;
     window.currentPackageLabel = null;
     window.rejectionAlert = null;
+    window.packageRemovalAlert = null;
 </script>
 <script src="/public/js/admin/fulfillment-scanning.js"></script>
 

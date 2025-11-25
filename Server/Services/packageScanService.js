@@ -40,25 +40,45 @@ class PackageScanService {
         const client = await pool.connect();
 
         try {
+            console.log(`[PackageScan] Starting scan validation for session ${sessionId}, package ${packageLabel}, invoice ${invoiceId}`);
             await client.query('BEGIN');
+            console.log(`[PackageScan] Transaction started`);
 
             // Update session activity timestamp
-            await client.query(`
-                UPDATE "ORDERS-scanning-sessions"
-                SET last_activity = NOW()
-                WHERE id = $1
-            `, [sessionId]);
+            let session;
+            try {
+                console.log(`[PackageScan] Updating session activity timestamp...`);
+                await client.query(`
+                    UPDATE "ORDERS-scanning-sessions"
+                    SET last_activity = NOW()
+                    WHERE id = $1
+                `, [sessionId]);
+                console.log(`[PackageScan] Session activity updated`);
 
-            // ============================================
-            // VALIDATION LAYER 1: Session Active?
-            // ============================================
-            const session = await client.query(`
-                SELECT session_status, currently_locked_packages
-                FROM "ORDERS-scanning-sessions"
-                WHERE id = $1
-            `, [sessionId]);
+                // ============================================
+                // VALIDATION LAYER 1: Session Active?
+                // ============================================
+                console.log(`[PackageScan] Checking if session is active...`);
+                session = await client.query(`
+                    SELECT session_status, currently_locked_packages
+                    FROM "ORDERS-scanning-sessions"
+                    WHERE id = $1
+                `, [sessionId]);
+                console.log(`[PackageScan] Session check complete, status: ${session.rows[0]?.session_status}`);
+            } catch (error) {
+                console.error('[PackageScan] ❌ Error in session query:', error.message);
+                console.error('[PackageScan] Error code:', error.code);
+                console.error('[PackageScan] Error stack:', error.stack);
+                try {
+                    await client.query('ROLLBACK');
+                } catch (rollbackError) {
+                    console.error('[PackageScan] Error during ROLLBACK:', rollbackError);
+                }
+                throw new ValidationError('DATABASE_ERROR', `Database error: ${error.message}`);
+            }
 
             if (session.rows.length === 0 || session.rows[0].session_status !== 'active') {
+                await client.query('ROLLBACK');
                 throw new ValidationError('SESSION_INACTIVE', 'Scanning session is not active');
             }
 
@@ -66,7 +86,21 @@ class PackageScanService {
             // VALIDATION LAYER 2: Package Exists in METRC?
             // ============================================
             // Handle both sync_license (production) and synclicense (development)
-            const licenseColumn = await this.getActivePackagesLicenseColumn(client);
+            let licenseColumn;
+            try {
+                console.log(`[PackageScan] Getting license column name...`);
+                licenseColumn = await this.getActivePackagesLicenseColumn(client);
+                console.log(`[PackageScan] License column: ${licenseColumn}`);
+            } catch (error) {
+                console.error('[PackageScan] ❌ Error getting license column:', error.message);
+                console.error('[PackageScan] Error code:', error.code);
+                try {
+                    await client.query('ROLLBACK');
+                } catch (rollbackError) {
+                    console.error('[PackageScan] Error during ROLLBACK:', rollbackError);
+                }
+                throw new ValidationError('DATABASE_ERROR', `Database error: ${error.message}`);
+            }
             
             // Build query with correct column name (licenseColumn is safe - comes from schema check)
             const packageExistsQuery = `
@@ -90,10 +124,31 @@ class PackageScanService {
                     AND ap.isfinished = false
             `;
             
-            const packageExists = await client.query(packageExistsQuery, [packageLabel, JSON.stringify([packageLabel])]);
+            let packageExists;
+            try {
+                console.log(`[PackageScan] Querying package ${packageLabel}...`);
+                packageExists = await client.query(packageExistsQuery, [packageLabel, JSON.stringify([packageLabel])]);
+                console.log(`[PackageScan] Package query complete, found ${packageExists.rows.length} result(s)`);
+            } catch (error) {
+                console.error('[PackageScan] ❌ Error querying package:', error.message);
+                console.error('[PackageScan] Error code:', error.code);
+                console.error('[PackageScan] Error detail:', error.detail);
+                console.error('[PackageScan] Error hint:', error.hint);
+                try {
+                    await client.query('ROLLBACK');
+                } catch (rollbackError) {
+                    console.error('[PackageScan] Error during ROLLBACK:', rollbackError);
+                }
+                throw new ValidationError('DATABASE_ERROR', `Database query error: ${error.message}`);
+            }
 
             if (packageExists.rows.length === 0) {
-                await this.logScanError(invoiceId, userId, packageLabel, 'package_not_found', client);
+                try {
+                    await this.logScanError(invoiceId, userId, packageLabel, 'package_not_found', client);
+                } catch (logError) {
+                    console.error('[PackageScan] Error logging scan error:', logError);
+                }
+                await client.query('ROLLBACK');
                 throw new ValidationError(
                     'PACKAGE_NOT_FOUND',
                     `Package ${packageLabel} does not exist in active inventory`
@@ -105,21 +160,36 @@ class PackageScanService {
             // ============================================
             // VALIDATION LAYER 3: Which Line Item?
             // ============================================
-            const lineItems = await client.query(`
-                SELECT 
-                    li.id as line_item_id,
-                    li.quantity_ordered,
-                    li.assigned_package_labels,
-                    li.specific_package_labels,
-                    b.id as batch_id,
-                    b.batch_name,
-                    b.full_package_details,
-                    b.partial_package_details,
-                    b.metrc_item_name
-                FROM "ORDERS-invoice-line-items" li
-                JOIN "ORDERS-batches" b ON li.fk_batch_id = b.id
-                WHERE li.fk_invoice_id = $1
-            `, [invoiceId]);
+            let lineItems;
+            try {
+                console.log(`[PackageScan] Querying line items for invoice ${invoiceId}...`);
+                lineItems = await client.query(`
+                    SELECT 
+                        li.id as line_item_id,
+                        li.quantity_ordered,
+                        li.assigned_package_labels,
+                        li.specific_package_labels,
+                        b.id as batch_id,
+                        b.batch_name,
+                        b.full_package_details,
+                        b.partial_package_details,
+                        b.metrc_item_name
+                    FROM "ORDERS-invoice-line-items" li
+                    JOIN "ORDERS-batches" b ON li.fk_batch_id = b.id
+                    WHERE li.fk_invoice_id = $1
+                `, [invoiceId]);
+                console.log(`[PackageScan] Line items query complete, found ${lineItems.rows.length} line item(s)`);
+            } catch (error) {
+                console.error('[PackageScan] ❌ Error querying line items:', error.message);
+                console.error('[PackageScan] Error code:', error.code);
+                console.error('[PackageScan] Error detail:', error.detail);
+                try {
+                    await client.query('ROLLBACK');
+                } catch (rollbackError) {
+                    console.error('[PackageScan] Error during ROLLBACK:', rollbackError);
+                }
+                throw new ValidationError('DATABASE_ERROR', `Database query error: ${error.message}`);
+            }
 
             let matchedLineItem = null;
             let isPartialPackageRequired = false;
@@ -136,26 +206,32 @@ class PackageScanService {
                     // Method 2: Check if package label is in batch's available_labels
                     // This is more reliable since batch_name from join might be null
                     if (li.batch_id) {
-                        // Check if this package label exists in the batch's available_labels
-                        // available_labels structure: {"labels": ["1A40...", "1A40...", ...]}
-                        // So we need to check available_labels->'labels' @> [...]
-                        const batchCheck = await client.query(`
-                            SELECT id, batch_name, available_labels
-                            FROM "ORDERS-batches"
-                            WHERE id = $1
-                                AND available_labels IS NOT NULL
-                                AND (
-                                    -- Handle object structure: {"labels": [...]}
-                                    (jsonb_typeof(available_labels) = 'object' AND available_labels->'labels' @> $2::jsonb)
-                                    -- Handle array structure: [...]
-                                    OR (jsonb_typeof(available_labels) = 'array' AND available_labels @> $2::jsonb)
-                                )
-                        `, [li.batch_id, JSON.stringify([packageLabel])]);
-                        
-                        if (batchCheck.rows.length > 0) {
-                            batchMatches = true;
-                            // Update pkg.batch_name for consistency
-                            pkg.batch_name = batchCheck.rows[0].batch_name;
+                        try {
+                            // Check if this package label exists in the batch's available_labels
+                            // available_labels structure: {"labels": ["1A40...", "1A40...", ...]}
+                            // So we need to check available_labels->'labels' @> [...]
+                            const batchCheck = await client.query(`
+                                SELECT id, batch_name, available_labels
+                                FROM "ORDERS-batches"
+                                WHERE id = $1
+                                    AND available_labels IS NOT NULL
+                                    AND (
+                                        -- Handle object structure: {"labels": [...]}
+                                        (jsonb_typeof(available_labels) = 'object' AND available_labels->'labels' @> $2::jsonb)
+                                        -- Handle array structure: [...]
+                                        OR (jsonb_typeof(available_labels) = 'array' AND available_labels @> $2::jsonb)
+                                    )
+                            `, [li.batch_id, JSON.stringify([packageLabel])]);
+                            
+                            if (batchCheck.rows.length > 0) {
+                                batchMatches = true;
+                                // Update pkg.batch_name for consistency
+                                pkg.batch_name = batchCheck.rows[0].batch_name;
+                            }
+                        } catch (error) {
+                            console.error('[PackageScan] Error checking batch:', error);
+                            await client.query('ROLLBACK');
+                            throw new ValidationError('DATABASE_ERROR', `Database query error: ${error.message}`);
                         }
                     }
                 }
@@ -173,6 +249,7 @@ class PackageScanService {
                             : JSON.parse(li.specific_package_labels || '[]');
 
                         if (!specificLabels.includes(packageLabel)) {
+                            await client.query('ROLLBACK');
                             throw new ValidationError(
                                 'WRONG_PARTIAL_PACKAGE',
                                 `This line item requires specific partial packages. ${packageLabel} is not in the required list.`,
@@ -186,11 +263,32 @@ class PackageScanService {
             }
 
             if (!matchedLineItem) {
-                await this.logScanError(invoiceId, userId, packageLabel, 'package_not_on_order', client);
-                throw new ValidationError(
-                    'PACKAGE_NOT_ON_ORDER',
-                    `Package ${packageLabel} from batch ${pkg.batch_name} does not belong to any line item on this order`
-                );
+                // Package doesn't belong to order - require forced acknowledgment
+                try {
+                    await this.logScanError(invoiceId, userId, packageLabel, 'package_not_on_order', client);
+                } catch (logError) {
+                    console.error('[PackageScan] Error logging scan error:', logError);
+                }
+                
+                // Commit transaction before returning confirmation requirement
+                await client.query('COMMIT');
+                
+                return {
+                    success: false,
+                    requiresRemovalConfirmation: true,
+                    alert: {
+                        type: 'PACKAGE_NOT_ON_ORDER',
+                        severity: 'HIGH',
+                        message: `⚠️ PACKAGE NOT ON ORDER: Package ${packageLabel} from batch ${pkg.batch_name || 'Unknown'} does not belong to this order`,
+                        details: {
+                            packageLabel: packageLabel,
+                            batchName: pkg.batch_name || 'Unknown',
+                            itemName: pkg.item_name || 'Unknown',
+                            action: 'Please confirm you have removed this package from the order before continuing'
+                        }
+                    },
+                    package_label: packageLabel
+                };
             }
 
             // ============================================
@@ -217,6 +315,7 @@ class PackageScanService {
                     const partialPackageLabels = partialPackageDetails.partial_packages?.map(p => p.label) || [];
                     
                     if (partialPackageLabels.includes(packageLabel)) {
+                        await client.query('ROLLBACK');
                         throw new ValidationError(
                             'PARTIAL_PACKAGE_NOT_ALLOWED',
                             `Package ${packageLabel} is a partial package, but this line item requires full packages only`
@@ -228,23 +327,31 @@ class PackageScanService {
             // ============================================
             // VALIDATION LAYER 5: Cross-Worker Conflict Check
             // ============================================
-            const conflictCheck = await client.query(`
-                SELECT 
-                    ss.fk_invoice_id,
-                    ss.fk_user_id,
-                    i.invoice_number,
-                    u.first_name,
-                    u.last_name
-                FROM "ORDERS-scanning-sessions" ss
-                JOIN "ORDERS-invoices" i ON ss.fk_invoice_id = i.id
-                JOIN users u ON ss.fk_user_id = u.id
-                WHERE ss.session_status = 'active'
-                    AND ss.id != $1  -- Not this session
-                    AND ss.currently_locked_packages @> $2::jsonb
-            `, [sessionId, JSON.stringify([packageLabel])]);
+            let conflictCheck;
+            try {
+                conflictCheck = await client.query(`
+                    SELECT 
+                        ss.fk_invoice_id,
+                        ss.fk_user_id,
+                        i.invoice_number,
+                        u.first_name,
+                        u.last_name
+                    FROM "ORDERS-scanning-sessions" ss
+                    JOIN "ORDERS-invoices" i ON ss.fk_invoice_id = i.id
+                    JOIN users u ON ss.fk_user_id = u.id
+                    WHERE ss.session_status = 'active'
+                        AND ss.id != $1  -- Not this session
+                        AND ss.currently_locked_packages @> $2::jsonb
+                `, [sessionId, JSON.stringify([packageLabel])]);
+            } catch (error) {
+                console.error('[PackageScan] Error checking conflicts:', error);
+                await client.query('ROLLBACK');
+                throw new ValidationError('DATABASE_ERROR', `Database query error: ${error.message}`);
+            }
 
             if (conflictCheck.rows.length > 0) {
                 const conflict = conflictCheck.rows[0];
+                await client.query('ROLLBACK');
                 throw new ValidationError(
                     'PACKAGE_LOCKED_BY_OTHER_WORKER',
                     `Package ${packageLabel} is currently being used by ${conflict.first_name} ${conflict.last_name} for Order ${conflict.invoice_number}`
@@ -274,11 +381,46 @@ class PackageScanService {
             // ============================================
             // VALIDATION LAYER 7: Rejection Alert Check
             // ============================================
-            const rejectionAlert = await this.checkForRejectionAlert(packageLabel, client);
+            let rejectionAlert;
+            try {
+                rejectionAlert = await this.checkForRejectionAlert(packageLabel, client);
+            } catch (error) {
+                console.error('[PackageScan] Error checking rejection alert:', error);
+                console.error('[PackageScan] Rejection check error code:', error.code);
+                
+                // If the error aborted the transaction, we must rollback
+                if (error.code === '25P02' || error.message.includes('current transaction is aborted')) {
+                    await client.query('ROLLBACK');
+                    throw new ValidationError('TRANSACTION_ABORTED', 'Database transaction was aborted. Please try scanning again.');
+                }
+                
+                // If rejection check fails for other reasons, continue without it (non-critical)
+                // But we need to make sure the transaction is still valid
+                try {
+                    // Test if transaction is still valid by doing a simple query
+                    await client.query('SELECT 1');
+                } catch (testError) {
+                    // Transaction is aborted, rollback and fail
+                    console.error('[PackageScan] Transaction is aborted after rejection check:', testError);
+                    await client.query('ROLLBACK');
+                    throw new ValidationError('TRANSACTION_ABORTED', 'Database transaction was aborted. Please try scanning again.');
+                }
+                
+                rejectionAlert = {
+                    isRejectedPackage: false,
+                    requiresVerification: false
+                };
+            }
 
-            if (rejectionAlert.requiresVerification) {
+            if (rejectionAlert && rejectionAlert.requiresVerification) {
                 // Don't reject - just return alert to UI for user confirmation
-                await client.query('COMMIT');
+                try {
+                    await client.query('COMMIT');
+                } catch (error) {
+                    console.error('[PackageScan] Error committing rejection alert:', error);
+                    await client.query('ROLLBACK');
+                    throw new ValidationError('DATABASE_ERROR', `Database error: ${error.message}`);
+                }
                 return {
                     success: false,
                     requiresConfirmation: true,
@@ -292,42 +434,91 @@ class PackageScanService {
             // SUCCESS: Add Package to Line Item
             // ============================================
 
+            // Verify transaction is still valid before proceeding with UPDATE
+            try {
+                console.log(`[PackageScan] Verifying transaction is still valid before UPDATE...`);
+                await client.query('SELECT 1');
+                console.log(`[PackageScan] Transaction is valid, proceeding with UPDATE`);
+            } catch (error) {
+                console.error('[PackageScan] ❌ Transaction is ABORTED before UPDATE:', error.message);
+                console.error('[PackageScan] Error code:', error.code);
+                try {
+                    await client.query('ROLLBACK');
+                } catch (rollbackError) {
+                    console.error('[PackageScan] Error during ROLLBACK:', rollbackError);
+                }
+                throw new ValidationError('TRANSACTION_ABORTED', 'Transaction was aborted by a previous operation. Please try scanning again.');
+            }
+
             // Update assigned_package_labels
             const updatedLabels = [...assignedLabels, packageLabel];
 
-            await client.query(`
-                UPDATE "ORDERS-invoice-line-items"
-                SET 
-                    assigned_package_labels = $1,
-                    updated_at = NOW()
-                WHERE id = $2
-            `, [JSON.stringify(updatedLabels), matchedLineItem.line_item_id]);
+            try {
+                console.log(`[PackageScan] Updating line item ${matchedLineItem.line_item_id} with package ${packageLabel}...`);
+                await client.query(`
+                    UPDATE "ORDERS-invoice-line-items"
+                    SET 
+                        assigned_package_labels = $1,
+                        updated_at = NOW()
+                    WHERE id = $2
+                `, [JSON.stringify(updatedLabels), matchedLineItem.line_item_id]);
+                console.log(`[PackageScan] Line item updated successfully`);
 
-            // Add to session's locked packages
-            const currentLockedPackages = session.rows[0].currently_locked_packages || [];
-            const updatedLockedPackages = Array.isArray(currentLockedPackages) 
-                ? [...currentLockedPackages, packageLabel]
-                : [packageLabel];
+                // Add to session's locked packages
+                const currentLockedPackages = session.rows[0].currently_locked_packages || [];
+                const updatedLockedPackages = Array.isArray(currentLockedPackages) 
+                    ? [...currentLockedPackages, packageLabel]
+                    : [packageLabel];
 
-            await client.query(`
-                UPDATE "ORDERS-scanning-sessions"
-                SET 
-                    currently_locked_packages = $1,
-                    last_activity = NOW()
-                WHERE id = $2
-            `, [JSON.stringify(updatedLockedPackages), sessionId]);
+                await client.query(`
+                    UPDATE "ORDERS-scanning-sessions"
+                    SET 
+                        currently_locked_packages = $1,
+                        last_activity = NOW()
+                    WHERE id = $2
+                `, [JSON.stringify(updatedLockedPackages), sessionId]);
+            } catch (error) {
+                console.error('[PackageScan] Error updating line item or session:', error);
+                console.error('[PackageScan] Error code:', error.code);
+                console.error('[PackageScan] Error details:', {
+                    message: error.message,
+                    code: error.code,
+                    severity: error.severity
+                });
+                
+                // If transaction is already aborted, ROLLBACK should still work
+                try {
+                    await client.query('ROLLBACK');
+                } catch (rollbackError) {
+                    console.error('[PackageScan] Error during ROLLBACK:', rollbackError);
+                }
+                
+                // Check if this is a transaction abort error
+                if (error.code === '25P02' || error.message.includes('current transaction is aborted')) {
+                    throw new ValidationError('TRANSACTION_ABORTED', 'A previous database operation failed. Please try scanning again.');
+                }
+                
+                throw new ValidationError('DATABASE_ERROR', `Database update error: ${error.message}`);
+            }
 
             // Log successful scan
-            await client.query(`
-                INSERT INTO "ORDERS-invoice-history" (
-                    fk_invoice_id,
-                    modification_type,
-                    field_name,
-                    new_value,
-                    changed_by_user_id,
-                    changed_by_system
-                ) VALUES ($1, 'package_scanned', 'line_item_' || $2, $3, $4, false)
-            `, [invoiceId, matchedLineItem.line_item_id, packageLabel, userId]);
+            try {
+                await client.query(`
+                    INSERT INTO "ORDERS-invoice-history" (
+                        fk_invoice_id,
+                        modification_type,
+                        field_name,
+                        new_value,
+                        changed_by_user_id,
+                        changed_by_system
+                    ) VALUES ($1, 'package_scanned', 'line_item_' || $2, $3, $4, false)
+                `, [invoiceId, matchedLineItem.line_item_id, packageLabel, userId]);
+            } catch (error) {
+                console.error('[PackageScan] Error logging invoice history:', error);
+                // Don't fail the scan if history logging fails, but rollback the transaction
+                await client.query('ROLLBACK');
+                throw new ValidationError('DATABASE_ERROR', `Database error: ${error.message}`);
+            }
 
             await client.query('COMMIT');
 
@@ -347,10 +538,56 @@ class PackageScanService {
             };
 
         } catch (error) {
-            await client.query('ROLLBACK');
+            console.error('[PackageScan] Error in validateAndProcessScan:', error);
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                console.error('[PackageScan] Error during ROLLBACK:', rollbackError);
+            }
             throw error;
         } finally {
             client.release();
+        }
+    }
+
+    /**
+     * Acknowledge that a package not on order has been removed
+     */
+    async acknowledgePackageRemoval(invoiceId, packageLabel, userId, sessionId) {
+        const { query } = require('../config/database');
+        
+        try {
+            // Log the acknowledgment to invoice history
+            await query(`
+                INSERT INTO "ORDERS-invoice-history" (
+                    fk_invoice_id,
+                    modification_type,
+                    field_name,
+                    reason,
+                    changed_by_user_id,
+                    changed_by_system
+                ) VALUES ($1, 'scan_error', 'package_removal_acknowledged', $2, $3, false)
+            `, [invoiceId, `Package ${packageLabel} removed from order - acknowledged by fulfillment worker`, userId]);
+
+            // Also log to scan errors table if it exists
+            try {
+                await query(`
+                    UPDATE "ORDERS-scanning-sessions"
+                    SET last_activity = NOW()
+                    WHERE id = $1
+                `, [sessionId]);
+            } catch (error) {
+                // Session might not exist, ignore
+                console.log('[PackageScan] Could not update session activity:', error.message);
+            }
+
+            return {
+                success: true,
+                message: 'Package removal acknowledged'
+            };
+        } catch (error) {
+            console.error('[PackageScan] Error acknowledging package removal:', error);
+            throw error;
         }
     }
 
@@ -361,15 +598,25 @@ class PackageScanService {
     async checkForRejectionAlert(packageLabel, client) {
         try {
             // Check if table exists first
-            const tableExists = await client.query(`
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_schema = 'public' 
-                    AND table_name = 'ORDERS-rejected_packages'
-                )
-            `);
+            let tableExists;
+            try {
+                tableExists = await client.query(`
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_schema = 'public' 
+                        AND table_name = 'ORDERS-rejected_packages'
+                    )
+                `);
+            } catch (error) {
+                console.error('[PackageScan] Error checking if rejection table exists:', error);
+                // If we can't check, assume table doesn't exist (optional feature)
+                return {
+                    isRejectedPackage: false,
+                    requiresVerification: false
+                };
+            }
 
-            if (!tableExists.rows[0].exists) {
+            if (!tableExists || !tableExists.rows || !tableExists.rows[0] || !tableExists.rows[0].exists) {
                 // Table doesn't exist - skip rejection check (optional feature)
                 return {
                     isRejectedPackage: false,
@@ -377,23 +624,35 @@ class PackageScanService {
                 };
             }
 
-            const rejectionCheck = await client.query(`
-                SELECT 
-                    rp.manifestnumber,
-                    rp.rejection_date,
-                    rp.rejected_by_facility,
-                    rp.rejected_by_person,
-                    rp.verified_by_fulfillment,
-                    rp.notes,
-                    EXTRACT(EPOCH FROM (NOW() - rp.rejection_date))/86400 as days_since_rejection
-                FROM "ORDERS-rejected_packages" rp
-                WHERE rp.packagelabel = $1
-                    AND rp.synclicense IN ('CUL000063', 'MAN000072')
-                    AND rp.verified_by_fulfillment = FALSE
-                    AND rp.rejection_date >= NOW() - INTERVAL '30 days'
-                ORDER BY rp.rejection_date DESC
-                LIMIT 1
-            `, [packageLabel]);
+            let rejectionCheck;
+            try {
+                // Query only columns that actually exist in the table
+                rejectionCheck = await client.query(`
+                    SELECT 
+                        rp.manifestnumber,
+                        rp.rejection_date,
+                        rp.rejection_reason,
+                        rp.returned_to_inventory,
+                        rp.inventory_restored_at,
+                        rp.inventory_restored_by,
+                        EXTRACT(EPOCH FROM (NOW() - rp.rejection_date))/86400 as days_since_rejection
+                    FROM "ORDERS-rejected_packages" rp
+                    WHERE rp.packagelabel = $1
+                        AND rp.synclicense IN ('CUL000063', 'MAN000072')
+                        AND rp.returned_to_inventory = FALSE
+                        AND rp.rejection_date >= NOW() - INTERVAL '30 days'
+                    ORDER BY rp.rejection_date DESC
+                    LIMIT 1
+                `, [packageLabel]);
+            } catch (error) {
+                console.error('[PackageScan] Error querying rejected packages:', error.message);
+                console.error('[PackageScan] Error code:', error.code);
+                // If query fails, return no rejection (non-critical check)
+                return {
+                    isRejectedPackage: false,
+                    requiresVerification: false
+                };
+            }
 
             if (rejectionCheck.rows.length > 0) {
                 const rejection = rejectionCheck.rows[0];
@@ -408,8 +667,8 @@ class PackageScanService {
                         details: {
                             manifestNumber: rejection.manifestnumber,
                             rejectionDate: rejection.rejection_date,
-                            rejectedBy: rejection.rejected_by_person,
-                            facility: rejection.rejected_by_facility,
+                            rejectionReason: rejection.rejection_reason || 'No reason provided',
+                            returnedToInventory: rejection.returned_to_inventory || false,
                             action: 'Please verify package is ready for sale before fulfilling order'
                         }
                     }

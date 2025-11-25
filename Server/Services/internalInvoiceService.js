@@ -219,29 +219,73 @@ class InternalInvoiceService {
             standingDiscountId = standingDiscount.id;
         }
         
+        // Check if invoice is in Fulfillment_Issue status
+        const invoiceStatus = await client.query(`
+            SELECT status FROM "ORDERS-invoices" WHERE id = $1
+        `, [invoiceId]);
+        const isFulfillmentIssue = invoiceStatus.rows.length > 0 && invoiceStatus.rows[0].status === 'Fulfillment_Issue';
+        
+        // Check if fulfillment_issue_modification column exists
+        const columnCheck = await client.query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'ORDERS-invoice-line-items' 
+            AND column_name = 'fulfillment_issue_modification'
+        `);
+        const hasColumn = columnCheck.rows.length > 0;
+
         // Create line item
-        const lineItem = await client.query(`
-            INSERT INTO "ORDERS-invoice-line-items" (
-                fk_invoice_id, fk_master_product_id, fk_batch_id,
-                quantity_ordered, quantity_allocated, unit_price,
-                line_discount_amount, line_total, standing_discount_applied,
-                standing_discount_id, specific_package_labels, line_item_order
-            ) VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $10,
-                      (SELECT COALESCE(MAX(line_item_order), 0) + 1
-                       FROM "ORDERS-invoice-line-items" WHERE fk_invoice_id = $1))
-            RETURNING id
-        `, [
-            invoiceId, 
-            b.fk_master_product_id, 
-            itemData.fk_batch_id,
-            itemData.quantity,
-            unitPrice,
-            discountAmount,
-            lineTotal,
-            standingDiscount !== null,
-            standingDiscountId,
-            specificLabels ? JSON.stringify(specificLabels) : null
-        ]);
+        let lineItem;
+        if (hasColumn && isFulfillmentIssue) {
+            lineItem = await client.query(`
+                INSERT INTO "ORDERS-invoice-line-items" (
+                    fk_invoice_id, fk_master_product_id, fk_batch_id,
+                    quantity_ordered, quantity_allocated, unit_price,
+                    line_discount_amount, line_total, standing_discount_applied,
+                    standing_discount_id, specific_package_labels, line_item_order,
+                    fulfillment_issue_modification
+                ) VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $10,
+                          (SELECT COALESCE(MAX(line_item_order), 0) + 1
+                           FROM "ORDERS-invoice-line-items" WHERE fk_invoice_id = $1),
+                          $11)
+                RETURNING id
+            `, [
+                invoiceId, 
+                b.fk_master_product_id, 
+                itemData.fk_batch_id,
+                itemData.quantity,
+                unitPrice,
+                discountAmount,
+                lineTotal,
+                standingDiscount !== null,
+                standingDiscountId,
+                specificLabels ? JSON.stringify(specificLabels) : null,
+                true // fulfillment_issue_modification
+            ]);
+        } else {
+            lineItem = await client.query(`
+                INSERT INTO "ORDERS-invoice-line-items" (
+                    fk_invoice_id, fk_master_product_id, fk_batch_id,
+                    quantity_ordered, quantity_allocated, unit_price,
+                    line_discount_amount, line_total, standing_discount_applied,
+                    standing_discount_id, specific_package_labels, line_item_order
+                ) VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $10,
+                          (SELECT COALESCE(MAX(line_item_order), 0) + 1
+                           FROM "ORDERS-invoice-line-items" WHERE fk_invoice_id = $1))
+                RETURNING id
+            `, [
+                invoiceId, 
+                b.fk_master_product_id, 
+                itemData.fk_batch_id,
+                itemData.quantity,
+                unitPrice,
+                discountAmount,
+                lineTotal,
+                standingDiscount !== null,
+                standingDiscountId,
+                specificLabels ? JSON.stringify(specificLabels) : null
+            ]);
+        }
         
         await lineItemHistoryService.addLineItemHistoryEntry({
             client,

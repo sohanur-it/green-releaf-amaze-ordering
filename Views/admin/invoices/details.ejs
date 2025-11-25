@@ -322,8 +322,9 @@
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
         <h3 style="color: var(--text-color); margin: 0;">Line Items</h3>
         <% 
-        // Allow editing if invoice is in Draft, Pending_Approval, or Fulfillment_Issue status
-        const canEdit = invoice.status === 'Draft' || invoice.status === 'Pending_Approval' || invoice.status === 'Fulfillment_Issue';
+        // Allow editing if invoice is in Draft, Pending_Approval, Approved (before fulfillment starts), or Fulfillment_Issue status
+        // Note: Backend will enforce that fulfillment hasn't started scanning
+        const canEdit = invoice.status === 'Draft' || invoice.status === 'Pending_Approval' || invoice.status === 'Approved' || invoice.status === 'Fulfillment_Issue';
         %>
         <% if (canEdit && (isSalesAdmin || isSalesRep || isAdmin)) { %>
             <button onclick="toggleEditMode()" id="edit-line-items-btn" class="btn btn-primary" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer;">

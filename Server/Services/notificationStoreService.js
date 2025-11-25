@@ -92,10 +92,11 @@ async function getUserNotifications(userId, {
         LIMIT $2 OFFSET $3
     `, [userId, limit, offset]);
 
+    // Apply the same filter conditions to the total count query
     const totalResult = await query(`
         SELECT COUNT(*) AS total
         FROM user_notifications
-        WHERE user_id = $1
+        WHERE ${conditions.join(' AND ')}
     `, [userId]);
 
     return {

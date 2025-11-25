@@ -149,14 +149,20 @@ const requireRole = (...roles) => {
             const userRoles = await UserModel.getUserRoles(req.session.userId);
             const userRoleNames = userRoles.map(r => (r.name || r.role_name || '').trim()).filter(Boolean);
 
-            // Check if user has any of the required roles (case-insensitive)
+            // Normalize role names for comparison (handle spaces, underscores, case)
+            const normalizeRole = (role) => role.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+            
+            // Check if user has any of the required roles (case-insensitive, space/underscore agnostic)
             const hasRole = roles.some(role => 
                 userRoleNames.some(userRole => 
-                    userRole.toLowerCase() === role.toLowerCase()
+                    normalizeRole(userRole) === normalizeRole(role)
                 )
             );
             
             if (!hasRole) {
+                console.log(`[AUTH] Role check failed for user ${req.session.userId}`);
+                console.log(`[AUTH] User roles: ${JSON.stringify(userRoleNames)}`);
+                console.log(`[AUTH] Required roles: ${JSON.stringify(roles)}`);
                 return res.status(403).json({ 
                     error: 'Forbidden',
                     message: `Required role: ${roles.join(' or ')}`

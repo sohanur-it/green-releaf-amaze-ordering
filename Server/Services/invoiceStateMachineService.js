@@ -331,14 +331,26 @@ class InvoiceStateMachineService {
      */
     async postTransitionEffects(invoiceId, from, to) {
         try {
-            // Draft -> Pending_Approval: Notify sales rep
+            // Draft -> Pending_Approval: Notify sales rep and sales admins
             if (from === 'Draft' && to === 'Pending_Approval') {
-                await this.notifySalesRep(invoiceId);
+                console.log(`[StateMachine] Draft → Pending_Approval: Triggering notifications for invoice ${invoiceId}`);
+                const result = await this.notifySalesRep(invoiceId);
+                console.log(`[StateMachine] Notification result:`, result);
             }
             
-            // Approved (from Pending): Notify fulfillment
+            // Approved (from Pending): Notify fulfillment and customer (if external)
             if (from === 'Pending_Approval' && to === 'Approved') {
                 await this.notifyFulfillment(invoiceId);
+                
+                // Notify customer if external order
+                const invoice = await this.pool.query(
+                    'SELECT source FROM "ORDERS-invoices" WHERE id = $1', 
+                    [invoiceId]
+                );
+                if (invoice.rows.length > 0 && invoice.rows[0].source === 'External') {
+                    const notificationService = require('./notificationService');
+                    await notificationService.notifyCustomerApproval(invoiceId);
+                }
             }
             
             // Fulfillment_Accepted: Notify fulfillment team
@@ -351,9 +363,10 @@ class InvoiceStateMachineService {
                 await this.notifyCustomerShipment(invoiceId);
             }
             
-            // Delivered: Update CRM
+            // Delivered: Notify sales rep and customer
             if (to === 'Delivered') {
-                console.log(`✅ Invoice ${invoiceId} delivered`);
+                const notificationService = require('./notificationService');
+                await notificationService.notifyDelivery(invoiceId);
             }
             
             // Paid: Mark as completed
