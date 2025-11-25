@@ -1038,7 +1038,8 @@ class InvoiceController {
                 user: req.session.user,
                 isAdmin: isAdmin,
                 isSalesAdmin: isSalesAdmin,
-                isSalesRep: isSalesRep
+                isSalesRep: isSalesRep,
+                userRoles: userRoleNames
             });
         } catch (error) {
             console.error('Error loading invoice details:', error);
@@ -2251,12 +2252,20 @@ class InvoiceController {
 
             // Transition to Cancelled (void)
             const invoiceStateMachine = require('../Services/invoiceStateMachineService');
-            const result = await invoiceStateMachine.transitionTo(
+            
+            // Add timeout wrapper
+            const transitionPromise = invoiceStateMachine.transitionTo(
                 id,
                 'Cancelled',
                 userId,
                 `Invoice voided: ${reason.trim()}`
             );
+            
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => reject(new Error('Transaction timeout - invoice may be locked by another operation')), 30000);
+            });
+            
+            const result = await Promise.race([transitionPromise, timeoutPromise]);
 
             if (!result.success) {
                 return res.status(400).json({

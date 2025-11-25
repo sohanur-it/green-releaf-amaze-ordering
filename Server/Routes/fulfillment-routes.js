@@ -148,5 +148,125 @@ router.post('/issues/request-global', requireAuth, requireRole('sales_admin', 'a
 router.post('/issues/acknowledge-global/:invoiceId', requireAuth, requireRole('fulfillment_worker', 'fulfillment_admin'), 
     fulfillmentController.acknowledgeGlobalIssue.bind(fulfillmentController));
 
+/**
+ * POST /api/v1/fulfillment/issues/update
+ * Update issue details
+ */
+router.post('/issues/update', requireAuth, requireRole('fulfillment_worker', 'fulfillment_admin'), 
+    fulfillmentController.updateIssueDetails.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/fulfillment/issues/add-note
+ * Add note to existing issue
+ */
+router.post('/issues/add-note', requireAuth, requireRole('fulfillment_worker', 'fulfillment_admin'), 
+    fulfillmentController.addNoteToIssue.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/fulfillment/issues/cancel
+ * Cancel issue report
+ */
+router.post('/issues/cancel', requireAuth, requireRole('fulfillment_worker', 'fulfillment_admin'), 
+    fulfillmentController.cancelIssueReport.bind(fulfillmentController));
+
+// =====================================================
+// Cancelled Shipment Routes
+// =====================================================
+
+/**
+ * POST /api/v1/fulfillment/cancelled-shipments/cancel
+ * Process cancellation after shipment
+ */
+router.post('/cancelled-shipments/cancel', requireAuth, requireRole('sales_admin', 'admin'), 
+    fulfillmentController.processCancellation.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/fulfillment/cancelled-shipments/confirm-return
+ * Confirm packages returned to inventory
+ */
+router.post('/cancelled-shipments/confirm-return', requireAuth, requireRole('fulfillment_worker', 'fulfillment_admin'), 
+    fulfillmentController.confirmPackagesReturned.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/fulfillment/cancelled-shipments/report-incident
+ * Report driver incident
+ */
+router.post('/cancelled-shipments/report-incident', requireAuth, requireRole('fulfillment_worker', 'fulfillment_admin'), 
+    fulfillmentController.reportDriverIncident.bind(fulfillmentController));
+
+// =====================================================
+// Admin Routes
+// =====================================================
+
+/**
+ * GET /api/v1/admin/fulfillment/sessions
+ * Get all active scanning sessions (admin)
+ */
+router.get('/admin/sessions', requireAuth, requireRole('fulfillment_admin', 'admin'), 
+    fulfillmentController.getAllActiveSessions.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/admin/fulfillment/sessions/:sessionId/force-complete
+ * Force complete scanning session (admin)
+ */
+router.post('/admin/sessions/:sessionId/force-complete', requireAuth, requireRole('fulfillment_admin', 'admin'), 
+    fulfillmentController.forceCompleteSession.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/admin/fulfillment/sessions/remove-package
+ * Remove mistakenly scanned package (admin)
+ */
+router.post('/admin/sessions/remove-package', requireAuth, requireRole('fulfillment_admin', 'admin'), 
+    fulfillmentController.removeScannedPackage.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/admin/fulfillment/sessions/edit-package
+ * Edit scanned package label (admin)
+ */
+router.post('/admin/sessions/edit-package', requireAuth, requireRole('fulfillment_admin', 'admin'), 
+    fulfillmentController.editScannedPackage.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/admin/fulfillment/sessions/:sessionId/adjust
+ * Manually adjust session data (admin)
+ */
+router.post('/admin/sessions/:sessionId/adjust', requireAuth, requireRole('fulfillment_admin', 'admin'), 
+    fulfillmentController.manuallyAdjustSession.bind(fulfillmentController));
+
+/**
+ * GET /api/v1/admin/fulfillment/issues
+ * Get all issues for bulk management (admin)
+ */
+router.get('/admin/issues', requireAuth, requireRole('fulfillment_admin', 'admin'), 
+    fulfillmentController.getAllIssues.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/admin/fulfillment/issues/bulk-assign
+ * Bulk assign issues to sales rep (admin)
+ */
+router.post('/admin/issues/bulk-assign', requireAuth, requireRole('fulfillment_admin', 'admin'), 
+    fulfillmentController.bulkAssignIssues.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/admin/cancelled-shipments/:invoiceId/finalize-destroyed
+ * Finalize destroyed packages (admin)
+ */
+router.post('/admin/cancelled-shipments/:invoiceId/finalize-destroyed', requireAuth, requireRole('fulfillment_admin', 'admin'), 
+    fulfillmentController.finalizeDestroyedPackages.bind(fulfillmentController));
+
+/**
+ * GET /api/v1/admin/cancelled-shipments/:invoiceId/unaccounted-packages
+ * Get unaccounted packages (admin)
+ */
+router.get('/admin/cancelled-shipments/:invoiceId/unaccounted-packages', requireAuth, requireRole('fulfillment_admin', 'admin'), 
+    fulfillmentController.getUnaccountedPackages.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/admin/fulfillment/sync-statuses
+ * Sync manifest statuses (scheduled job endpoint)
+ */
+router.post('/admin/sync-statuses', requireAuth, requireRole('admin'), 
+    fulfillmentController.syncManifestStatuses.bind(fulfillmentController));
+
 module.exports = router;
 

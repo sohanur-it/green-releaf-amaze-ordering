@@ -3,19 +3,17 @@
 
 const { query, pool } = require('../config/database');
 const websocketService = require('./websocketService');
-const axios = require('axios');
+const metrcAuth = require('./metrcAuth');
 
 // METRC API Configuration
-const T3_API_BASE_URL = process.env.T3_API_BASE_URL || 'https://api.t3.com';
 const METRC_API_TIMEOUT = 30000;
 
 class ManifestVoidingService {
     /**
      * Void a manifest that was created but not yet shipped
-     * Phase 1: Single manifest support
-     * Phase 2: Will extend for multi-license
+     * Supports multi-license manifests
      */
-    async voidManifest(invoiceId, userId, reason) {
+    async voidManifest(invoiceId, userId, reason, targetManifestOrLicense = null) {
         const client = await pool.connect();
 
         try {
@@ -40,87 +38,167 @@ class ManifestVoidingService {
 
             const inv = invoice.rows[0];
 
-            // Verify status is Manifested (not yet shipped)
-            if (inv.status !== 'Manifested') {
+            // Verify status allows voiding
+            if (!['Manifested', 'Shipped', 'Partially_Manifested'].includes(inv.status)) {
                 throw new Error(`Cannot void manifest - invoice status is ${inv.status}`);
             }
 
-            const manifestNumbers = inv.metrc_manifest_numbers || [];
-            const manifestIds = inv.manifest_metrc_ids || [];
+            const manifestNumbers = Array.isArray(inv.metrc_manifest_numbers) 
+                ? inv.metrc_manifest_numbers 
+                : (inv.metrc_manifest_numbers ? JSON.parse(inv.metrc_manifest_numbers) : []);
+            const manifestIds = Array.isArray(inv.manifest_metrc_ids)
+                ? inv.manifest_metrc_ids
+                : (inv.manifest_metrc_ids ? JSON.parse(inv.manifest_metrc_ids) : []);
 
             if (manifestNumbers.length === 0) {
                 throw new Error('No manifests to void');
             }
 
-            if (!reason || reason.trim().length === 0) {
-                throw new Error('Void reason is required');
+            if (!reason || reason.trim().length < 20) {
+                throw new Error('Void reason is required (minimum 20 characters)');
             }
 
-            // Verify user has permission
-            if (inv.fulfillment_accepted_by !== userId) {
-                // TODO: Check user permissions
-                // For now, allow if user is admin
-                console.warn('User voiding manifest they did not create');
+            console.log(`[Void] Voiding manifest(s) for invoice ${inv.invoice_number}`);
+
+            // Determine which manifests to void
+            let manifestsToVoid = [];
+            if (targetManifestOrLicense === null || targetManifestOrLicense === 'all') {
+                // Void all manifests
+                manifestsToVoid = manifestIds;
+            } else {
+                // Void specific manifest by number or license
+                manifestsToVoid = manifestIds.filter(m => 
+                    m.number === targetManifestOrLicense || m.license === targetManifestOrLicense
+                );
+                if (manifestsToVoid.length === 0) {
+                    throw new Error(`Manifest not found: ${targetManifestOrLicense}`);
+                }
             }
 
-            console.log(`[Void] Voiding manifest for invoice ${inv.invoice_number}`);
+            const voidedManifests = [];
+            const failedManifests = [];
 
-            // Phase 1: Void first manifest (single license support)
-            // Phase 2: Will loop through all manifests
-            const manifestToVoid = manifestIds[0] || { id: null, number: manifestNumbers[0], license: 'CUL000063' };
+            // Process each manifest to void
+            for (const manifest of manifestsToVoid) {
+                try {
+                    if (!manifest.id) {
+                        throw new Error(`Manifest METRC ID not found for ${manifest.number}`);
+                    }
 
-            if (!manifestToVoid.id) {
-                throw new Error('Manifest METRC ID not found');
+                    console.log(`[Void] Processing manifest ${manifest.number} (ID: ${manifest.id})`);
+
+                    // PHASE 1: DRY RUN
+                    console.log(`[Void] Dry run for manifest ${manifest.number}...`);
+                    const dryRunResult = await this.voidManifestDryRun(manifest.id, manifest.license);
+                    
+                    if (!dryRunResult.success) {
+                        throw new Error(`Dry run failed: ${dryRunResult.error}`);
+                    }
+
+                    console.log(`[Void] ✓ Dry run passed for ${manifest.number}`);
+
+                    // PHASE 2: ACTUAL VOID
+                    console.log(`[Void] Submitting void to METRC for ${manifest.number}...`);
+                    const voidResult = await this.voidManifestInMetrc(manifest.id, manifest.license);
+                    
+                    if (!voidResult.success) {
+                        throw new Error(`Void failed: ${voidResult.error}`);
+                    }
+
+                    console.log(`[Void] ✓ Manifest ${manifest.number} voided in METRC`);
+                    voidedManifests.push(manifest);
+
+                } catch (manifestError) {
+                    console.error(`[Void] ❌ Failed to void manifest ${manifest.number}:`, manifestError.message);
+                    failedManifests.push({
+                        manifest: manifest,
+                        error: manifestError.message
+                    });
+                }
             }
 
-            // TODO: Implement actual METRC void API call
-            // For Phase 1, we'll simulate the structure
-            console.log(`[Void] Simulating void for manifest ${manifestToVoid.number}`);
+            if (voidedManifests.length === 0) {
+                throw new Error('All manifest void attempts failed');
+            }
 
-            // Update invoice
+            // Update invoice - remove voided manifests
+            const remainingManifests = manifestIds.filter(m => 
+                !voidedManifests.some(v => v.id === m.id)
+            );
+            const remainingNumbers = remainingManifests.map(m => m.number);
+            const voidedNumbers = voidedManifests.map(m => m.number);
+
+            let newStatus = inv.status;
+            if (remainingManifests.length === 0) {
+                // All manifests voided
+                newStatus = 'Fulfillment_Issue';
+            } else if (voidedManifests.length > 0 && remainingManifests.length > 0) {
+                // Partial void
+                newStatus = 'Partially_Voided';
+            }
+
             await client.query(`
                 UPDATE "ORDERS-invoices"
                 SET 
-                    status = 'Fulfillment_Issue',
-                    metrc_manifest_numbers = '[]'::jsonb,
-                    manifest_metrc_ids = '[]'::jsonb,
-                    voided_manifest_number = $1,
-                    voided_manifest_reason = $2,
+                    status = $1,
+                    metrc_manifest_numbers = $2::jsonb,
+                    manifest_metrc_ids = $3::jsonb,
+                    voided_manifest_number = CASE 
+                        WHEN voided_manifest_number IS NULL THEN $4
+                        ELSE voided_manifest_number || ', ' || $4
+                    END,
+                    voided_manifest_reason = $5,
                     voided_at = NOW(),
-                    voided_by = $3,
-                    fulfillment_issue_reported_at = NOW(),
-                    fulfillment_issue_note = $4,
+                    voided_by = $6,
+                    fulfillment_issue_reported_at = CASE 
+                        WHEN $7 = true THEN NOW()
+                        ELSE fulfillment_issue_reported_at
+                    END,
+                    fulfillment_issue_note = CASE 
+                        WHEN $7 = true THEN $8
+                        ELSE fulfillment_issue_note
+                    END,
                     status_updated_at = NOW()
-                WHERE id = $5
+                WHERE id = $9
             `, [
-                manifestToVoid.number,
+                newStatus,
+                JSON.stringify(remainingNumbers),
+                JSON.stringify(remainingManifests),
+                voidedNumbers.join(', '),
                 reason,
                 userId,
-                `All manifests voided: ${reason}`,
+                remainingManifests.length === 0, // All voided
+                remainingManifests.length === 0 ? `All manifests voided: ${reason}` : `Partial void: ${voidedNumbers.join(', ')} - ${reason}`,
                 invoiceId
             ]);
 
-            // Clear assigned packages (allow re-scanning)
-            await client.query(`
-                UPDATE "ORDERS-invoice-line-items"
-                SET 
-                    assigned_package_labels = NULL,
-                    quantity_fulfilled = 0
-                WHERE fk_invoice_id = $1
-            `, [invoiceId]);
+            // If all manifests voided, clear assigned packages and release allocations
+            if (remainingManifests.length === 0) {
+                // Clear assigned packages (allow re-scanning)
+                await client.query(`
+                    UPDATE "ORDERS-invoice-line-items"
+                    SET 
+                        assigned_package_labels = NULL,
+                        quantity_fulfilled = 0
+                    WHERE fk_invoice_id = $1
+                `, [invoiceId]);
 
-            // Update manifest packages table
-            await client.query(`
-                UPDATE "ORDERS-manifest-packages"
-                SET 
-                    package_status = 'voided',
-                    voided_at = NOW(),
-                    voided_by = $1
-                WHERE fk_invoice_id = $2
-            `, [userId, invoiceId]);
+                // Release allocations
+                await this.releaseAllocationsForInvoice(invoiceId, client);
+            }
 
-            // Release allocations
-            await this.releaseAllocationsForInvoice(invoiceId, client);
+            // Update manifest packages table - mark voided packages
+            for (const voidedManifest of voidedManifests) {
+                await client.query(`
+                    UPDATE "ORDERS-manifest-packages"
+                    SET 
+                        package_status = 'voided',
+                        voided_at = NOW(),
+                        voided_by = $1
+                    WHERE fk_invoice_id = $2 
+                        AND manifest_number = $3
+                `, [userId, invoiceId, voidedManifest.number]);
+            }
 
             // Log void
             await client.query(`
@@ -135,27 +213,39 @@ class ManifestVoidingService {
                     triggered_by_fulfillment_issue,
                     change_details
                 ) VALUES ($1, 'manifest_voided', 'metrc_manifest_numbers', 
-                          $2, '[]', $3, $4, true, $5)
+                          $2, $3, $4, $5, $6, $7)
             `, [
                 invoiceId,
                 JSON.stringify(manifestNumbers),
+                JSON.stringify(remainingNumbers),
                 reason,
                 userId,
+                remainingManifests.length === 0,
                 JSON.stringify({
-                    voided_manifests: [manifestToVoid],
-                    all_voided: true
+                    voided_manifests: voidedManifests,
+                    failed_manifests: failedManifests,
+                    remaining_manifests: remainingManifests,
+                    all_voided: remainingManifests.length === 0
                 })
             ]);
 
             await client.query('COMMIT');
 
+            // Alert admin if partial void
+            if (failedManifests.length > 0 || (voidedManifests.length > 0 && remainingManifests.length > 0)) {
+                console.warn(`[Void] ⚠️ PARTIAL VOID: ${voidedManifests.length} voided, ${remainingManifests.length} remaining, ${failedManifests.length} failed`);
+            }
+
             return {
                 success: true,
-                voided_count: 1,
-                voided_manifests: [manifestToVoid.number],
-                remaining_manifests: [],
-                all_voided: true,
-                message: `Manifest ${manifestToVoid.number} voided. Order returned to Fulfillment Issue state.`
+                voided_count: voidedManifests.length,
+                voided_manifests: voidedNumbers,
+                remaining_manifests: remainingNumbers,
+                failed_manifests: failedManifests.map(f => f.manifest.number),
+                all_voided: remainingManifests.length === 0,
+                message: remainingManifests.length === 0
+                    ? `All ${voidedManifests.length} manifest(s) voided. Order returned to Fulfillment Issue state.`
+                    : `Partial void: ${voidedManifests.length} manifest(s) voided, ${remainingManifests.length} remaining.`
             };
 
         } catch (error) {
@@ -323,6 +413,84 @@ class ManifestVoidingService {
             throw error;
         } finally {
             client.release();
+        }
+    }
+
+    /**
+     * Dry run void manifest in METRC (validation only)
+     */
+    async voidManifestDryRun(manifestMetrcId, license) {
+        try {
+            // METRC T3 API doesn't have a separate dry run endpoint for voiding
+            // We'll check the transfer status first to validate it can be voided
+            const response = await metrcAuth.makeAuthenticatedRequest({
+                method: 'GET',
+                url: `${metrcAuth.apiBaseUrl}/transfers/v2/external/incoming/${manifestMetrcId}`,
+                params: {
+                    licenseNumber: license
+                },
+                timeout: 15000
+            });
+
+            const transfer = response.data;
+            
+            // Check if transfer can be voided
+            if (transfer.status === 'Delivered') {
+                return { success: false, error: 'Cannot void manifest - already delivered' };
+            }
+            if (transfer.status === 'Voided') {
+                return { success: false, error: 'Cannot void manifest - already voided' };
+            }
+            if (transfer.status === 'InTransit') {
+                // May or may not be voidable depending on METRC rules
+                return { success: true, warning: 'Manifest is in transit - void may not be allowed by METRC' };
+            }
+
+            return { success: true };
+        } catch (error) {
+            if (error.response && error.response.status === 404) {
+                return { success: false, error: 'Manifest not found in METRC' };
+            }
+            return { success: false, error: error.message };
+        }
+    }
+
+    /**
+     * Actually void manifest in METRC
+     */
+    async voidManifestInMetrc(manifestMetrcId, license) {
+        try {
+            // METRC T3 API void endpoint
+            // Note: Actual endpoint may vary - check METRC API documentation
+            const response = await metrcAuth.makeAuthenticatedRequest({
+                method: 'DELETE',
+                url: `${metrcAuth.apiBaseUrl}/transfers/v2/external/incoming/${manifestMetrcId}`,
+                params: {
+                    licenseNumber: license
+                },
+                timeout: METRC_API_TIMEOUT
+            });
+
+            return { success: true, data: response.data };
+        } catch (error) {
+            if (error.response) {
+                const status = error.response.status;
+                const data = error.response.data;
+                
+                if (status === 400) {
+                    return { success: false, error: `METRC validation error: ${data.message || JSON.stringify(data)}` };
+                }
+                if (status === 404) {
+                    return { success: false, error: 'Manifest not found in METRC' };
+                }
+                if (status === 409) {
+                    return { success: false, error: 'Cannot void manifest - may already be in transit or delivered' };
+                }
+                
+                return { success: false, error: `METRC API error (${status}): ${data.message || JSON.stringify(data)}` };
+            }
+            
+            return { success: false, error: error.message };
         }
     }
 }

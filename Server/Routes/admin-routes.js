@@ -509,4 +509,30 @@ router.get('/fulfillment/manifest/:invoiceId', requireRole('fulfillment_worker',
     }
 });
 
+// Admin Session Management
+router.get('/fulfillment/sessions', requireRole('fulfillment_admin', 'admin'), async (req, res) => {
+    try {
+        res.render('admin/fulfillment/sessions', {
+            title: 'Active Scanning Sessions',
+            layout: 'layouts/main'
+        });
+    } catch (error) {
+        console.error('Error rendering sessions dashboard:', error);
+        res.status(500).send('Error loading sessions dashboard');
+    }
+});
+
+// Admin Issues Dashboard
+router.get('/fulfillment/issues', requireRole('fulfillment_admin', 'admin'), async (req, res) => {
+    try {
+        res.render('admin/fulfillment/issues', {
+            title: 'Fulfillment Issues',
+            layout: 'layouts/main'
+        });
+    } catch (error) {
+        console.error('Error rendering issues dashboard:', error);
+        res.status(500).send('Error loading issues dashboard');
+    }
+});
+
 module.exports = router;

@@ -1,0 +1,166 @@
+<style>
+.sessions-container {
+    padding: 2rem;
+}
+
+.sessions-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.sessions-table {
+    width: 100%;
+    background: var(--card-bg, white);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--card-shadow, 0 2px 8px rgba(0,0,0,0.1));
+}
+
+.sessions-table table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.sessions-table th {
+    background: var(--bg-color, #f9fafb);
+    padding: 1rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-color);
+    border-bottom: 2px solid var(--border-color);
+}
+
+.sessions-table td {
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-color);
+}
+
+.sessions-table tr:hover {
+    background: var(--bg-color, #f9fafb);
+}
+
+.btn-action {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-right: 0.5rem;
+    font-size: 0.875rem;
+}
+
+.btn-force-complete {
+    background: #ef4444;
+    color: white;
+}
+
+.btn-view {
+    background: #3b82f6;
+    color: white;
+}
+
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-overlay.active {
+    display: flex;
+}
+
+.modal-content {
+    background: white;
+    border-radius: 12px;
+    padding: 2rem;
+    max-width: 500px;
+    width: 90%;
+}
+
+.filter-bar {
+    background: var(--card-bg, white);
+    padding: 1.5rem;
+    border-radius: 12px;
+    margin-bottom: 2rem;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+</style>
+
+<div class="sessions-container">
+    <div class="sessions-header">
+        <div>
+            <h1>Active Scanning Sessions</h1>
+            <p style="color: var(--text-light); margin: 0.5rem 0 0 0;">Monitor and manage active scanning sessions</p>
+        </div>
+        <button class="btn btn-secondary" onclick="loadSessions()">
+            <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+    </div>
+
+    <div class="filter-bar">
+        <div class="filter-group">
+            <label>Worker</label>
+            <select id="worker-filter" onchange="applyFilters()">
+                <option value="">All Workers</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>Duration (minutes)</label>
+            <input type="number" id="duration-filter" placeholder="Greater than" onchange="applyFilters()">
+        </div>
+    </div>
+
+    <div class="sessions-table">
+        <table>
+            <thead>
+                <tr>
+                    <th>Invoice</th>
+                    <th>Worker</th>
+                    <th>Duration</th>
+                    <th>Progress</th>
+                    <th>Last Activity</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="sessions-tbody">
+                <tr>
+                    <td colspan="6" style="text-align: center; padding: 2rem;">
+                        <i class="fas fa-spinner fa-spin"></i> Loading sessions...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Force Complete Modal -->
+<div class="modal-overlay" id="force-complete-modal">
+    <div class="modal-content">
+        <h3>Force Complete Session</h3>
+        <form id="force-complete-form">
+            <div class="form-group">
+                <label>Reason *</label>
+                <textarea id="force-complete-reason" required rows="4" placeholder="Enter reason for force completing this session..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-back" onclick="closeForceCompleteModal()">Cancel</button>
+                <button type="submit" class="btn-force-complete">Force Complete</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="/public/js/admin/fulfillment-sessions-admin.js"></script>
+

@@ -74,13 +74,15 @@ class InvoiceStateMachineService {
         const client = await this.pool.connect();
         
         try {
+            // Set statement timeout to prevent hanging (30 seconds)
+            await client.query('SET statement_timeout = 30000');
             await client.query('BEGIN');
             
-            // Lock the invoice row
+            // Lock the invoice row with NOWAIT to fail fast if locked
             const invoice = await client.query(`
                 SELECT status, source FROM "ORDERS-invoices"
                 WHERE id = $1
-                FOR UPDATE
+                FOR UPDATE NOWAIT
             `, [invoiceId]);
             
             if (invoice.rows.length === 0) {
@@ -133,7 +135,10 @@ class InvoiceStateMachineService {
             await client.query('COMMIT');
             
             // Trigger side effects (websocket broadcasts, notifications, etc.)
-            await this.postTransitionEffects(invoiceId, currentStatus, newStatus);
+            // Don't await - run in background to prevent blocking
+            this.postTransitionEffects(invoiceId, currentStatus, newStatus).catch(error => {
+                console.error('⚠️ Error in postTransitionEffects (non-critical):', error.message);
+            });
 
             const eventName = newStatus === 'Cancelled'
                 ? 'invoice_cancelled'
@@ -226,6 +231,7 @@ class InvoiceStateMachineService {
                 }
 
                 // Broadcast inventory updates for all affected batches
+                // Don't block on WebSocket operations - run in background
                 try {
                     const allocationService = require('./allocationService');
                     const lineItems = await client.query(`
@@ -234,13 +240,20 @@ class InvoiceStateMachineService {
                         WHERE fk_invoice_id = $1 AND fk_batch_id IS NOT NULL
                     `, [invoiceId]);
                     
-                    for (const item of lineItems.rows) {
-                        const batchId = item.fk_batch_id;
-                        const newAvailable = await allocationService.getAvailableQuantity(batchId);
-                        await allocationService.broadcastInventoryUpdate(batchId, newAvailable);
-                    }
+                    // Broadcast updates asynchronously (don't await to prevent blocking)
+                    Promise.all(lineItems.rows.map(async (item) => {
+                        try {
+                            const batchId = item.fk_batch_id;
+                            const newAvailable = await allocationService.getAvailableQuantity(batchId);
+                            await allocationService.broadcastInventoryUpdate(batchId, newAvailable);
+                        } catch (wsError) {
+                            console.error(`WebSocket broadcast error for batch ${item.fk_batch_id} (non-critical):`, wsError.message);
+                        }
+                    })).catch(error => {
+                        console.error('WebSocket broadcast error (non-critical) during cancellation:', error.message);
+                    });
                 } catch (wsError) {
-                    console.error('WebSocket broadcast error (non-critical) during cancellation:', wsError.message);
+                    console.error('Error querying line items for broadcast (non-critical):', wsError.message);
                 }
 
                 // Immediately expire any associated external cart session so the buyer's cart is cleared

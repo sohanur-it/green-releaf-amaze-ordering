@@ -329,6 +329,16 @@
     <% } else { %>
     window.currentUserId = null;
     <% } %>
+    <% if (typeof isAdmin !== 'undefined' && isAdmin) { %>
+    window.isAdmin = true;
+    <% } else { %>
+    window.isAdmin = false;
+    <% } %>
+    <% if (typeof userRoles !== 'undefined' && userRoles && userRoles.includes('fulfillment_admin')) { %>
+    window.isFulfillmentAdmin = true;
+    <% } else { %>
+    window.isFulfillmentAdmin = false;
+    <% } %>
     console.log('Current User ID:', window.currentUserId); // Debug: check if it's set
 </script>
 <script src="/public/js/admin/fulfillment-queue.js"></script>

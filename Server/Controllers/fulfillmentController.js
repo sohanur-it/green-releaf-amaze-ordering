@@ -8,6 +8,9 @@ const transportationDetailsService = require('../Services/transportationDetailsS
 const manifestCreationService = require('../Services/manifestCreationService');
 const fulfillmentIssueService = require('../Services/fulfillmentIssueService');
 const manifestVoidingService = require('../Services/manifestVoidingService');
+const cancelledShipmentService = require('../Services/cancelledShipmentService');
+const adminSessionService = require('../Services/adminSessionService');
+const manifestStatusTrackingService = require('../Services/manifestStatusTrackingService');
 
 class FulfillmentController {
     /**
@@ -365,14 +368,19 @@ class FulfillmentController {
      */
     async voidManifest(req, res) {
         try {
-            const { invoice_id, reason } = req.body;
+            const { invoice_id, reason, target_manifest_or_license } = req.body;
             const userId = req.user.id;
 
             if (!invoice_id || !reason) {
                 return res.status(400).json({ error: 'invoice_id and reason are required' });
             }
 
-            const result = await manifestVoidingService.voidManifest(invoice_id, userId, reason);
+            const result = await manifestVoidingService.voidManifest(
+                invoice_id, 
+                userId, 
+                reason,
+                target_manifest_or_license || null
+            );
             res.json(result);
         } catch (error) {
             console.error('[Fulfillment] Error voiding manifest:', error);
@@ -398,6 +406,368 @@ class FulfillmentController {
         } catch (error) {
             console.error('[Fulfillment] Error updating manifest:', error);
             res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Update issue details
+     * POST /api/v1/fulfillment/issues/update
+     */
+    async updateIssueDetails(req, res) {
+        try {
+            const { invoice_id, ...updates } = req.body;
+            const userId = req.user.id;
+
+            if (!invoice_id) {
+                return res.status(400).json({ error: 'invoice_id is required' });
+            }
+
+            const result = await fulfillmentIssueService.updateIssueDetails(invoice_id, userId, updates);
+            res.json(result);
+        } catch (error) {
+            console.error('[Fulfillment] Error updating issue:', error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Add note to issue
+     * POST /api/v1/fulfillment/issues/add-note
+     */
+    async addNoteToIssue(req, res) {
+        try {
+            const { invoice_id, note } = req.body;
+            const userId = req.user.id;
+
+            if (!invoice_id || !note) {
+                return res.status(400).json({ error: 'invoice_id and note are required' });
+            }
+
+            const result = await fulfillmentIssueService.addNoteToIssue(invoice_id, userId, note);
+            res.json(result);
+        } catch (error) {
+            console.error('[Fulfillment] Error adding note:', error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Cancel issue report
+     * POST /api/v1/fulfillment/issues/cancel
+     */
+    async cancelIssueReport(req, res) {
+        try {
+            const { invoice_id, reason } = req.body;
+            const userId = req.user.id;
+
+            if (!invoice_id) {
+                return res.status(400).json({ error: 'invoice_id is required' });
+            }
+
+            const result = await fulfillmentIssueService.cancelIssueReport(invoice_id, userId, reason);
+            res.json(result);
+        } catch (error) {
+            console.error('[Fulfillment] Error cancelling issue:', error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Process cancellation
+     * POST /api/v1/fulfillment/cancelled-shipments/cancel
+     */
+    async processCancellation(req, res) {
+        try {
+            const { invoice_id, cancellation_reason, incident_type } = req.body;
+            const userId = req.user.id;
+
+            if (!invoice_id || !cancellation_reason) {
+                return res.status(400).json({ error: 'invoice_id and cancellation_reason are required' });
+            }
+
+            const result = await cancelledShipmentService.processCancellation(
+                invoice_id, 
+                userId, 
+                cancellation_reason,
+                incident_type || 'other'
+            );
+            res.json(result);
+        } catch (error) {
+            console.error('[Fulfillment] Error processing cancellation:', error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Confirm packages returned
+     * POST /api/v1/fulfillment/cancelled-shipments/confirm-return
+     */
+    async confirmPackagesReturned(req, res) {
+        try {
+            const { invoice_id } = req.body;
+            const userId = req.user.id;
+
+            if (!invoice_id) {
+                return res.status(400).json({ error: 'invoice_id is required' });
+            }
+
+            const result = await cancelledShipmentService.confirmPackagesReturned(invoice_id, userId);
+            res.json(result);
+        } catch (error) {
+            console.error('[Fulfillment] Error confirming returns:', error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Report driver incident
+     * POST /api/v1/fulfillment/cancelled-shipments/report-incident
+     */
+    async reportDriverIncident(req, res) {
+        try {
+            const { invoice_id, incident_details } = req.body;
+            const userId = req.user.id;
+
+            if (!invoice_id || !incident_details) {
+                return res.status(400).json({ error: 'invoice_id and incident_details are required' });
+            }
+
+            const result = await cancelledShipmentService.reportDriverIncident(
+                invoice_id, 
+                userId, 
+                incident_details
+            );
+            res.json(result);
+        } catch (error) {
+            console.error('[Fulfillment] Error reporting incident:', error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Get all active sessions (admin)
+     * GET /api/v1/admin/fulfillment/sessions
+     */
+    async getAllActiveSessions(req, res) {
+        try {
+            const filters = {
+                worker_id: req.query.worker_id ? parseInt(req.query.worker_id) : null,
+                duration_min: req.query.duration_min ? parseInt(req.query.duration_min) : null
+            };
+
+            const result = await adminSessionService.getAllActiveSessions(filters);
+            res.json(result);
+        } catch (error) {
+            console.error('[Admin] Error getting sessions:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Force complete session (admin)
+     * POST /api/v1/admin/fulfillment/sessions/:sessionId/force-complete
+     */
+    async forceCompleteSession(req, res) {
+        try {
+            const { sessionId } = req.params;
+            const { reason } = req.body;
+            const userId = req.user.id;
+
+            if (!reason) {
+                return res.status(400).json({ error: 'reason is required' });
+            }
+
+            const result = await adminSessionService.forceCompleteSession(
+                parseInt(sessionId), 
+                userId, 
+                reason
+            );
+            res.json(result);
+        } catch (error) {
+            console.error('[Admin] Error force completing session:', error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Remove scanned package (admin)
+     * POST /api/v1/admin/fulfillment/sessions/remove-package
+     */
+    async removeScannedPackage(req, res) {
+        try {
+            const { invoice_id, line_item_id, package_label } = req.body;
+            const userId = req.user.id;
+
+            if (!invoice_id || !line_item_id || !package_label) {
+                return res.status(400).json({ error: 'invoice_id, line_item_id, and package_label are required' });
+            }
+
+            const result = await adminSessionService.removeScannedPackage(
+                invoice_id,
+                line_item_id,
+                package_label,
+                userId
+            );
+            res.json(result);
+        } catch (error) {
+            console.error('[Admin] Error removing package:', error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Edit scanned package label (admin)
+     * POST /api/v1/admin/fulfillment/sessions/edit-package
+     */
+    async editScannedPackage(req, res) {
+        try {
+            const { invoice_id, line_item_id, old_package_label, new_package_label } = req.body;
+            const userId = req.user.id;
+
+            if (!invoice_id || !line_item_id || !old_package_label || !new_package_label) {
+                return res.status(400).json({ error: 'All fields are required' });
+            }
+
+            const result = await adminSessionService.editScannedPackage(
+                invoice_id,
+                line_item_id,
+                old_package_label,
+                new_package_label,
+                userId
+            );
+            res.json(result);
+        } catch (error) {
+            console.error('[Admin] Error editing package:', error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Manually adjust session (admin)
+     * POST /api/v1/admin/fulfillment/sessions/:sessionId/adjust
+     */
+    async manuallyAdjustSession(req, res) {
+        try {
+            const { sessionId } = req.params;
+            const { adjustments, reason } = req.body;
+            const userId = req.user.id;
+
+            if (!adjustments || !reason) {
+                return res.status(400).json({ error: 'adjustments and reason are required' });
+            }
+
+            const result = await adminSessionService.manuallyAdjustSession(
+                parseInt(sessionId),
+                userId,
+                adjustments,
+                reason
+            );
+            res.json(result);
+        } catch (error) {
+            console.error('[Admin] Error adjusting session:', error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Get all issues (admin)
+     * GET /api/v1/admin/fulfillment/issues
+     */
+    async getAllIssues(req, res) {
+        try {
+            const filters = {
+                issue_type: req.query.issue_type || null,
+                date_from: req.query.date_from || null,
+                date_to: req.query.date_to || null,
+                sales_rep_id: req.query.sales_rep_id ? parseInt(req.query.sales_rep_id) : null
+            };
+
+            const result = await fulfillmentIssueService.getAllIssues(filters);
+            res.json(result);
+        } catch (error) {
+            console.error('[Admin] Error getting issues:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Bulk assign issues (admin)
+     * POST /api/v1/admin/fulfillment/issues/bulk-assign
+     */
+    async bulkAssignIssues(req, res) {
+        try {
+            const { invoice_ids, sales_rep_id } = req.body;
+            const userId = req.user.id;
+
+            if (!invoice_ids || !Array.isArray(invoice_ids) || !sales_rep_id) {
+                return res.status(400).json({ error: 'invoice_ids (array) and sales_rep_id are required' });
+            }
+
+            const result = await fulfillmentIssueService.bulkAssignIssues(
+                invoice_ids,
+                sales_rep_id,
+                userId
+            );
+            res.json(result);
+        } catch (error) {
+            console.error('[Admin] Error bulk assigning issues:', error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Finalize destroyed packages (admin)
+     * POST /api/v1/admin/cancelled-shipments/:invoiceId/finalize-destroyed
+     */
+    async finalizeDestroyedPackages(req, res) {
+        try {
+            const { invoiceId } = req.params;
+            const { destroyed_packages } = req.body;
+            const userId = req.user.id;
+
+            if (!destroyed_packages || !Array.isArray(destroyed_packages)) {
+                return res.status(400).json({ error: 'destroyed_packages (array) is required' });
+            }
+
+            const result = await cancelledShipmentService.finalizeDestroyedPackages(
+                parseInt(invoiceId),
+                destroyed_packages,
+                userId
+            );
+            res.json(result);
+        } catch (error) {
+            console.error('[Admin] Error finalizing destroyed packages:', error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Get unaccounted packages (admin)
+     * GET /api/v1/admin/cancelled-shipments/:invoiceId/unaccounted-packages
+     */
+    async getUnaccountedPackages(req, res) {
+        try {
+            const { invoiceId } = req.params;
+
+            const result = await cancelledShipmentService.getUnaccountedPackages(parseInt(invoiceId));
+            res.json(result);
+        } catch (error) {
+            console.error('[Admin] Error getting unaccounted packages:', error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Sync manifest statuses (scheduled job)
+     * POST /api/v1/admin/fulfillment/sync-statuses
+     */
+    async syncManifestStatuses(req, res) {
+        try {
+            const result = await manifestStatusTrackingService.syncManifestStatuses();
+            res.json(result);
+        } catch (error) {
+            console.error('[Admin] Error syncing manifest statuses:', error);
+            res.status(500).json({ error: error.message });
         }
     }
 }

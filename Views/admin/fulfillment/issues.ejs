@@ -1,0 +1,155 @@
+<style>
+.issues-container {
+    padding: 2rem;
+}
+
+.issues-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+}
+
+.issues-table {
+    width: 100%;
+    background: var(--card-bg, white);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: var(--card-shadow, 0 2px 8px rgba(0,0,0,0.1));
+}
+
+.issues-table table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.issues-table th {
+    background: var(--bg-color, #f9fafb);
+    padding: 1rem;
+    text-align: left;
+    font-weight: 600;
+    color: var(--text-color);
+    border-bottom: 2px solid var(--border-color);
+}
+
+.issues-table td {
+    padding: 1rem;
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-color);
+}
+
+.issues-table tr:hover {
+    background: var(--bg-color, #f9fafb);
+}
+
+.bulk-actions {
+    background: var(--card-bg, white);
+    padding: 1.5rem;
+    border-radius: 12px;
+    margin-bottom: 2rem;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+.filter-bar {
+    background: var(--card-bg, white);
+    padding: 1.5rem;
+    border-radius: 12px;
+    margin-bottom: 2rem;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+</style>
+
+<div class="issues-container">
+    <div class="issues-header">
+        <div>
+            <h1>Fulfillment Issues</h1>
+            <p style="color: var(--text-light); margin: 0.5rem 0 0 0;">Manage and resolve fulfillment issues</p>
+        </div>
+        <button class="btn btn-secondary" onclick="loadIssues()">
+            <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+    </div>
+
+    <div class="filter-bar">
+        <div class="filter-group">
+            <label>Status</label>
+            <select id="status-filter" onchange="applyFilters()">
+                <option value="">All</option>
+                <option value="Fulfillment_Issue">Fulfillment Issue</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>Sales Rep</label>
+            <select id="sales-rep-filter" onchange="applyFilters()">
+                <option value="">All</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>Date From</label>
+            <input type="date" id="date-from" onchange="applyFilters()">
+        </div>
+        <div class="filter-group">
+            <label>Date To</label>
+            <input type="date" id="date-to" onchange="applyFilters()">
+        </div>
+    </div>
+
+    <div class="bulk-actions">
+        <input type="checkbox" id="select-all" onchange="toggleSelectAll()">
+        <label for="select-all">Select All</label>
+        <button class="btn btn-primary" onclick="bulkAssign()" id="btn-bulk-assign" disabled>
+            <i class="fas fa-user-plus"></i> Bulk Assign
+        </button>
+        <button class="btn btn-success" onclick="bulkResolve()" id="btn-bulk-resolve" disabled>
+            <i class="fas fa-check"></i> Bulk Resolve
+        </button>
+    </div>
+
+    <div class="issues-table">
+        <table>
+            <thead>
+                <tr>
+                    <th><input type="checkbox" id="select-all-header" onchange="toggleSelectAll()"></th>
+                    <th>Invoice</th>
+                    <th>Issue Type</th>
+                    <th>Description</th>
+                    <th>Sales Rep</th>
+                    <th>Reported At</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="issues-tbody">
+                <tr>
+                    <td colspan="7" style="text-align: center; padding: 2rem;">
+                        <i class="fas fa-spinner fa-spin"></i> Loading issues...
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Bulk Assign Modal -->
+<div class="modal-overlay" id="bulk-assign-modal">
+    <div class="modal-content">
+        <h3>Bulk Assign Issues</h3>
+        <form id="bulk-assign-form">
+            <div class="form-group">
+                <label>Sales Rep ID *</label>
+                <input type="number" id="bulk-assign-rep-id" required placeholder="Enter sales rep user ID">
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-back" onclick="closeBulkAssignModal()">Cancel</button>
+                <button type="submit" class="btn-primary">Assign</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="/public/js/admin/fulfillment-issues-admin.js"></script>
+

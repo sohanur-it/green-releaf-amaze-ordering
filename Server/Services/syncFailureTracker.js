@@ -461,6 +461,42 @@ class SyncFailureTracker {
     }
 
     /**
+     * Manually reset failure count for a script (admin function)
+     * @param {string} scriptName - Name of the sync script
+     * @param {string} licenseNumber - License number for the sync
+     */
+    async resetFailures(scriptName, licenseNumber = 'CUL000063') {
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            // Reset failure count to 0
+            await client.query(`
+                INSERT INTO sync_failure_tracking (
+                    script_name, license_number, consecutive_failures, 
+                    created_at, updated_at
+                ) VALUES ($1, $2, 0, NOW(), NOW())
+                ON CONFLICT (script_name, license_number)
+                DO UPDATE SET
+                    consecutive_failures = 0,
+                    updated_at = NOW()
+            `, [scriptName, licenseNumber]);
+
+            await client.query('COMMIT');
+
+            console.log(`✅ Manually reset failure count for ${scriptName}`);
+            return true;
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            console.error('❌ Error resetting failures:', error.message);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
      * Get last N sync operations from sync_history
      * @param {number} limit - Number of recent syncs to retrieve (default: 5)
      * @returns {Array} Array of sync history objects

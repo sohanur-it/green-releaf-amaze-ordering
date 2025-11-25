@@ -158,6 +158,105 @@
                     </button>
                 </div>
             <% } %>
+            <% 
+            // Request Global Issue (Sales)
+            const canRequestGlobal = (isSalesAdmin || isSalesRep || isAdmin) && 
+                                   ['Fulfillment_Accepted', 'Manifested'].includes(invoice.status) &&
+                                   !invoice.global_issue_requested_by;
+            %>
+            <% if (canRequestGlobal) { %>
+                <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                    <button onclick="requestGlobalIssue()" class="btn btn-warning" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer; background: #f59e0b;">
+                        <i class="fas fa-exclamation-circle"></i> Request Return to Sales
+                    </button>
+                </div>
+            <% } %>
+            <% 
+            // Acknowledge Global Issue (Fulfillment)
+            let isFulfillmentWorker = false;
+            let isFulfillmentAdmin = false;
+            if (userRoles && Array.isArray(userRoles)) {
+                for (let i = 0; i < userRoles.length; i++) {
+                    const role = userRoles[i];
+                    const roleName = (typeof role === 'string' ? role : (role.name || role.role_name || '')).toLowerCase();
+                    if (roleName.includes('fulfillment')) {
+                        isFulfillmentWorker = true;
+                        if (roleName.includes('admin')) {
+                            isFulfillmentAdmin = true;
+                        }
+                    }
+                }
+            }
+            const canAcknowledgeGlobal = (isFulfillmentWorker || isFulfillmentAdmin || isAdmin) && 
+                                       invoice.global_issue_requested_by &&
+                                       invoice.status === 'Fulfillment_Accepted';
+            %>
+            <% if (canAcknowledgeGlobal) { %>
+                <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                    <button onclick="acknowledgeGlobalIssue()" class="btn btn-info" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer; background: #3b82f6;">
+                        <i class="fas fa-check-circle"></i> Acknowledge Return Request
+                    </button>
+                </div>
+            <% } %>
+            <% 
+            // Cancelled Shipment Actions
+            let isFulfillmentWorker2 = false;
+            let isFulfillmentAdmin2 = false;
+            if (userRoles && Array.isArray(userRoles)) {
+                for (let i = 0; i < userRoles.length; i++) {
+                    const role = userRoles[i];
+                    const roleName = (typeof role === 'string' ? role : (role.name || role.role_name || '')).toLowerCase();
+                    if (roleName.includes('fulfillment')) {
+                        isFulfillmentWorker2 = true;
+                        if (roleName.includes('admin')) {
+                            isFulfillmentAdmin2 = true;
+                        }
+                    }
+                }
+            }
+            const canCancelShipment = (isSalesAdmin || isAdmin) && invoice.status === 'Shipped';
+            const canConfirmReturn = (isFulfillmentWorker2 || isFulfillmentAdmin2 || isAdmin) && invoice.status === 'Cancelled_After_Ship';
+            const canReportIncident = (isFulfillmentWorker2 || isFulfillmentAdmin2 || isAdmin) && invoice.status === 'Shipped';
+            %>
+            <% if (canCancelShipment) { %>
+                <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                    <button onclick="cancelShipment()" class="btn btn-danger" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer; background: #ef4444;">
+                        <i class="fas fa-times-circle"></i> Cancel Shipment
+                    </button>
+                </div>
+            <% } %>
+            <% if (canConfirmReturn) { %>
+                <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                    <button onclick="confirmPackagesReturned()" class="btn btn-success" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer; background: #10b981;">
+                        <i class="fas fa-check"></i> Confirm Packages Returned
+                    </button>
+                    <% 
+                    let isFulfillmentAdmin3 = false;
+                    if (userRoles && Array.isArray(userRoles)) {
+                        for (let i = 0; i < userRoles.length; i++) {
+                            const role = userRoles[i];
+                            const roleName = (typeof role === 'string' ? role : (role.name || role.role_name || '')).toLowerCase();
+                            if (roleName.includes('fulfillment') && roleName.includes('admin')) {
+                                isFulfillmentAdmin3 = true;
+                                break;
+                            }
+                        }
+                    }
+                    %>
+                    <% if (isAdmin || isFulfillmentAdmin3) { %>
+                        <button onclick="finalizeDestroyedPackages()" class="btn btn-danger" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer; background: #ef4444;">
+                            <i class="fas fa-trash"></i> Finalize Destroyed Packages
+                        </button>
+                    <% } %>
+                </div>
+            <% } %>
+            <% if (canReportIncident) { %>
+                <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
+                    <button onclick="reportDriverIncident()" class="btn btn-warning" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer; background: #f59e0b;">
+                        <i class="fas fa-exclamation-triangle"></i> Report Driver Incident
+                    </button>
+                </div>
+            <% } %>
         </div>
     </div>
     <div class="detail-row">
@@ -876,6 +975,141 @@ if (typeof showNotification === 'undefined' && typeof NotificationSystem !== 'un
     window.showNotification = function(message, type = 'info', duration = 3000) {
         NotificationSystem.show(message, type, duration);
     };
+}
+
+// Request Global Issue
+async function requestGlobalIssue() {
+    const reason = prompt('Enter reason for requesting return to sales:');
+    if (!reason) return;
+    
+    try {
+        const response = await fetch('/api/v1/fulfillment/issues/request-global', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ invoice_id: invoiceId, reason: reason })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to request global issue');
+        alert('Return request sent to fulfillment');
+        window.location.reload();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Acknowledge Global Issue
+async function acknowledgeGlobalIssue() {
+    if (!confirm('Acknowledge this return request? Order will be returned to sales.')) return;
+    
+    try {
+        const response = await fetch(`/api/v1/fulfillment/issues/acknowledge-global/${invoiceId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to acknowledge');
+        alert('Return request acknowledged');
+        window.location.reload();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Cancel Shipment
+async function cancelShipment() {
+    const reason = prompt('Enter cancellation reason:');
+    if (!reason) return;
+    
+    if (!confirm('Cancel this shipment? Packages will need to be verified upon return.')) return;
+    
+    try {
+        const response = await fetch('/api/v1/fulfillment/cancelled-shipments/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ invoice_id: invoiceId, cancellation_reason: reason, incident_type: 'customer_cancel' })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to cancel shipment');
+        alert('Shipment cancelled. Awaiting package return confirmation.');
+        window.location.reload();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Confirm Packages Returned
+async function confirmPackagesReturned() {
+    if (!confirm('Confirm packages have returned to inventory? This will verify packages in METRC.')) return;
+    
+    try {
+        const response = await fetch('/api/v1/fulfillment/cancelled-shipments/confirm-return', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ invoice_id: invoiceId })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to confirm return');
+        alert(`${data.verified_count || 0} package(s) verified. ${data.not_found_count || 0} not yet found.`);
+        window.location.reload();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Report Driver Incident
+async function reportDriverIncident() {
+    const description = prompt('Enter incident description:');
+    if (!description) return;
+    
+    const notes = prompt('Additional notes (optional):') || '';
+    
+    try {
+        const response = await fetch('/api/v1/fulfillment/cancelled-shipments/report-incident', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                invoice_id: invoiceId,
+                incident_details: { description: description, notes: notes }
+            })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to report incident');
+        alert('Incident reported. Admin team will verify package status.');
+        window.location.reload();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Finalize Destroyed Packages
+async function finalizeDestroyedPackages() {
+    const packageLabels = prompt('Enter package labels to mark as destroyed (comma-separated):');
+    if (!packageLabels) return;
+    
+    const reason = prompt('Enter destruction reason:');
+    if (!reason) return;
+    
+    const labels = packageLabels.split(',').map(l => l.trim()).filter(l => l);
+    const destroyedPackages = labels.map(label => ({
+        package_label: label,
+        destruction_reason: reason
+    }));
+    
+    if (!confirm(`Mark ${labels.length} package(s) as permanently destroyed?`)) return;
+    
+    try {
+        const response = await fetch(`/api/v1/admin/cancelled-shipments/${invoiceId}/finalize-destroyed`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ destroyed_packages: destroyedPackages })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to finalize destroyed packages');
+        alert(`${data.packages_finalized} package(s) finalized. ${data.total_quantity_destroyed} units destroyed.`);
+        window.location.reload();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
 }
 </script>
 

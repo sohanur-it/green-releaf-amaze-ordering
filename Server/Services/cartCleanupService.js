@@ -105,6 +105,77 @@ class CartCleanupService {
             // Release all allocations (updates database within transaction)
             await this.releaseAllAllocations(cartId, client);
 
+            // Delete related records first (foreign key constraints)
+            // Order matters: delete child records before parent
+            
+            // 1. Delete credit applications (if any)
+            try {
+                const creditAppsDeleted = await client.query(`
+                    DELETE FROM "orders-credit-applications"
+                    WHERE fk_invoice_id = $1
+                `, [cartId]);
+                if (creditAppsDeleted.rowCount > 0) {
+                    console.log(`🗑️  Deleted ${creditAppsDeleted.rowCount} credit application(s) for cart ${cartId}`);
+                }
+            } catch (creditError) {
+                console.warn(`⚠️  Error deleting credit applications for cart ${cartId}:`, creditError.message);
+                // If this fails, we can't delete the invoice - throw error
+                throw new Error(`Cannot delete cart ${cartId}: credit applications exist and cannot be deleted - ${creditError.message}`);
+            }
+
+            // 2. Delete invoice history
+            try {
+                const historyDeleted = await client.query(`
+                    DELETE FROM "ORDERS-invoice-history"
+                    WHERE fk_invoice_id = $1
+                `, [cartId]);
+                if (historyDeleted.rowCount > 0) {
+                    console.log(`🗑️  Deleted ${historyDeleted.rowCount} history record(s) for cart ${cartId}`);
+                }
+            } catch (historyError) {
+                console.warn(`⚠️  Error deleting invoice history (non-critical):`, historyError.message);
+                // History deletion failure is non-critical - continue
+            }
+
+            // 3. Delete scanning sessions (if any)
+            try {
+                const sessionsDeleted = await client.query(`
+                    DELETE FROM "ORDERS-scanning-sessions"
+                    WHERE fk_invoice_id = $1
+                `, [cartId]);
+                if (sessionsDeleted.rowCount > 0) {
+                    console.log(`🗑️  Deleted ${sessionsDeleted.rowCount} scanning session(s) for cart ${cartId}`);
+                }
+            } catch (sessionError) {
+                console.warn(`⚠️  Error deleting scanning sessions (non-critical):`, sessionError.message);
+            }
+
+            // 4. Delete cancelled shipment packages (if any)
+            try {
+                const cancelledPkgsDeleted = await client.query(`
+                    DELETE FROM "ORDERS-cancelled-shipment-packages"
+                    WHERE fk_invoice_id = $1
+                `, [cartId]);
+                if (cancelledPkgsDeleted.rowCount > 0) {
+                    console.log(`🗑️  Deleted ${cancelledPkgsDeleted.rowCount} cancelled shipment package(s) for cart ${cartId}`);
+                }
+            } catch (cancelledError) {
+                console.warn(`⚠️  Error deleting cancelled shipment packages (non-critical):`, cancelledError.message);
+            }
+
+            // 5. Delete manifest packages (if any)
+            try {
+                const manifestPkgsDeleted = await client.query(`
+                    DELETE FROM "ORDERS-manifest-packages"
+                    WHERE fk_invoice_id = $1
+                `, [cartId]);
+                if (manifestPkgsDeleted.rowCount > 0) {
+                    console.log(`🗑️  Deleted ${manifestPkgsDeleted.rowCount} manifest package(s) for cart ${cartId}`);
+                }
+            } catch (manifestError) {
+                console.warn(`⚠️  Error deleting manifest packages (non-critical):`, manifestError.message);
+            }
+
             // Delete line items
             await client.query(`
                 DELETE FROM "ORDERS-invoice-line-items"

@@ -131,6 +131,14 @@ function renderQueue(orders) {
                         <button class="btn-view" onclick="startScanning(${order.id})">
                             <i class="fas fa-barcode"></i> Start Scanning
                         </button>
+                        <button class="btn-view" style="background: #ef4444;" onclick="releaseOrder(${order.id})">
+                            <i class="fas fa-undo"></i> Release
+                        </button>
+                    ` : ''}
+                    ${window.isAdmin || window.isFulfillmentAdmin ? `
+                        <button class="btn-view" style="background: #8b5cf6;" onclick="reassignOrder(${order.id})">
+                            <i class="fas fa-user-exchange"></i> Reassign
+                        </button>
                     ` : ''}
                     <button class="btn-view" onclick="viewOrder(${order.id})">
                         <i class="fas fa-eye"></i> View Details
@@ -253,5 +261,73 @@ function startScanning(invoiceId) {
  */
 function viewOrder(invoiceId) {
     window.location.href = `/admin/invoices/${invoiceId}`;
+}
+
+/**
+ * Release order back to queue
+ */
+async function releaseOrder(invoiceId) {
+    if (!confirm('Release this order back to the queue?')) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/v1/fulfillment/queue/release', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ invoice_id: invoiceId })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to release order');
+        }
+
+        alert('Order released successfully');
+        loadQueue();
+
+    } catch (error) {
+        console.error('Error releasing order:', error);
+        alert(`Error: ${error.message}`);
+    }
+}
+
+/**
+ * Admin reassign order
+ */
+async function reassignOrder(invoiceId) {
+    const newWorkerId = prompt('Enter new worker user ID:');
+    if (!newWorkerId) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/v1/fulfillment/admin/reassign', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                invoice_id: invoiceId,
+                to_user_id: parseInt(newWorkerId)
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to reassign order');
+        }
+
+        alert('Order reassigned successfully');
+        loadQueue();
+
+    } catch (error) {
+        console.error('Error reassigning order:', error);
+        alert(`Error: ${error.message}`);
+    }
 }
 

@@ -146,6 +146,16 @@ if (isSuperuser) {
                     <span class="nav-link-text">Fulfillment</span>
                 </a>
                 <% } %>
+                <% if ((hasRole('fulfillment_admin') || isAdmin) && (title === 'Active Scanning Sessions' || title === 'Fulfillment Issues')) { %>
+                <a href="/admin/fulfillment/sessions" class="nav-link <%= title === 'Active Scanning Sessions' ? 'active' : '' %>" title="Session Management">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+                    <span class="nav-link-text">Sessions</span>
+                </a>
+                <a href="/admin/fulfillment/issues" class="nav-link <%= title === 'Fulfillment Issues' ? 'active' : '' %>" title="Issue Management">
+                    <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                    <span class="nav-link-text">Issues</span>
+                </a>
+                <% } %>
             <% } else if (isSalesRep && !isAdmin && !isSalesAdmin) { %>
                 <!-- Sales Rep: Dashboard and Invoices -->
                 <!-- Dashboard -->

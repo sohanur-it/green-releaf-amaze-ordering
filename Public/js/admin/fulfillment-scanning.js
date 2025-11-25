@@ -217,6 +217,9 @@ async function loadProgress() {
         scanningProgress = data;
         renderProgress(data);
         updateOverallProgress(data.overall_progress);
+        
+        // Check if invoice has issues and show appropriate buttons
+        checkInvoiceStatus();
 
     } catch (error) {
         console.error('Error loading progress:', error);
@@ -269,6 +272,9 @@ function renderProgress(data) {
                                     ${pkg}
                                     <button class="remove-btn" onclick="removePackage(${item.line_item_id}, '${pkg}')" title="Remove">
                                         <i class="fas fa-times"></i>
+                                    </button>
+                                    <button class="edit-btn" onclick="editPackage(${item.line_item_id}, '${pkg}')" title="Edit" style="margin-left: 4px; background: #3b82f6; color: white; border: none; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">
+                                        <i class="fas fa-edit"></i>
                                     </button>
                                 </span>
                             `).join('')}
@@ -372,8 +378,70 @@ async function removePackage(lineItemId, packageLabel) {
         return;
     }
 
-    // TODO: Implement remove package endpoint
-    alert('Remove package functionality coming soon');
+    try {
+        const response = await fetch('/api/v1/admin/fulfillment/sessions/remove-package', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                invoice_id: window.invoiceId,
+                line_item_id: lineItemId,
+                package_label: packageLabel
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to remove package');
+        }
+
+        alert('Package removed successfully');
+        loadProgress();
+
+    } catch (error) {
+        console.error('Error removing package:', error);
+        alert(`Error: ${error.message}`);
+    }
+}
+
+/**
+ * Edit package label
+ */
+async function editPackage(lineItemId, oldPackageLabel) {
+    const newPackageLabel = prompt(`Enter new package label for ${oldPackageLabel}:`, oldPackageLabel);
+    if (!newPackageLabel || newPackageLabel === oldPackageLabel) {
+        return;
+    }
+
+    try {
+        const response = await fetch('/api/v1/admin/fulfillment/sessions/edit-package', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                invoice_id: window.invoiceId,
+                line_item_id: lineItemId,
+                old_package_label: oldPackageLabel,
+                new_package_label: newPackageLabel
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to edit package');
+        }
+
+        alert('Package label updated successfully');
+        loadProgress();
+
+    } catch (error) {
+        console.error('Error editing package:', error);
+        alert(`Error: ${error.message}`);
+    }
 }
 
 /**
@@ -398,7 +466,221 @@ async function completeScanning() {
  */
 function showIssueModal() {
     document.getElementById('issue-modal').classList.add('active');
+    const form = document.getElementById('issue-form');
+    // Remove existing listeners
+    const newForm = form.cloneNode(true);
+    form.parentNode.replaceChild(newForm, form);
     document.getElementById('issue-form').addEventListener('submit', handleIssueReport);
+}
+
+/**
+ * Show update issue modal
+ */
+function showUpdateIssueModal() {
+    const modal = document.getElementById('update-issue-modal');
+    if (!modal) {
+        createUpdateIssueModal();
+    }
+    document.getElementById('update-issue-modal').classList.add('active');
+}
+
+/**
+ * Create update issue modal
+ */
+function createUpdateIssueModal() {
+    const modal = document.createElement('div');
+    modal.id = 'update-issue-modal';
+    modal.className = 'rejection-alert-modal';
+    modal.innerHTML = `
+        <div class="rejection-alert-content">
+            <h3><i class="fas fa-edit"></i> Update Issue</h3>
+            <form id="update-issue-form">
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Issue Type</label>
+                    <select id="update-issue-type" required style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px;">
+                        <option value="batch_unavailable">Batch Unavailable</option>
+                        <option value="package_damaged">Package Damaged</option>
+                        <option value="package_quantity_mismatch">Quantity Mismatch</option>
+                        <option value="package_missing_from_metrc">Package Missing from METRC</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Description <span style="color: #ef4444;">*</span></label>
+                    <textarea id="update-issue-description" required rows="4" placeholder="Update issue description..." style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; resize: vertical;"></textarea>
+                </div>
+                <div class="alert-actions">
+                    <button type="button" class="btn-skip" onclick="closeUpdateIssueModal()">Cancel</button>
+                    <button type="submit" class="btn-verify">Update Issue</button>
+                </div>
+            </form>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById('update-issue-form').addEventListener('submit', handleUpdateIssue);
+}
+
+/**
+ * Close update issue modal
+ */
+function closeUpdateIssueModal() {
+    document.getElementById('update-issue-modal').classList.remove('active');
+}
+
+/**
+ * Handle update issue
+ */
+async function handleUpdateIssue(e) {
+    e.preventDefault();
+    
+    const issueType = document.getElementById('update-issue-type').value;
+    const description = document.getElementById('update-issue-description').value;
+    
+    try {
+        const response = await fetch('/api/v1/fulfillment/issues/update', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                invoice_id: window.invoiceId,
+                issue_type: issueType,
+                description: description
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to update issue');
+        }
+        
+        alert('Issue updated successfully');
+        closeUpdateIssueModal();
+        
+    } catch (error) {
+        console.error('Error updating issue:', error);
+        alert(`Error: ${error.message}`);
+    }
+}
+
+/**
+ * Show add note modal
+ */
+function showAddNoteModal() {
+    const modal = document.getElementById('add-note-modal');
+    if (!modal) {
+        createAddNoteModal();
+    }
+    document.getElementById('add-note-modal').classList.add('active');
+}
+
+/**
+ * Create add note modal
+ */
+function createAddNoteModal() {
+    const modal = document.createElement('div');
+    modal.id = 'add-note-modal';
+    modal.className = 'rejection-alert-modal';
+    modal.innerHTML = `
+        <div class="rejection-alert-content">
+            <h3><i class="fas fa-sticky-note"></i> Add Note to Issue</h3>
+            <form id="add-note-form">
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Note <span style="color: #ef4444;">*</span></label>
+                    <textarea id="note-text" required rows="4" placeholder="Enter note..." style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; resize: vertical;"></textarea>
+                </div>
+                <div class="alert-actions">
+                    <button type="button" class="btn-skip" onclick="closeAddNoteModal()">Cancel</button>
+                    <button type="submit" class="btn-verify">Add Note</button>
+                </div>
+            </form>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    document.getElementById('add-note-form').addEventListener('submit', handleAddNote);
+}
+
+/**
+ * Close add note modal
+ */
+function closeAddNoteModal() {
+    document.getElementById('add-note-modal').classList.remove('active');
+}
+
+/**
+ * Handle add note
+ */
+async function handleAddNote(e) {
+    e.preventDefault();
+    
+    const note = document.getElementById('note-text').value;
+    
+    try {
+        const response = await fetch('/api/v1/fulfillment/issues/add-note', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                invoice_id: window.invoiceId,
+                note: note
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to add note');
+        }
+        
+        alert('Note added successfully');
+        closeAddNoteModal();
+        
+    } catch (error) {
+        console.error('Error adding note:', error);
+        alert(`Error: ${error.message}`);
+    }
+}
+
+/**
+ * Cancel issue report
+ */
+async function cancelIssueReport() {
+    const reason = prompt('Enter reason for cancelling this issue report:');
+    if (!reason) {
+        return;
+    }
+    
+    if (!confirm('Cancel this issue report? The order will return to Fulfillment_Accepted status.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/v1/fulfillment/issues/cancel', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                invoice_id: window.invoiceId,
+                reason: reason
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to cancel issue');
+        }
+        
+        alert('Issue cancelled successfully. Order returned to Fulfillment_Accepted status.');
+        window.location.href = '/admin/fulfillment/queue';
+        
+    } catch (error) {
+        console.error('Error cancelling issue:', error);
+        alert(`Error: ${error.message}`);
+    }
 }
 
 /**
@@ -453,6 +735,38 @@ async function handleIssueReport(e) {
     } catch (error) {
         console.error('Error reporting issue:', error);
         alert(`Error: ${error.message}`);
+    }
+}
+
+/**
+ * Check invoice status and show/hide issue buttons
+ */
+async function checkInvoiceStatus() {
+    try {
+        const response = await fetch(`/api/v1/invoices/${window.invoiceId}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.data) {
+                const status = data.data.status;
+                const hasIssue = status === 'Fulfillment_Issue';
+                
+                const updateBtn = document.getElementById('btn-update-issue');
+                const addNoteBtn = document.getElementById('btn-add-note');
+                const cancelBtn = document.getElementById('btn-cancel-issue');
+                
+                if (hasIssue) {
+                    if (updateBtn) updateBtn.style.display = 'inline-block';
+                    if (addNoteBtn) addNoteBtn.style.display = 'inline-block';
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                } else {
+                    if (updateBtn) updateBtn.style.display = 'none';
+                    if (addNoteBtn) addNoteBtn.style.display = 'none';
+                    if (cancelBtn) cancelBtn.style.display = 'none';
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error checking invoice status:', error);
     }
 }
 

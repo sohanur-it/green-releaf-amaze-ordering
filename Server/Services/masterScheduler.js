@@ -226,6 +226,29 @@ class MasterScheduler {
         scheduledCount++;
         console.log('📅 Scheduled scanning session auto-abandon job (every 10 minutes)');
 
+        // Schedule manifest status tracking job (every 15 minutes, 24/7)
+        const manifestStatusTrackingService = require('./manifestStatusTrackingService');
+        const manifestStatusJob = cron.schedule('*/15 * * * *', async () => {
+            try {
+                console.log('📊 Running manifest status tracking job...');
+                const result = await manifestStatusTrackingService.syncManifestStatuses();
+                if (result.success) {
+                    console.log(`✅ Manifest status sync completed: ${result.synced} synced, ${result.errors} errors`);
+                } else {
+                    console.error(`❌ Manifest status sync failed: ${result.error}`);
+                }
+            } catch (error) {
+                console.error('❌ Manifest status tracking job error:', error.message);
+            }
+        }, {
+            scheduled: true,
+            timezone: process.env.SYNC_TIMEZONE || 'America/Chicago'
+        });
+
+        this.jobs.set('manifestStatusTracking', manifestStatusJob);
+        scheduledCount++;
+        console.log('📅 Scheduled manifest status tracking job (every 15 minutes)');
+
         // Run batch promotion immediately on startup
         try {
             console.log('🚀 [SCHEDULER] Running initial batch promotion check on startup...');

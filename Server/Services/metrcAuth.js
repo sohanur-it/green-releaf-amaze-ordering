@@ -235,16 +235,45 @@ class MetrcAuthService {
             const response = await axios(requestConfig);
             return response;
         } catch (error) {
-            // If we get a 401, try to refresh token and retry once
-            if (error.response && error.response.status === 401) {
-                console.log('🔐 Received 401 error, attempting token refresh...');
+            // Enhanced error logging for debugging
+            if (error.response) {
+                const status = error.response.status;
+                const statusText = error.response.statusText;
+                const responseData = error.response.data;
                 
-                const refreshSuccess = await this.refreshAccessToken();
-                if (refreshSuccess) {
-                    // Retry the request with new token
-                    requestConfig.headers['Authorization'] = `Bearer ${this.accessToken}`;
-                    return await axios(requestConfig);
+                console.error(`❌ METRC API Error: ${status} ${statusText}`);
+                console.error(`   URL: ${config.url || requestConfig.url}`);
+                console.error(`   Method: ${config.method || requestConfig.method || 'GET'}`);
+                
+                if (responseData) {
+                    console.error(`   Response Data:`, JSON.stringify(responseData).substring(0, 500));
                 }
+                
+                // If we get a 401, try to refresh token and retry once
+                if (status === 401) {
+                    console.log('🔐 Received 401 error, attempting token refresh...');
+                    
+                    const refreshSuccess = await this.refreshAccessToken();
+                    if (refreshSuccess) {
+                        // Retry the request with new token
+                        requestConfig.headers['Authorization'] = `Bearer ${this.accessToken}`;
+                        console.log('🔐 Retrying request with refreshed token...');
+                        return await axios(requestConfig);
+                    }
+                }
+                
+                // For 500 errors, provide more context
+                if (status === 500) {
+                    console.error('❌ METRC API returned 500 Internal Server Error');
+                    console.error('   This may indicate a temporary METRC API issue');
+                    console.error('   The request will be retried on the next sync cycle');
+                }
+            } else if (error.request) {
+                console.error(`❌ METRC API Request Error: No response received`);
+                console.error(`   URL: ${config.url || requestConfig.url}`);
+                console.error(`   Error: ${error.message}`);
+            } else {
+                console.error(`❌ METRC API Error: ${error.message}`);
             }
             
             throw error;

@@ -195,18 +195,67 @@ class BackgroundSyncService {
       logger.info(`✅ Background sync completed: ${job.serviceName} (Job ID: ${job.id}) - ${recordsProcessed} records in ${executionTime}ms`);
 
     } catch (error) {
-      job.error = error.message;
+      // Extract detailed error information
+      let errorMessage = error.message;
+      let errorDetails = {
+        code: error.code,
+        signal: error.signal,
+        stdout: error.stdout || '',
+        stderr: error.stderr || ''
+      };
+
+      // Try to extract meaningful error from stderr or stdout
+      const errorOutput = error.stderr || error.stdout || '';
+      const errorLines = errorOutput.split('\n').filter(line => 
+        line.includes('❌') || 
+        line.includes('Error') || 
+        line.includes('Failed') ||
+        line.includes('500') ||
+        line.includes('HALTING')
+      );
+
+      if (errorLines.length > 0) {
+        // Use the most relevant error line
+        const relevantError = errorLines[errorLines.length - 1] || errorLines[0];
+        errorMessage = `${error.message} | Script Error: ${relevantError}`;
+      } else if (error.stderr) {
+        // Fall back to last line of stderr
+        const stderrLines = error.stderr.split('\n').filter(line => line.trim().length > 0);
+        if (stderrLines.length > 0) {
+          errorMessage = `${error.message} | Script Output: ${stderrLines[stderrLines.length - 1]}`;
+        }
+      } else if (error.stdout) {
+        // Check stdout for error messages
+        const stdoutLines = error.stdout.split('\n').filter(line => 
+          line.includes('❌') || line.includes('Error') || line.includes('Failed')
+        );
+        if (stdoutLines.length > 0) {
+          errorMessage = `${error.message} | Script Output: ${stdoutLines[stdoutLines.length - 1]}`;
+        }
+      }
+
+      job.error = errorMessage;
       job.status = 'failed';
       job.completedAt = new Date();
+      job.result = {
+        success: false,
+        error: errorMessage,
+        errorDetails: errorDetails,
+        output: error.stdout || '',
+        stderr: error.stderr || ''
+      };
 
-      // Log job failed
+      // Log job failed with detailed error information
       await auditLogger.logAction({
         userId: job.userInfo.userId,
         action: `sync_${job.serviceName}_failed`,
         resourceType: 'SyncJob',
         resourceId: job.id,
         details: {
-          error: error.message,
+          error: errorMessage,
+          errorDetails: errorDetails,
+          scriptOutput: error.stdout ? error.stdout.substring(0, 1000) : '', // Limit size
+          scriptError: error.stderr ? error.stderr.substring(0, 1000) : '', // Limit size
           triggeredBy: job.userInfo.triggeredBy,
           userId: job.userInfo.userId,
           username: job.userInfo.username,
@@ -216,7 +265,19 @@ class BackgroundSyncService {
         sourceIp: job.req.ip
       });
 
-      logger.error(`❌ Background sync failed: ${job.serviceName} (Job ID: ${job.id}) - ${error.message}`);
+      logger.error(`❌ Background sync failed: ${job.serviceName} (Job ID: ${job.id})`);
+      logger.error(`   Error: ${errorMessage}`);
+      if (error.stderr) {
+        logger.error(`   Stderr: ${error.stderr.substring(0, 500)}`);
+      }
+      if (error.stdout) {
+        const errorLines = error.stdout.split('\n').filter(line => 
+          line.includes('❌') || line.includes('Error') || line.includes('Failed')
+        );
+        if (errorLines.length > 0) {
+          logger.error(`   Script Errors: ${errorLines.join('; ')}`);
+        }
+      }
     } finally {
       // Remove from running jobs
       this.runningJobs.delete(job.id);
