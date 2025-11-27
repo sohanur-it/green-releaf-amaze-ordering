@@ -153,6 +153,70 @@ class UserManagementController {
     }
 
     /**
+     * Reject a pending user
+     * POST /api/v1/admin/users/:userId/reject
+     */
+    async rejectUser(req, res) {
+        try {
+            const { userId } = req.params;
+            const adminUserId = req.session.userId;
+            
+            // Get user details
+            const user = await UserModel.findById(userId);
+            if (!user) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'User not found'
+                });
+            }
+            
+            if (user.status !== 'pending') {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Only pending users can be rejected'
+                });
+            }
+            
+            // Reject the user
+            await UserModel.reject(userId);
+            
+            // Log the rejection with clear message
+            await auditLogger.logUserAction(
+                adminUserId,
+                'user_rejected',
+                'User',
+                userId,
+                {
+                    message: `User ${user.firstname} ${user.lastname} (${user.username})'s registration has been rejected`,
+                    username: user.username,
+                    email: user.email,
+                    previousStatus: user.status
+                },
+                'success'
+            );
+            
+            res.json({
+                success: true,
+                message: 'User rejected successfully',
+                data: {
+                    userId,
+                    username: user.username,
+                    status: 'rejected'
+                },
+                timestamp: new Date().toISOString()
+            });
+            
+        } catch (error) {
+            console.error('Error rejecting user:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to reject user',
+                message: error.message
+            });
+        }
+    }
+
+    /**
      * Revoke user access
      * POST /api/v1/admin/users/:userId/revoke
      */
@@ -170,10 +234,10 @@ class UserManagementController {
                 });
             }
             
-            if (user.status === 'revoked') {
+            if (user.status === 'revoked' || user.status === 'rejected') {
                 return res.status(400).json({
                     success: false,
-                    error: 'User is already revoked'
+                    error: 'User is already revoked or rejected'
                 });
             }
             

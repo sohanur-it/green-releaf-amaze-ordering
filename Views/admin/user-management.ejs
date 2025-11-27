@@ -247,9 +247,16 @@ function renderActiveUsers() {
 function createUserRow(user, showRoles = true) {
     const row = document.createElement('tr');
     
-    const statusBadge = user.status === 'active' ? 
-        '<span class="badge bg-success">Active</span>' : 
-        '<span class="badge bg-warning">Pending</span>';
+    let statusBadge;
+    if (user.status === 'active') {
+        statusBadge = '<span class="badge bg-success">Active</span>';
+    } else if (user.status === 'rejected') {
+        statusBadge = '<span class="badge bg-danger">Rejected</span>';
+    } else if (user.status === 'pending') {
+        statusBadge = '<span class="badge bg-warning">Pending</span>';
+    } else {
+        statusBadge = '<span class="badge bg-secondary">Inactive</span>';
+    }
     
     const rolesHtml = showRoles ? 
         `<div class="role-badges">${user.roles ? user.roles.map(role => `<span class="badge bg-primary me-1">${role.name}</span>`).join('') : '<span class="text-muted">No roles</span>'}</div>` : 
@@ -260,11 +267,16 @@ function createUserRow(user, showRoles = true) {
         `<div class="permissions-display">${user.permissions ? user.permissions.map(perm => `<span class="badge bg-secondary me-1" title="${perm.resource}: ${perm.action}">${perm.permission}</span>`).join('') : '<span class="text-muted">No permissions</span>'}</div>` : 
         '';
     
-    const actionsHtml = user.status === 'pending' ? 
-        `<button class="btn btn-sm btn-success me-1" onclick="approveUser(${user.id})">Approve</button>
-         <button class="btn btn-sm btn-danger" onclick="revokeUser(${user.id})">Reject</button>` :
-        `<button class="btn btn-sm btn-primary me-1 mb-2" onclick="openRoleModal(${user.id})">Assign Role</button>
-         <button class="btn btn-sm btn-warning me-1" onclick="revokeUser(${user.id})">Revoke</button>`;
+    let actionsHtml;
+    if (user.status === 'pending') {
+        actionsHtml = `<button class="btn btn-sm btn-success me-1" onclick="approveUser(${user.id})">Approve</button>
+                       <button class="btn btn-sm btn-danger" onclick="rejectUser(${user.id})">Reject</button>`;
+    } else if (user.status === 'rejected') {
+        actionsHtml = '<span class="text-muted">No actions available</span>';
+    } else {
+        actionsHtml = `<button class="btn btn-sm btn-primary me-1 mb-2" onclick="openRoleModal(${user.id})">Assign Role</button>
+                       <button class="btn btn-sm btn-warning me-1" onclick="revokeUser(${user.id})">Revoke</button>`;
+    }
     
     row.innerHTML = `
         <td>${user.username}</td>
@@ -299,6 +311,32 @@ async function approveUser(userId) {
         }
     } catch (error) {
         showAlert('Error approving user: ' + error.message, 'danger');
+    }
+}
+
+async function rejectUser(userId) {
+    if (!confirm('Are you sure you want to reject this user? This action cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/v1/admin/users/${userId}/reject`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showAlert('User rejected successfully', 'success');
+            loadUsers();
+        } else {
+            showAlert('Error rejecting user: ' + data.error, 'danger');
+        }
+    } catch (error) {
+        showAlert('Error rejecting user: ' + error.message, 'danger');
     }
 }
 

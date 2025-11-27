@@ -74,6 +74,16 @@ router.post('/:userId/approve',
 );
 
 /**
+ * POST /api/v1/admin/users/:userId/reject
+ * Reject a pending user
+ * Requires: admin.user.approve permission (same as approve)
+ */
+router.post('/:userId/reject',
+    requirePermission('admin.user.approve'),
+    userManagementController.rejectUser
+);
+
+/**
  * POST /api/v1/admin/users/:userId/revoke
  * Revoke user access
  * Requires: admin.user.revoke permission

@@ -207,28 +207,47 @@ function renderUsers() {
     filteredUsers.forEach(user => {
         const row = document.createElement('tr');
         
-        const statusClass = user.status === 'active' ? 'success' : user.status === 'pending' ? 'warning' : 'danger';
-        const statusText = user.status.charAt(0).toUpperCase() + user.status.slice(1);
+        let statusClass, statusText;
+        if (user.status === 'active') {
+            statusClass = 'success';
+            statusText = 'Active';
+        } else if (user.status === 'rejected') {
+            statusClass = 'danger';
+            statusText = 'Rejected';
+        } else if (user.status === 'pending') {
+            statusClass = 'warning';
+            statusText = 'Pending';
+        } else {
+            statusClass = 'secondary';
+            statusText = user.status ? user.status.charAt(0).toUpperCase() + user.status.slice(1) : 'Inactive';
+        }
         
         const rolesHtml = user.roles && user.roles.length > 0 ?
             user.roles.map(role => `<span class="permission-badge">${role.name}</span>`).join(' ') :
             '<span class="text-muted">No roles</span>';
         
-        const actionsHtml = user.status === 'pending' ? `
-            <button class="btn btn-sm btn-success me-1 mb-1" onclick="approveUser(${user.id})">
-                <i class="fas fa-check"></i> Approve
-            </button>
-            <button class="btn btn-sm btn-danger mb-1" onclick="revokeUser(${user.id})">
-                <i class="fas fa-times"></i> Reject
-            </button>
-        ` : `
-            <button class="btn btn-sm btn-primary me-1 mb-1" onclick="openRoleModal(${user.id})">
-                <i class="fas fa-user-cog"></i> Assign Role
-            </button>
-            <button class="btn btn-sm btn-warning mb-1" onclick="revokeUser(${user.id})">
-                <i class="fas fa-ban"></i> Revoke
-            </button>
-        `;
+        let actionsHtml;
+        if (user.status === 'pending') {
+            actionsHtml = `
+                <button class="btn btn-sm btn-success me-1 mb-1" onclick="approveUser(${user.id})">
+                    <i class="fas fa-check"></i> Approve
+                </button>
+                <button class="btn btn-sm btn-danger mb-1" onclick="rejectUser(${user.id})">
+                    <i class="fas fa-times"></i> Reject
+                </button>
+            `;
+        } else if (user.status === 'rejected') {
+            actionsHtml = '<span class="text-muted">No actions available</span>';
+        } else {
+            actionsHtml = `
+                <button class="btn btn-sm btn-primary me-1 mb-1" onclick="openRoleModal(${user.id})">
+                    <i class="fas fa-user-cog"></i> Assign Role
+                </button>
+                <button class="btn btn-sm btn-warning mb-1" onclick="revokeUser(${user.id})">
+                    <i class="fas fa-ban"></i> Revoke
+                </button>
+            `;
+        }
         
         row.innerHTML = `
             <td>
@@ -548,6 +567,42 @@ async function approveUser(userId) {
         console.error('Error:', error);
         notify.remove(loadingNotif);
         notify.error('Error approving user: ' + error.message);
+    }
+}
+
+async function rejectUser(userId) {
+    const user = allUsers.find(u => u.id === userId);
+    if (!user) return;
+    
+    const confirmed = await notify.confirm(
+        `Are you sure you want to reject ${user.firstname} ${user.lastname}? This action cannot be undone.`,
+        'Confirm Reject User'
+    );
+    
+    if (!confirmed) return;
+    
+    const loadingNotif = notify.loading(`Rejecting ${user.firstname} ${user.lastname}...`);
+    
+    try {
+        const response = await fetch(`/api/v1/admin/users/${userId}/reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        notify.remove(loadingNotif);
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            notify.success(`User ${user.firstname} ${user.lastname} has been rejected`, 4000);
+            refreshData();
+        } else {
+            notify.error('Failed to reject user: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error:', error);
+        notify.remove(loadingNotif);
+        notify.error('Error rejecting user: ' + error.message);
     }
 }
 

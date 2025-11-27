@@ -3,7 +3,57 @@
 const { query, pool } = require('../config/database');
 const bcrypt = require('bcrypt');
 
+// Cache for column existence check
+let isRejectedColumnExists = null;
+
 class UserModel {
+    /**
+     * Check if is_rejected column exists in users table
+     * @returns {Promise<boolean>}
+     */
+    static async checkIsRejectedColumnExists() {
+        if (isRejectedColumnExists !== null) {
+            return isRejectedColumnExists;
+        }
+        
+        try {
+            const result = await query(`
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name = 'users'
+                  AND column_name = 'is_rejected'
+            `);
+            isRejectedColumnExists = result.rows.length > 0;
+            return isRejectedColumnExists;
+        } catch (error) {
+            console.error('Error checking is_rejected column:', error);
+            isRejectedColumnExists = false;
+            return false;
+        }
+    }
+    
+    /**
+     * Ensure is_rejected column exists
+     */
+    static async ensureIsRejectedColumn() {
+        const exists = await this.checkIsRejectedColumnExists();
+        if (exists) {
+            return;
+        }
+        
+        try {
+            await query(`
+                ALTER TABLE users 
+                ADD COLUMN IF NOT EXISTS is_rejected BOOLEAN DEFAULT false
+            `);
+            isRejectedColumnExists = true;
+        } catch (error) {
+            console.error('Error creating is_rejected column:', error);
+            // Don't throw, just mark as not existing
+            isRejectedColumnExists = false;
+        }
+    }
     /**
      * Create a new user
      * @param {Object} userData - User data
@@ -53,18 +103,38 @@ class UserModel {
      * @returns {Promise<Object|null>} User or null
      */
     static async findById(id) {
-        const sql = `
-            SELECT id, username, first_name as firstname, last_name as lastname, 
-                   email, password_hash, 
-                   CASE 
-                       WHEN is_active = true THEN 'active'
-                       WHEN is_active = false THEN 'pending'
-                       ELSE 'inactive'
-                   END as status,
-                   COALESCE(is_superadmin, is_admin, false) as is_superuser, 
-                   created_at, last_login, updated_at
-            FROM users WHERE id = $1
-        `;
+        const columnExists = await this.checkIsRejectedColumnExists();
+        
+        let sql;
+        if (columnExists) {
+            sql = `
+                SELECT id, username, first_name as firstname, last_name as lastname, 
+                       email, password_hash, 
+                       CASE 
+                           WHEN is_active = true THEN 'active'
+                           WHEN is_rejected = true THEN 'rejected'
+                           WHEN is_active = false THEN 'pending'
+                           ELSE 'inactive'
+                       END as status,
+                       COALESCE(is_superadmin, is_admin, false) as is_superuser, 
+                       created_at, last_login, updated_at
+                FROM users WHERE id = $1
+            `;
+        } else {
+            sql = `
+                SELECT id, username, first_name as firstname, last_name as lastname, 
+                       email, password_hash, 
+                       CASE 
+                           WHEN is_active = true THEN 'active'
+                           WHEN is_active = false THEN 'pending'
+                           ELSE 'inactive'
+                       END as status,
+                       COALESCE(is_superadmin, is_admin, false) as is_superuser, 
+                       created_at, last_login, updated_at
+                FROM users WHERE id = $1
+            `;
+        }
+        
         const result = await query(sql, [id]);
         return result.rows[0] || null;
     }
@@ -75,18 +145,38 @@ class UserModel {
      * @returns {Promise<Object|null>} User or null
      */
     static async findByUsername(username) {
-        const sql = `
-            SELECT id, username, first_name as firstname, last_name as lastname, 
-                   email, password_hash, 
-                   CASE 
-                       WHEN is_active = true THEN 'active'
-                       WHEN is_active = false THEN 'pending'
-                       ELSE 'inactive'
-                   END as status,
-                   COALESCE(is_superadmin, is_admin, false) as is_superuser, 
-                   created_at, last_login, updated_at
-            FROM users WHERE username = $1
-        `;
+        const columnExists = await this.checkIsRejectedColumnExists();
+        
+        let sql;
+        if (columnExists) {
+            sql = `
+                SELECT id, username, first_name as firstname, last_name as lastname, 
+                       email, password_hash, 
+                       CASE 
+                           WHEN is_active = true THEN 'active'
+                           WHEN is_rejected = true THEN 'rejected'
+                           WHEN is_active = false THEN 'pending'
+                           ELSE 'inactive'
+                       END as status,
+                       COALESCE(is_superadmin, is_admin, false) as is_superuser, 
+                       created_at, last_login, updated_at
+                FROM users WHERE username = $1
+            `;
+        } else {
+            sql = `
+                SELECT id, username, first_name as firstname, last_name as lastname, 
+                       email, password_hash, 
+                       CASE 
+                           WHEN is_active = true THEN 'active'
+                           WHEN is_active = false THEN 'pending'
+                           ELSE 'inactive'
+                       END as status,
+                       COALESCE(is_superadmin, is_admin, false) as is_superuser, 
+                       created_at, last_login, updated_at
+                FROM users WHERE username = $1
+            `;
+        }
+        
         const result = await query(sql, [username]);
         return result.rows[0] || null;
     }
@@ -97,18 +187,38 @@ class UserModel {
      * @returns {Promise<Object|null>} User or null
      */
     static async findByEmail(email) {
-        const sql = `
-            SELECT id, username, first_name as firstname, last_name as lastname, 
-                   email, password_hash, 
-                   CASE 
-                       WHEN is_active = true THEN 'active'
-                       WHEN is_active = false THEN 'pending'
-                       ELSE 'inactive'
-                   END as status,
-                   COALESCE(is_superadmin, is_admin, false) as is_superuser, 
-                   created_at, last_login, updated_at
-            FROM users WHERE email = $1
-        `;
+        const columnExists = await this.checkIsRejectedColumnExists();
+        
+        let sql;
+        if (columnExists) {
+            sql = `
+                SELECT id, username, first_name as firstname, last_name as lastname, 
+                       email, password_hash, 
+                       CASE 
+                           WHEN is_active = true THEN 'active'
+                           WHEN is_rejected = true THEN 'rejected'
+                           WHEN is_active = false THEN 'pending'
+                           ELSE 'inactive'
+                       END as status,
+                       COALESCE(is_superadmin, is_admin, false) as is_superuser, 
+                       created_at, last_login, updated_at
+                FROM users WHERE email = $1
+            `;
+        } else {
+            sql = `
+                SELECT id, username, first_name as firstname, last_name as lastname, 
+                       email, password_hash, 
+                       CASE 
+                           WHEN is_active = true THEN 'active'
+                           WHEN is_active = false THEN 'pending'
+                           ELSE 'inactive'
+                       END as status,
+                       COALESCE(is_superadmin, is_admin, false) as is_superuser, 
+                       created_at, last_login, updated_at
+                FROM users WHERE email = $1
+            `;
+        }
+        
         const result = await query(sql, [email]);
         return result.rows[0] || null;
     }
@@ -119,30 +229,66 @@ class UserModel {
      * @returns {Promise<Array>} Array of users
      */
     static async getAll(status = null) {
-        let sql = `
-            SELECT 
-                id, 
-                username, 
-                first_name as firstname, 
-                last_name as lastname, 
-                email, 
-                CASE 
-                    WHEN is_active = true THEN 'active'
-                    WHEN is_active = false THEN 'pending'
-                    ELSE 'inactive'
-                END as status,
-                COALESCE(is_superadmin, is_admin, false) as is_superuser, 
-                created_at, 
-                last_login 
-            FROM users
-        `;
+        const columnExists = await this.checkIsRejectedColumnExists();
+        
+        let sql;
+        if (columnExists) {
+            sql = `
+                SELECT 
+                    id, 
+                    username, 
+                    first_name as firstname, 
+                    last_name as lastname, 
+                    email, 
+                    CASE 
+                        WHEN is_active = true THEN 'active'
+                        WHEN is_rejected = true THEN 'rejected'
+                        WHEN is_active = false THEN 'pending'
+                        ELSE 'inactive'
+                    END as status,
+                    COALESCE(is_superadmin, is_admin, false) as is_superuser, 
+                    created_at, 
+                    last_login 
+                FROM users
+            `;
+        } else {
+            sql = `
+                SELECT 
+                    id, 
+                    username, 
+                    first_name as firstname, 
+                    last_name as lastname, 
+                    email, 
+                    CASE 
+                        WHEN is_active = true THEN 'active'
+                        WHEN is_active = false THEN 'pending'
+                        ELSE 'inactive'
+                    END as status,
+                    COALESCE(is_superadmin, is_admin, false) as is_superuser, 
+                    created_at, 
+                    last_login 
+                FROM users
+            `;
+        }
+        
         const params = [];
         
         if (status) {
             if (status === 'active') {
                 sql += ' WHERE is_active = true';
             } else if (status === 'pending') {
-                sql += ' WHERE is_active = false';
+                if (columnExists) {
+                    sql += ' WHERE is_active = false AND is_rejected = false';
+                } else {
+                    sql += ' WHERE is_active = false';
+                }
+            } else if (status === 'rejected') {
+                if (columnExists) {
+                    sql += ' WHERE is_rejected = true';
+                } else {
+                    // If column doesn't exist, no rejected users yet
+                    sql += ' WHERE 1 = 0';
+                }
             } else if (status === 'inactive') {
                 sql += ' WHERE is_active = false';
             }
@@ -159,25 +305,52 @@ class UserModel {
      * @returns {Promise<Array>} Array of pending users
      */
     static async getPending() {
-        const sql = `
-            SELECT 
-                id, 
-                username, 
-                first_name as firstname, 
-                last_name as lastname, 
-                email, 
-                CASE 
-                    WHEN is_active = true THEN 'active'
-                    WHEN is_active = false THEN 'pending'
-                    ELSE 'inactive'
-                END as status,
-                COALESCE(is_superadmin, is_admin, false) as is_superuser, 
-                created_at, 
-                last_login 
-            FROM users 
-            WHERE is_active = false
-            ORDER BY created_at DESC
-        `;
+        const columnExists = await this.checkIsRejectedColumnExists();
+        
+        let sql;
+        if (columnExists) {
+            sql = `
+                SELECT 
+                    id, 
+                    username, 
+                    first_name as firstname, 
+                    last_name as lastname, 
+                    email, 
+                    CASE 
+                        WHEN is_active = true THEN 'active'
+                        WHEN is_rejected = true THEN 'rejected'
+                        WHEN is_active = false THEN 'pending'
+                        ELSE 'inactive'
+                    END as status,
+                    COALESCE(is_superadmin, is_admin, false) as is_superuser, 
+                    created_at, 
+                    last_login 
+                FROM users 
+                WHERE is_active = false AND is_rejected = false
+                ORDER BY created_at DESC
+            `;
+        } else {
+            sql = `
+                SELECT 
+                    id, 
+                    username, 
+                    first_name as firstname, 
+                    last_name as lastname, 
+                    email, 
+                    CASE 
+                        WHEN is_active = true THEN 'active'
+                        WHEN is_active = false THEN 'pending'
+                        ELSE 'inactive'
+                    END as status,
+                    COALESCE(is_superadmin, is_admin, false) as is_superuser, 
+                    created_at, 
+                    last_login 
+                FROM users 
+                WHERE is_active = false
+                ORDER BY created_at DESC
+            `;
+        }
+        
         const result = await query(sql);
         return result.rows;
     }
@@ -585,7 +758,7 @@ class UserModel {
     }
 
     /**
-     * Revoke user
+     * Revoke user (for active users)
      */
     static async revoke(userId) {
         const sql = `
@@ -604,6 +777,30 @@ class UserModel {
             console.error('Database query error:', error);
             throw error;
         }
+    }
+
+    /**
+     * Reject user (for pending users - sets status to rejected)
+     */
+    static async reject(userId) {
+        // Ensure is_rejected column exists
+        await this.ensureIsRejectedColumn();
+        
+        // Update user to set is_rejected = true and is_active = false
+        const sql = `
+            UPDATE users
+            SET is_active = false, is_rejected = true, updated_at = NOW()
+            WHERE id = $1 AND is_active = false
+            RETURNING id, username, first_name as firstname, last_name as lastname, email, 
+                     'rejected' as status, 
+                     COALESCE(is_superadmin, is_admin, false) as is_superuser, created_at
+        `;
+        
+        const result = await query(sql, [userId]);
+        if (result.rows.length > 0) {
+            result.rows[0].status = 'rejected';
+        }
+        return result.rows[0];
     }
 }
 
