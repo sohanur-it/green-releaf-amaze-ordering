@@ -222,6 +222,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <td>${location.name || ''}</td>
             <td>${address}</td>
             <td>${location.state_license || 'N/A'}</td>
+            <td>${location.delivery_zone || ''}</td>
             <td><code>${location.access_code || ''}</code></td>
             <td class="table-actions">
                 <button type="button" class="action-btn action-btn--primary" data-action="edit-location"
@@ -232,7 +233,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     data-location-city="${location.city || ''}"
                     data-location-state="${location.state || ''}"
                     data-location-zip="${location.zip || ''}"
-                    data-location-state_license="${location.state_license || ''}">
+                    data-location-state_license="${location.state_license || ''}"
+                    data-location-delivery_zone="${location.delivery_zone || ''}">
                     Edit
                 </button>
                 ${limitsButton}
@@ -517,6 +519,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 locationForm.setAttribute('data-action', `/api/crm/locations/${locationId}`);
                 locationIdField.value = locationId;
 
+                // Check if user is fulfillment user (read-only mode)
+                const isFulfillmentUser = window.isFulfillmentUser === true || window.isFulfillmentUser === 'true';
+                
+                // Populate all fields
                 document.getElementById('locationName').value = target.dataset.locationName || '';
                 document.getElementById('locationLineOne').value = target.dataset.locationLine_one || '';
                 document.getElementById('locationLineTwo').value = target.dataset.locationLine_two || '';
@@ -525,6 +531,47 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('locationZip').value = target.dataset.locationZip || '';
                 document.getElementById('locationLicense').value = target.dataset.locationState_license || '';
                 document.getElementById('locationDeliveryZone').value = target.dataset.locationDelivery_zone || '';
+                
+                // Make all fields except delivery_zone read-only for fulfillment users
+                if (isFulfillmentUser) {
+                    document.getElementById('locationName').readOnly = true;
+                    document.getElementById('locationLineOne').readOnly = true;
+                    document.getElementById('locationLineTwo').readOnly = true;
+                    document.getElementById('locationCity').readOnly = true;
+                    document.getElementById('locationState').readOnly = true;
+                    document.getElementById('locationZip').readOnly = true;
+                    document.getElementById('locationLicense').readOnly = true;
+                    // locationDeliveryZone remains editable
+                    
+                    // Show read-only notice
+                    let notice = document.getElementById('locationFulfillmentNotice');
+                    if (!notice) {
+                        notice = document.createElement('div');
+                        notice.id = 'locationFulfillmentNotice';
+                        notice.style.cssText = 'padding: 1rem; background: #e3f2fd; color: #1976d2; border-radius: 4px; margin-bottom: 1rem; font-size: 0.9rem;';
+                        notice.innerHTML = '<i class="fas fa-info-circle"></i> <strong>Read-Only Mode:</strong> Fulfillment users can only edit the Delivery Zone field.';
+                        const modalBody = document.querySelector('#locationModal .modal-body');
+                        if (modalBody) {
+                            modalBody.insertBefore(notice, modalBody.firstChild);
+                        }
+                    }
+                    notice.style.display = 'block';
+                } else {
+                    // Remove read-only restrictions for non-fulfillment users
+                    document.getElementById('locationName').readOnly = false;
+                    document.getElementById('locationLineOne').readOnly = false;
+                    document.getElementById('locationLineTwo').readOnly = false;
+                    document.getElementById('locationCity').readOnly = false;
+                    document.getElementById('locationState').readOnly = false;
+                    document.getElementById('locationZip').readOnly = false;
+                    document.getElementById('locationLicense').readOnly = false;
+                    
+                    // Hide notice if it exists
+                    const notice = document.getElementById('locationFulfillmentNotice');
+                    if (notice) {
+                        notice.style.display = 'none';
+                    }
+                }
 
                 // Show delivery windows section for existing locations
                 const deliveryWindowsSection = document.getElementById('deliveryWindowsSection');

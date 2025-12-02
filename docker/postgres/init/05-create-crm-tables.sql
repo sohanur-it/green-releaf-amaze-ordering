@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS "ORDERS-buyers" (
     name VARCHAR(255) NOT NULL,
     website_url VARCHAR(500),
     buyer_type VARCHAR(50),
+    zone VARCHAR(100),
     fk_stage_id INTEGER REFERENCES "ORDERS-buyer_stages"(entry_id),
     fk_deal_flow_id INTEGER REFERENCES "ORDERS-deal_flows"(entry_id),
     source VARCHAR(50) DEFAULT 'INTERNAL',

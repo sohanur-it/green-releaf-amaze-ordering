@@ -553,6 +553,83 @@ function showIssueModal() {
     const newForm = form.cloneNode(true);
     form.parentNode.replaceChild(newForm, form);
     document.getElementById('issue-form').addEventListener('submit', handleIssueReport);
+    
+    // Populate batch selection
+    populateBatchSelection();
+}
+
+/**
+ * Populate batch selection in issue modal
+ */
+function populateBatchSelection() {
+    const container = document.getElementById('batch-selection-container');
+    const reasonsContainer = document.getElementById('batch-reasons-container');
+    
+    if (!scanningProgress || !scanningProgress.line_items || scanningProgress.line_items.length === 0) {
+        container.innerHTML = '<p style="color: var(--text-light); font-size: 0.875rem; margin: 0.5rem 0;">No line items available</p>';
+        return;
+    }
+    
+    container.innerHTML = scanningProgress.line_items.map(item => `
+        <div style="padding: 0.5rem; border-bottom: 1px solid #eee;">
+            <label style="display: flex; align-items: center; cursor: pointer;">
+                <input type="checkbox" 
+                       class="batch-checkbox" 
+                       data-line-item-id="${item.line_item_id}"
+                       data-batch-name="${item.batch_name}"
+                       data-product-name="${item.product_name}"
+                       onchange="toggleBatchReason(${item.line_item_id})"
+                       style="margin-right: 0.5rem;">
+                <div style="flex: 1;">
+                    <strong>${item.product_name}</strong>
+                    <div style="font-size: 0.875rem; color: var(--text-light);">Batch: ${item.batch_name}</div>
+                </div>
+            </label>
+        </div>
+    `).join('');
+    
+    reasonsContainer.innerHTML = '';
+}
+
+/**
+ * Toggle batch reason field when batch is selected/deselected
+ */
+function toggleBatchReason(lineItemId) {
+    const checkbox = document.querySelector(`.batch-checkbox[data-line-item-id="${lineItemId}"]`);
+    const reasonsContainer = document.getElementById('batch-reasons-container');
+    const batchName = checkbox.getAttribute('data-batch-name');
+    const productName = checkbox.getAttribute('data-product-name');
+    
+    if (checkbox.checked) {
+        // Add reason field for this batch
+        const reasonDiv = document.createElement('div');
+        reasonDiv.id = `batch-reason-${lineItemId}`;
+        reasonDiv.style.marginBottom = '1rem';
+        reasonDiv.style.padding = '1rem';
+        reasonDiv.style.background = '#f9fafb';
+        reasonDiv.style.borderRadius = '6px';
+        reasonDiv.style.border = '1px solid #e5e7eb';
+        reasonDiv.innerHTML = `
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">
+                Reason for ${productName} (${batchName}) <span style="color: #ef4444;">*</span>
+            </label>
+            <textarea 
+                class="batch-reason" 
+                data-line-item-id="${lineItemId}"
+                required 
+                rows="3" 
+                placeholder="Describe the issue with this batch..." 
+                style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; resize: vertical;">
+            </textarea>
+        `;
+        reasonsContainer.appendChild(reasonDiv);
+    } else {
+        // Remove reason field
+        const reasonDiv = document.getElementById(`batch-reason-${lineItemId}`);
+        if (reasonDiv) {
+            reasonDiv.remove();
+        }
+    }
 }
 
 /**
@@ -779,21 +856,51 @@ async function handleIssueReport(e) {
     e.preventDefault();
 
     const issueType = document.getElementById('issue-type').value;
-    const lineItemId = document.getElementById('issue-line-item').value;
-    const description = document.getElementById('issue-description').value;
-
-    if (!description.trim()) {
-        alert('Please provide a description');
+    const generalDescription = document.getElementById('issue-description').value;
+    
+    // Get all selected batches
+    const selectedBatches = Array.from(document.querySelectorAll('.batch-checkbox:checked'));
+    
+    if (selectedBatches.length === 0) {
+        alert('Please select at least one batch');
         return;
+    }
+    
+    // Validate that all selected batches have reasons
+    const issues = [];
+    let allReasonsValid = true;
+    
+    for (const checkbox of selectedBatches) {
+        const lineItemId = parseInt(checkbox.getAttribute('data-line-item-id'));
+        const reasonField = document.querySelector(`.batch-reason[data-line-item-id="${lineItemId}"]`);
+        
+        if (!reasonField || !reasonField.value.trim()) {
+            allReasonsValid = false;
+            reasonField.style.borderColor = '#ef4444';
+            reasonField.focus();
+            break;
+        } else {
+            reasonField.style.borderColor = '#ddd';
+        }
+        
+        issues.push({
+            type: issueType,
+            line_item_id: lineItemId,
+            description: reasonField.value.trim()
+        });
+    }
+    
+    if (!allReasonsValid) {
+        alert('Please provide a reason for each selected batch');
+        return;
+    }
+    
+    // Add general description to the first issue if provided
+    if (generalDescription.trim() && issues.length > 0) {
+        issues[0].description += `\n\nGeneral Notes: ${generalDescription.trim()}`;
     }
 
     try {
-        const issues = [{
-            type: issueType,
-            line_item_id: lineItemId ? parseInt(lineItemId) : null,
-            description: description.trim()
-        }];
-
         const response = await fetch('/api/v1/fulfillment/issues/report', {
             method: 'POST',
             headers: {
@@ -811,7 +918,7 @@ async function handleIssueReport(e) {
             throw new Error(data.error || 'Failed to report issue');
         }
 
-        alert('Issue reported successfully. Order returned to sales for resolution.');
+        alert(`Issue reported successfully for ${issues.length} batch(es). Order returned to sales for resolution.`);
         window.location.href = '/admin/fulfillment/queue';
 
     } catch (error) {

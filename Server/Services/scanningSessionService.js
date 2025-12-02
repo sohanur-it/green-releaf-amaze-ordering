@@ -48,6 +48,9 @@ class ScanningSessionService {
 
             if (inv.status !== 'Fulfillment_Accepted') {
                 await client.query('ROLLBACK');
+                if (inv.status === 'Fulfillment_Issue') {
+                    throw new Error('Cannot start scanning - invoice has an active issue. Please resolve the issue first.');
+                }
                 throw new Error(`Cannot start scanning - invoice status is ${inv.status}`);
             }
 

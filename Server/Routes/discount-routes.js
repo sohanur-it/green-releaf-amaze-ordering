@@ -8,14 +8,35 @@ const express = require('express');
 const router = express.Router();
 const discountService = require('../Services/discountService');
 const discountBuilderService = require('../Services/discountBuilderService');
-const { requireAuth: auth } = require('../Middleware/auth');
+const { requireAuth: auth, requireRole } = require('../Middleware/auth');
 const { auditMiddleware } = require('../Middleware/auditMiddleware');
 const { query } = require('../config/database');
+
+// Block fulfillment users from all discount routes
+const blockFulfillmentUsers = (req, res, next) => {
+    const userRoles = req.session?.roles || [];
+    const normalizeRole = (role) => role.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+    const isFulfillmentUser = userRoles.some(role => {
+        const normalized = normalizeRole(role);
+        return normalized === 'fulfillment team' || 
+               normalized === 'fulfillment worker' || 
+               normalized === 'fulfillment admin';
+    });
+    
+    if (isFulfillmentUser) {
+        return res.status(403).json({ 
+            success: false,
+            error: 'Forbidden',
+            message: 'Fulfillment users do not have access to discount management'
+        });
+    }
+    next();
+};
 
 /**
  * Discount Builder Endpoints
  */
-router.get('/codes', auth, async (req, res) => {
+router.get('/codes', auth, blockFulfillmentUsers, async (req, res) => {
     try {
         const codes = await discountBuilderService.listDiscountCodes();
         res.json({ success: true, discounts: codes });
@@ -25,7 +46,7 @@ router.get('/codes', auth, async (req, res) => {
     }
 });
 
-router.post('/codes', auth, auditMiddleware, async (req, res) => {
+router.post('/codes', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         const userId = req.session.userId || req.user?.id;
         const required = ['display_name', 'code_name'];
@@ -41,7 +62,7 @@ router.post('/codes', auth, auditMiddleware, async (req, res) => {
     }
 });
 
-router.get('/codes/:id', auth, async (req, res) => {
+router.get('/codes/:id', auth, blockFulfillmentUsers, async (req, res) => {
     try {
         const code = await discountBuilderService.getDiscountCodeById(parseInt(req.params.id, 10));
         if (!code) {
@@ -54,7 +75,7 @@ router.get('/codes/:id', auth, async (req, res) => {
     }
 });
 
-router.put('/codes/:id', auth, auditMiddleware, async (req, res) => {
+router.put('/codes/:id', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         const userId = req.session.userId || req.user?.id;
         const discount = await discountBuilderService.updateDiscountCode(parseInt(req.params.id, 10), req.body, userId);
@@ -65,7 +86,7 @@ router.put('/codes/:id', auth, auditMiddleware, async (req, res) => {
     }
 });
 
-router.delete('/codes/:id', auth, auditMiddleware, async (req, res) => {
+router.delete('/codes/:id', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         await discountBuilderService.deleteDiscountCode(parseInt(req.params.id, 10));
         res.json({ success: true });
@@ -75,7 +96,7 @@ router.delete('/codes/:id', auth, auditMiddleware, async (req, res) => {
     }
 });
 
-router.post('/codes/:id/rules', auth, auditMiddleware, async (req, res) => {
+router.post('/codes/:id/rules', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         const required = ['applies_to', 'action', 'value'];
         const missing = required.filter((field) => req.body[field] === undefined || req.body[field] === null);
@@ -90,7 +111,7 @@ router.post('/codes/:id/rules', auth, auditMiddleware, async (req, res) => {
     }
 });
 
-router.put('/rules/:ruleId', auth, auditMiddleware, async (req, res) => {
+router.put('/rules/:ruleId', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         const rule = await discountBuilderService.updateRule(parseInt(req.params.ruleId, 10), req.body);
         res.json({ success: true, rule });
@@ -100,7 +121,7 @@ router.put('/rules/:ruleId', auth, auditMiddleware, async (req, res) => {
     }
 });
 
-router.delete('/rules/:ruleId', auth, auditMiddleware, async (req, res) => {
+router.delete('/rules/:ruleId', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         await discountBuilderService.deleteRule(parseInt(req.params.ruleId, 10));
         res.json({ success: true });
@@ -114,7 +135,7 @@ router.delete('/rules/:ruleId', auth, auditMiddleware, async (req, res) => {
  * Reorder rules for a discount
  * PUT /api/v1/discounts/codes/:id/rules/reorder
  */
-router.put('/codes/:id/rules/reorder', auth, auditMiddleware, async (req, res) => {
+router.put('/codes/:id/rules/reorder', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
         const ordering = Array.isArray(req.body.ordering) ? req.body.ordering : [];
@@ -126,7 +147,7 @@ router.put('/codes/:id/rules/reorder', auth, auditMiddleware, async (req, res) =
     }
 });
 
-router.post('/codes/:id/conflicts', auth, auditMiddleware, async (req, res) => {
+router.post('/codes/:id/conflicts', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         const conflictIds = Array.isArray(req.body.conflicts) ? req.body.conflicts : [];
         await discountBuilderService.updateConflicts(parseInt(req.params.id, 10), conflictIds);
@@ -137,7 +158,7 @@ router.post('/codes/:id/conflicts', auth, auditMiddleware, async (req, res) => {
     }
 });
 
-router.get('/buyers/:buyerId/assignments', auth, async (req, res) => {
+router.get('/buyers/:buyerId/assignments', auth, blockFulfillmentUsers, async (req, res) => {
     try {
         const assignments = await discountBuilderService.getBuyerAssignments(parseInt(req.params.buyerId, 10));
         res.json({ success: true, assignments });
@@ -147,7 +168,7 @@ router.get('/buyers/:buyerId/assignments', auth, async (req, res) => {
     }
 });
 
-router.post('/buyers/:buyerId/assignments', auth, auditMiddleware, async (req, res) => {
+router.post('/buyers/:buyerId/assignments', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         const userId = req.session.userId || req.user?.id;
         const { discount_id } = req.body;
@@ -166,7 +187,7 @@ router.post('/buyers/:buyerId/assignments', auth, auditMiddleware, async (req, r
     }
 });
 
-router.put('/buyers/:buyerId/assignments/reorder', auth, auditMiddleware, async (req, res) => {
+router.put('/buyers/:buyerId/assignments/reorder', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         const ordering = Array.isArray(req.body.ordering) ? req.body.ordering : [];
         await discountBuilderService.reorderAssignments(parseInt(req.params.buyerId, 10), ordering);
@@ -177,7 +198,7 @@ router.put('/buyers/:buyerId/assignments/reorder', auth, auditMiddleware, async 
     }
 });
 
-router.put('/buyers/:buyerId/assignments/:assignmentId', auth, auditMiddleware, async (req, res) => {
+router.put('/buyers/:buyerId/assignments/:assignmentId', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         const { priority, is_active } = req.body;
         const assignment = await discountBuilderService.updateAssignment(
@@ -191,7 +212,7 @@ router.put('/buyers/:buyerId/assignments/:assignmentId', auth, auditMiddleware, 
     }
 });
 
-router.delete('/buyers/:buyerId/assignments/:assignmentId', auth, auditMiddleware, async (req, res) => {
+router.delete('/buyers/:buyerId/assignments/:assignmentId', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         await discountBuilderService.removeAssignment(parseInt(req.params.assignmentId, 10));
         res.json({ success: true });
@@ -201,7 +222,7 @@ router.delete('/buyers/:buyerId/assignments/:assignmentId', auth, auditMiddlewar
     }
 });
 
-router.post('/simulate', auth, async (req, res) => {
+router.post('/simulate', auth, blockFulfillmentUsers, async (req, res) => {
     try {
         const result = await discountBuilderService.simulatePricing(req.body || {});
         res.json({ success: true, result });
@@ -215,7 +236,7 @@ router.post('/simulate', auth, async (req, res) => {
  * Helper: list products for a buyer (first location fallback)
  * GET /api/v1/discounts/buyers/:buyerId/products?limit=50
  */
-router.get('/buyers/:buyerId/products', auth, async (req, res) => {
+router.get('/buyers/:buyerId/products', auth, blockFulfillmentUsers, async (req, res) => {
     try {
         const buyerId = parseInt(req.params.buyerId, 10);
         const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
@@ -252,7 +273,7 @@ router.get('/buyers/:buyerId/products', auth, async (req, res) => {
  * Get all standing discounts for a location
  * GET /api/v1/discounts/standing?location_id=123
  */
-router.get('/standing', auth, async (req, res) => {
+router.get('/standing', auth, blockFulfillmentUsers, async (req, res) => {
     try {
         const { location_id } = req.query;
         
@@ -276,7 +297,7 @@ router.get('/standing', auth, async (req, res) => {
  * Create a new standing discount
  * POST /api/v1/discounts/standing
  */
-router.post('/standing', auth, auditMiddleware, async (req, res) => {
+router.post('/standing', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         const userId = req.session.userId || req.user?.id;
         const discountData = req.body;
@@ -311,7 +332,7 @@ router.post('/standing', auth, auditMiddleware, async (req, res) => {
  * Update a standing discount
  * PUT /api/v1/discounts/standing/:id
  */
-router.put('/standing/:id', auth, auditMiddleware, async (req, res) => {
+router.put('/standing/:id', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
         const discountData = req.body;
@@ -338,7 +359,7 @@ router.put('/standing/:id', auth, auditMiddleware, async (req, res) => {
  * Delete a standing discount
  * DELETE /api/v1/discounts/standing/:id
  */
-router.delete('/standing/:id', auth, auditMiddleware, async (req, res) => {
+router.delete('/standing/:id', auth, blockFulfillmentUsers, auditMiddleware, async (req, res) => {
     try {
         const { id } = req.params;
         

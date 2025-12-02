@@ -358,6 +358,15 @@ class InvoiceController {
             const isAdmin = isSuperuser || userRoleNames.some(r => r.toLowerCase() === 'administrator');
             const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
             
+            // Check if user is fulfillment user (normalize role names for comparison)
+            const normalizeRole = (role) => role ? role.toLowerCase().replace(/[\s_-]+/g, ' ').trim() : '';
+            const isFulfillmentUser = userRoleNames.some(r => {
+                const normalized = normalizeRole(r);
+                return normalized === 'fulfillment team' || 
+                       normalized === 'fulfillment worker' || 
+                       normalized === 'fulfillment admin';
+            });
+            
             // Use LEFT JOIN to show invoices even if buyer/location is missing
             let queryStr = `
                 SELECT 
@@ -487,6 +496,7 @@ class InvoiceController {
                 isAdmin: isAdmin,
                 isSalesAdmin: isSalesAdmin,
                 isSalesRep: isSalesRep,
+                isFulfillmentUser: isFulfillmentUser, // Pass fulfillment flag for read-only mode
                 websocketPort
             });
         } catch (error) {
@@ -966,9 +976,17 @@ class InvoiceController {
             const userRoles = await UserModel.getUserRoles(userId);
             const userRoleNames = userRoles.map(r => r.name || r.role_name).filter(Boolean);
             
+            const normalizeRole = (role) => role.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+            const isFulfillmentUser = userRoleNames.some(r => {
+                const normalized = normalizeRole(r);
+                return normalized === 'fulfillment team' || 
+                       normalized === 'fulfillment worker' || 
+                       normalized === 'fulfillment admin';
+            });
+            
             const isAdmin = isSuperuser || userRoleNames.some(r => r.toLowerCase() === 'administrator');
             const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
-            const isSalesRep = !isAdmin && !isSalesAdmin && userRoleNames.some(r => r.toLowerCase() === 'sales representative');
+            const isSalesRep = !isAdmin && !isSalesAdmin && !isFulfillmentUser && userRoleNames.some(r => r.toLowerCase() === 'sales representative');
             
             // Get invoice with location info
             const invoice = await query(`
@@ -1039,6 +1057,7 @@ class InvoiceController {
                 isAdmin: isAdmin,
                 isSalesAdmin: isSalesAdmin,
                 isSalesRep: isSalesRep,
+                isFulfillmentUser: isFulfillmentUser, // Pass fulfillment flag for read-only mode
                 userRoles: userRoleNames
             });
         } catch (error) {

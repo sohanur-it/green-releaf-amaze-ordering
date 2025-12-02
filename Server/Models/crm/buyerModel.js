@@ -15,6 +15,7 @@ const Buyer = {
                 b.name,
                 b.website_url,
                 b.buyer_type,
+                b.zone,
                 s.name AS stage_name,
                 s.color AS stage_color,
                 df.name AS deal_flow_name,
@@ -172,21 +173,21 @@ const Buyer = {
 
     //this function actually creates the new buyer in the db
     async create(buyerData) {
-        const { name, website_url, buyer_type, fk_stage_id, fk_deal_flow_id } = buyerData;
+        const { name, website_url, buyer_type, zone, fk_stage_id, fk_deal_flow_id } = buyerData;
 
         // the query to insert a new row.
         // the RETURNING entry_id part is clutch, it gives us back the new id
         // so we can redirect the user right to the new profile page.
         const query = `
             INSERT INTO "ORDERS-buyers"
-            (name, website_url, buyer_type, fk_stage_id, fk_deal_flow_id, source, created_at, updated_at)
+            (name, website_url, buyer_type, zone, fk_stage_id, fk_deal_flow_id, source, created_at, updated_at)
             VALUES
-                ($1, $2, $3, $4, $5, 'INTERNAL', NOW(), NOW())
+                ($1, $2, $3, $4, $5, $6, 'INTERNAL', NOW(), NOW())
             RETURNING entry_id;
         `;
 
         try {
-            const { rows } = await db.query(query, [name, website_url, buyer_type, fk_stage_id, fk_deal_flow_id]);
+            const { rows } = await db.query(query, [name, website_url, buyer_type, zone || null, fk_stage_id, fk_deal_flow_id]);
             return rows[0]; // returns { entry_id: new_id }
         } catch (err) {
             console.error('Error creating buyer:', err);
@@ -195,7 +196,7 @@ const Buyer = {
     },
 
     async update(id, buyerData) {
-        const { name, website_url, buyer_type, fk_stage_id, fk_deal_flow_id } = buyerData;
+        const { name, website_url, buyer_type, zone, fk_stage_id, fk_deal_flow_id } = buyerData;
 
         const query = `
             UPDATE "ORDERS-buyers"
@@ -203,16 +204,17 @@ const Buyer = {
                 name = $1,
                 website_url = $2,
                 buyer_type = $3,
-                fk_stage_id = $4,
-                fk_deal_flow_id = $5,
+                zone = $4,
+                fk_stage_id = $5,
+                fk_deal_flow_id = $6,
                 updated_at = NOW()
             WHERE
-                entry_id = $6;
+                entry_id = $7;
         `;
 
         try {
             // we don't need to return anything here, just wait for it to finish
-            await db.query(query, [name, website_url, buyer_type, fk_stage_id, fk_deal_flow_id, id]);
+            await db.query(query, [name, website_url, buyer_type, zone || null, fk_stage_id, fk_deal_flow_id, id]);
             return;
         } catch (err) {
             console.error(`Error updating buyer ${id}:`, err);

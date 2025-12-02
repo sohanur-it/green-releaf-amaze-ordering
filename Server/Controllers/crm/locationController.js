@@ -19,6 +19,47 @@ const createLocation = async (req, res) => {
 const updateLocation = async (req, res) => {
     try {
         const { locationId } = req.params;
+        const userId = req.session?.userId;
+        
+        // Check if user is fulfillment user - restrict to delivery_zone only
+        if (userId) {
+            const UserModel = require('../../Models/userModel');
+            const userRoles = await UserModel.getUserRoles(userId);
+            const userRoleNames = userRoles.map(r => (r.name || r.role_name || '').trim()).filter(Boolean);
+            const normalizeRole = (role) => role.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+            const isFulfillmentUser = userRoleNames.some(r => {
+                const normalized = normalizeRole(r);
+                return normalized === 'fulfillment team' || 
+                       normalized === 'fulfillment worker' || 
+                       normalized === 'fulfillment admin';
+            });
+            
+            if (isFulfillmentUser) {
+                // Fulfillment users can only update delivery_zone
+                // Get current location data first
+                const { query } = require('../../config/database');
+                const currentLocation = await query(
+                    'SELECT * FROM "ORDERS-buyer_locations" WHERE entry_id = $1',
+                    [locationId]
+                );
+                
+                if (currentLocation.rows.length === 0) {
+                    return res.status(404).json({ message: "Location not found" });
+                }
+                
+                // Only allow delivery_zone to be updated
+                const updatedData = {
+                    ...currentLocation.rows[0],
+                    delivery_zone: req.body.delivery_zone || currentLocation.rows[0].delivery_zone,
+                    updated_at: new Date()
+                };
+                
+                const updatedLocation = await Location.update(locationId, updatedData);
+                return res.status(200).json(updatedLocation);
+            }
+        }
+        
+        // Non-fulfillment users can update all fields
         const updatedLocation = await Location.update(locationId, req.body);
         res.status(200).json(updatedLocation);
     } catch (err) {

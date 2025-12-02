@@ -85,6 +85,8 @@
     "db:rename-outgoing:prod": "NODE_ENV=production node scripts/rename-outgoing-transfers-table.js",
     "db:update-references": "node scripts/update-outgoing-transfers-references.js",
     "db:add-metrcid-constraint": "NODE_ENV=production node scripts/add-metrcid-unique-constraint.js",
+    "db:add-zone-to-buyers": "node scripts/apply-zone-to-buyers.js",
+    "db:add-zone-to-buyers:prod": "NODE_ENV=production node scripts/apply-zone-to-buyers.js",
     "db:setup-failure-tracking": "NODE_ENV=production node scripts/setup-sync-failure-tracking.js",
     "test:alert-system": "NODE_ENV=production node scripts/test-alert-system.js",
     "setup:full": "npm run docker:up && sleep 10 && npm run db:init && npm run db:rbac && npm run db:metrc && npm run db:crm && npm run schema:setup && npm run superuser",

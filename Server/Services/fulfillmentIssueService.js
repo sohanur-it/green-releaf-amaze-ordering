@@ -99,6 +99,9 @@ class FulfillmentIssueService {
                 await this.notifySalesRepOfIssue(invoiceId, inv.invoice_number, issueNote, inv.assigned_sales_rep_id);
             }
 
+            // Notify all Sales Admins and Administrators
+            await this.notifyAdminsOfIssue(invoiceId, inv.invoice_number, issueNote);
+
             return {
                 success: true,
                 message: `Issues reported for invoice ${inv.invoice_number}. Order returned to sales for resolution.`
@@ -299,6 +302,53 @@ class FulfillmentIssueService {
             });
         } catch (error) {
             console.error('Error notifying sales rep:', error);
+        }
+    }
+
+    /**
+     * Notify all Sales Admins and Administrators of fulfillment issue
+     */
+    async notifyAdminsOfIssue(invoiceId, invoiceNumber, issueNote) {
+        try {
+            // Get all users with Sales Admin or Administrator roles
+            const adminUsers = await query(`
+                SELECT DISTINCT u.id
+                FROM users u
+                JOIN user_roles ur ON u.id = ur.user_id
+                JOIN roles r ON ur.role_id = r.id
+                WHERE (LOWER(r.name) IN ('sales admin', 'administrator')
+                   OR LOWER(r.role_name) IN ('sales admin', 'administrator'))
+                   AND u.status = 'active'
+            `);
+
+            for (const user of adminUsers.rows) {
+                await notificationStore.createNotification({
+                    userId: user.id,
+                    type: 'fulfillment_issue',
+                    title: `Fulfillment Issue: ${invoiceNumber}`,
+                    message: issueNote,
+                    payload: {
+                        invoice_id: invoiceId,
+                        invoice_number: invoiceNumber
+                    },
+                    priority: 'high',
+                    requiresAck: false
+                });
+
+                await websocketService.sendPersistentNotification(user.id, {
+                    type: 'fulfillment_issue',
+                    title: `Fulfillment Issue: ${invoiceNumber}`,
+                    message: issueNote,
+                    payload: {
+                        invoice_id: invoiceId,
+                        invoice_number: invoiceNumber
+                    }
+                });
+            }
+
+            console.log(`✅ Notified ${adminUsers.rows.length} admin(s) of fulfillment issue for invoice ${invoiceNumber}`);
+        } catch (error) {
+            console.error('Error notifying admins of issue:', error);
         }
     }
 

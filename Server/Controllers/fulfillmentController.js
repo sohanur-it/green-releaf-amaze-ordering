@@ -24,6 +24,7 @@ class FulfillmentController {
                 status: req.query.status ? (Array.isArray(req.query.status) ? req.query.status : [req.query.status]) : null,
                 location: req.query.location || null,
                 customer: req.query.customer || null,
+                deliveryZone: req.query.deliveryZone || req.query.delivery_zone || null, // Support both naming conventions
                 minTotal: req.query.minTotal ? parseFloat(req.query.minTotal) : null,
                 maxTotal: req.query.maxTotal ? parseFloat(req.query.maxTotal) : null,
                 sortBy: req.query.sortBy || 'age',

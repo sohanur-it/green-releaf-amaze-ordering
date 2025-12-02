@@ -115,7 +115,69 @@ class FulfillmentQueueService {
             paramCount++;
         }
 
-        // Group by
+        // Build count query BEFORE adding GROUP BY, ORDER BY, LIMIT
+        // This ensures we get the correct total count of distinct invoices
+        let countSql = `
+            SELECT COUNT(DISTINCT i.id) as total
+            FROM "ORDERS-invoices" i
+            LEFT JOIN "ORDERS-buyers" b ON i.fk_buyer_id = b.entry_id
+            LEFT JOIN "ORDERS-buyer_locations" bl ON i.fk_location_id = bl.entry_id
+            LEFT JOIN "ORDERS-invoice-line-items" li ON i.id = li.fk_invoice_id
+            LEFT JOIN users u ON i.fulfillment_accepted_by = u.id
+            WHERE i.status IN ('Approved', 'Fulfillment_Accepted', 'Fulfillment_Issue')
+        `;
+
+        // Apply same filters to count query
+        let countParamCount = 1;
+        const countParams = [];
+
+        if (licenseNumber) {
+            countSql += ` AND i.location_license_number LIKE $${countParamCount}`;
+            countParams.push(`${licenseNumber}%`);
+            countParamCount++;
+        }
+
+        if (status && Array.isArray(status) && status.length > 0) {
+            countSql += ` AND i.status = ANY($${countParamCount})`;
+            countParams.push(status);
+            countParamCount++;
+        }
+
+        if (location) {
+            countSql += ` AND (bl.city ILIKE $${countParamCount} OR bl.state ILIKE $${countParamCount})`;
+            countParams.push(`%${location}%`);
+            countParamCount++;
+        }
+
+        if (customer) {
+            countSql += ` AND b.name ILIKE $${countParamCount}`;
+            countParams.push(`%${customer}%`);
+            countParamCount++;
+        }
+
+        if (deliveryZone) {
+            countSql += ` AND bl.delivery_zone = $${countParamCount}`;
+            countParams.push(deliveryZone);
+            countParamCount++;
+        }
+
+        if (minTotal) {
+            countSql += ` AND i.total >= $${countParamCount}`;
+            countParams.push(minTotal);
+            countParamCount++;
+        }
+
+        if (maxTotal) {
+            countSql += ` AND i.total <= $${countParamCount}`;
+            countParams.push(maxTotal);
+            countParamCount++;
+        }
+
+        // Execute count query
+        const countResult = await query(countSql, countParams);
+        const total = parseInt(countResult.rows[0]?.total || 0);
+
+        // Group by (for main query)
         sql += `
             GROUP BY i.id, i.location_license_number, b.name, bl.name, 
                      bl.city, bl.state, bl.delivery_zone, u.first_name, u.last_name
@@ -135,17 +197,15 @@ class FulfillmentQueueService {
         const sortDirection = sortOrder.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
         sql += ` ORDER BY is_priority DESC, ${sortColumn} ${sortDirection}`;
 
-        // Get total count for pagination
-        const countSql = sql.replace(/SELECT.*?FROM/, 'SELECT COUNT(DISTINCT i.id) as total FROM');
-        const countResult = await query(countSql, params);
-        const total = parseInt(countResult.rows[0]?.total || 0);
-
         // Pagination
         const offset = (page - 1) * limit;
         sql += ` LIMIT $${paramCount} OFFSET $${paramCount + 1}`;
         params.push(limit, offset);
 
         const result = await query(sql, params);
+
+        // Get summary counts (without filters) for the stat cards
+        const summaryCounts = await this.getSummaryCounts(licenseNumber);
 
         return {
             queue: result.rows,
@@ -154,7 +214,35 @@ class FulfillmentQueueService {
                 limit: parseInt(limit),
                 total,
                 totalPages: Math.ceil(total / limit)
-            }
+            },
+            summary: summaryCounts
+        };
+    }
+
+    /**
+     * Get summary counts for stat cards (without filters)
+     */
+    async getSummaryCounts(licenseNumber = null) {
+        let sql = `
+            SELECT 
+                COUNT(*) FILTER (WHERE i.status = 'Approved') as pending,
+                COUNT(*) FILTER (WHERE i.status = 'Fulfillment_Accepted') as in_progress,
+                COUNT(*) FILTER (WHERE i.status = 'Fulfillment_Issue') as issues
+            FROM "ORDERS-invoices" i
+            WHERE i.status IN ('Approved', 'Fulfillment_Accepted', 'Fulfillment_Issue')
+        `;
+
+        const params = [];
+        if (licenseNumber) {
+            sql += ` AND i.location_license_number LIKE $1`;
+            params.push(`${licenseNumber}%`);
+        }
+
+        const result = await query(sql, params);
+        return {
+            pending: parseInt(result.rows[0].pending || 0),
+            in_progress: parseInt(result.rows[0].in_progress || 0),
+            issues: parseInt(result.rows[0].issues || 0)
         };
     }
 

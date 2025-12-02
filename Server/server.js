@@ -211,8 +211,10 @@ app.use((req, res, next) => {
 });
 
 // Make user roles and permissions available to all templates
+// Note: Roles are refreshed from database in requireAuth middleware to ensure they're current
 app.use((req, res, next) => {
     if (req.session) {
+        // Use session data (which is refreshed from DB in requireAuth middleware)
         res.locals.userRoles = req.session.roles || [];
         res.locals.userPermissions = req.session.permissions || [];
         res.locals.isSuperuser = req.session.isSuperuser || false;

@@ -10,11 +10,32 @@ const accountCreditService = require('../Services/accountCreditService');
 const { requireAuth: auth, requireRole, requireSuperuser } = require('../Middleware/auth');
 const { auditMiddleware } = require('../Middleware/auditMiddleware');
 
+// Block fulfillment users from all credit routes
+const blockFulfillmentUsers = (req, res, next) => {
+    const userRoles = req.session?.roles || [];
+    const normalizeRole = (role) => role.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+    const isFulfillmentUser = userRoles.some(role => {
+        const normalized = normalizeRole(role);
+        return normalized === 'fulfillment team' || 
+               normalized === 'fulfillment worker' || 
+               normalized === 'fulfillment admin';
+    });
+    
+    if (isFulfillmentUser) {
+        return res.status(403).json({ 
+            success: false,
+            error: 'Forbidden',
+            message: 'Fulfillment users do not have access to account credit management'
+        });
+    }
+    next();
+};
+
 /**
  * Issue a new account credit
  * POST /api/v1/credits
  */
-router.post('/', auth, requireRole('Sales Admin', 'Administrator'), auditMiddleware, async (req, res) => {
+router.post('/', auth, blockFulfillmentUsers, requireRole('Sales Admin', 'Administrator'), auditMiddleware, async (req, res) => {
     try {
         const userId = req.session.userId || req.user?.id;
         const creditData = req.body;
@@ -48,7 +69,7 @@ router.post('/', auth, requireRole('Sales Admin', 'Administrator'), auditMiddlew
  * Get available credits for a location
  * GET /api/v1/credits?location_id=123
  */
-router.get('/', auth, async (req, res) => {
+router.get('/', auth, blockFulfillmentUsers, async (req, res) => {
     try {
         const { location_id } = req.query;
         
@@ -72,7 +93,7 @@ router.get('/', auth, async (req, res) => {
  * Apply credits to an invoice
  * POST /api/v1/credits/apply/:invoiceId
  */
-router.post('/apply/:invoiceId', auth, requireRole('Sales Admin', 'Administrator'), auditMiddleware, async (req, res) => {
+router.post('/apply/:invoiceId', auth, blockFulfillmentUsers, requireRole('Sales Admin', 'Administrator'), auditMiddleware, async (req, res) => {
     try {
         const { invoiceId } = req.params;
         
@@ -98,7 +119,7 @@ router.post('/apply/:invoiceId', auth, requireRole('Sales Admin', 'Administrator
  * Void a credit
  * POST /api/v1/credits/:creditId/void
  */
-router.post('/:creditId/void', auth, requireRole('Sales Admin', 'Administrator'), auditMiddleware, async (req, res) => {
+router.post('/:creditId/void', auth, blockFulfillmentUsers, requireRole('Sales Admin', 'Administrator'), auditMiddleware, async (req, res) => {
     try {
         const { creditId } = req.params;
         const { reason } = req.body;
@@ -120,7 +141,7 @@ router.post('/:creditId/void', auth, requireRole('Sales Admin', 'Administrator')
  * Manual correction of credit balance
  * POST /api/v1/credits/:creditId/correct-balance
  */
-router.post('/:creditId/correct-balance', auth, requireSuperuser, auditMiddleware, async (req, res) => {
+router.post('/:creditId/correct-balance', auth, blockFulfillmentUsers, requireSuperuser, auditMiddleware, async (req, res) => {
     try {
         const { creditId } = req.params;
         const { new_remaining_balance: newRemainingBalance, reason } = req.body;
@@ -152,7 +173,7 @@ router.post('/:creditId/correct-balance', auth, requireSuperuser, auditMiddlewar
  * Unapply credits from an invoice
  * POST /api/v1/credits/unapply/:invoiceId
  */
-router.post('/unapply/:invoiceId', auth, requireRole('Sales Admin', 'Administrator'), auditMiddleware, async (req, res) => {
+router.post('/unapply/:invoiceId', auth, blockFulfillmentUsers, requireRole('Sales Admin', 'Administrator'), auditMiddleware, async (req, res) => {
     try {
         const { invoiceId } = req.params;
         const { credit_ids: creditIds, reason } = req.body;

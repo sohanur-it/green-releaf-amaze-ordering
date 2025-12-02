@@ -237,8 +237,9 @@ class NotificationService {
                 FROM users u
                 JOIN user_roles ur ON u.id = ur.user_id
                 JOIN roles r ON ur.role_id = r.id
-                WHERE LOWER(r.name) = 'fulfillment' 
-                   OR LOWER(r.role_name) = 'fulfillment'
+                WHERE (LOWER(r.name) IN ('fulfillment team', 'fulfillment worker', 'fulfillment admin', 'fulfillment')
+                   OR LOWER(r.role_name) IN ('fulfillment team', 'fulfillment worker', 'fulfillment admin', 'fulfillment'))
+                   AND u.status = 'active'
             `);
 
             const notification = {

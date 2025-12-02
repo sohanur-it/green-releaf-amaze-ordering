@@ -103,6 +103,15 @@ class UserManagementController {
                 for (const roleId of roles) {
                     await UserModel.assignRole(userId, roleId, adminUserId);
                 }
+                
+                // Update superuser flags based on assigned roles
+                try {
+                    await UserModel.updateSuperuserFlags(userId);
+                    console.log(`[ROLES] Updated superuser flags for user ${userId} after approval with roles`);
+                } catch (flagError) {
+                    console.error('[ROLES] Error updating superuser flags:', flagError);
+                    // Don't fail the whole operation if flag update fails
+                }
             }
             
             // Get role names if roles were assigned
@@ -337,6 +346,15 @@ class UserManagementController {
                 }
             }
             
+            // Update superuser flags based on new roles
+            try {
+                await UserModel.updateSuperuserFlags(userId);
+                console.log(`[ROLES] Updated superuser flags for user ${userId} based on new roles`);
+            } catch (flagError) {
+                console.error('[ROLES] Error updating superuser flags:', flagError);
+                // Don't fail the whole operation if flag update fails
+            }
+            
             const roleNamesText = assignedRoleNames.join(', ');
             const roleText = assignedRoleNames.length === 1 ? 'role' : 'roles';
             
@@ -354,6 +372,16 @@ class UserManagementController {
                 },
                 'success'
             );
+            
+            // Invalidate all sessions for this user to force re-login with new roles
+            // This ensures users don't retain old permissions after role changes
+            try {
+                const invalidatedCount = await UserModel.invalidateUserSessions(userId);
+                console.log(`[ROLES] Invalidated ${invalidatedCount} session(s) for user ${userId} after role change`);
+            } catch (sessionError) {
+                console.error('[ROLES] Error invalidating sessions:', sessionError);
+                // Don't fail the whole operation if session invalidation fails
+            }
             
             res.json({
                 success: true,
@@ -411,6 +439,15 @@ class UserManagementController {
                 await UserModel.removeRole(userId, roleId);
             }
             
+            // Update superuser flags based on remaining roles
+            try {
+                await UserModel.updateSuperuserFlags(userId);
+                console.log(`[ROLES] Updated superuser flags for user ${userId} after role removal`);
+            } catch (flagError) {
+                console.error('[ROLES] Error updating superuser flags:', flagError);
+                // Don't fail the whole operation if flag update fails
+            }
+            
             // Get removed role names
             const allRoles = await UserModel.getAllRoles();
             const removedRoleNames = roles.map(roleId => {
@@ -432,6 +469,16 @@ class UserManagementController {
                 },
                 'success'
             );
+            
+            // Invalidate all sessions for this user to force re-login with updated roles
+            // This ensures users don't retain old permissions after role removal
+            try {
+                const invalidatedCount = await UserModel.invalidateUserSessions(userId);
+                console.log(`[ROLES] Invalidated ${invalidatedCount} session(s) for user ${userId} after role removal`);
+            } catch (sessionError) {
+                console.error('[ROLES] Error invalidating sessions:', sessionError);
+                // Don't fail the whole operation if session invalidation fails
+            }
             
             res.json({
                 success: true,

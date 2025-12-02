@@ -1105,6 +1105,8 @@ html.sidebar-is-collapsed .sidebar-title-full {
 .profile-menu-role {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 0.25rem;
 }
 
 .role-badge-small {

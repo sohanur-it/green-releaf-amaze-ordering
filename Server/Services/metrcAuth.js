@@ -9,6 +9,22 @@ const axios = require('axios');
 const fs = require('fs').promises;
 const path = require('path');
 
+/**
+ * Decode JWT token without verification (to extract expiry)
+ */
+function decodeJWT(token) {
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 3) {
+            return null;
+        }
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+        return payload;
+    } catch (error) {
+        return null;
+    }
+}
+
 class MetrcAuthService {
     constructor() {
         this.apiBaseUrl = process.env.T3_API_BASE_URL || 'https://api.trackandtrace.tools/v2';
@@ -89,23 +105,52 @@ class MetrcAuthService {
     async authenticateWithCredentials() {
         try {
             console.log('🔐 Authenticating with METRC T3 API using credentials...');
+            console.log(`🔐 Using hostname: ${this.hostname}, username: ${this.username}`);
             
             const response = await axios.post(`${this.apiBaseUrl}/auth/credentials`, {
                 username: this.username,
                 password: this.password,
                 hostname: this.hostname
+            }, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'accept': 'application/json'
+                },
+                validateStatus: function (status) {
+                    return status < 500; // Don't throw for 4xx errors, we'll handle them
+                }
             });
 
+            // Check for error response
+            if (response.status !== 200) {
+                const errorMsg = response.data?.error?.message || response.data?.message || 'Unknown error';
+                throw new Error(`METRC API returned ${response.status}: ${errorMsg}`);
+            }
+            
             if (response.data && response.data.accessToken) {
                 this.accessToken = response.data.accessToken;
                 this.refreshToken = response.data.refreshToken || null;
                 
-                // Set token expiry (typically 24 hours for access token)
-                this.tokenExpiry = new Date(Date.now() + (24 * 60 * 60 * 1000));
+                // Parse JWT to get actual expiry time from the token
+                const decodedToken = decodeJWT(this.accessToken);
+                if (decodedToken && decodedToken.exp) {
+                    // Use the actual expiry time from the JWT (exp is in seconds)
+                    this.tokenExpiry = new Date(decodedToken.exp * 1000);
+                    console.log(`🔐 Token expires at: ${this.tokenExpiry.toISOString()}`);
+                } else {
+                    // Fallback to 24 hours if we can't parse the token
+                    this.tokenExpiry = new Date(Date.now() + (24 * 60 * 60 * 1000));
+                    console.log('⚠️  Could not parse token expiry, using 24-hour default');
+                }
                 
                 // Set refresh token expiry (typically 30 days)
                 if (this.refreshToken) {
-                    this.refreshTokenExpiry = new Date(Date.now() + (30 * 24 * 60 * 60 * 1000));
+                    const decodedRefresh = decodeJWT(this.refreshToken);
+                    if (decodedRefresh && decodedRefresh.exp) {
+                        this.refreshTokenExpiry = new Date(decodedRefresh.exp * 1000);
+                    } else {
+                        this.refreshTokenExpiry = new Date(Date.now() + (30 * 24 * 60 * 60 * 1000));
+                    }
                 }
                 
                 // Cache the tokens
@@ -150,8 +195,16 @@ class MetrcAuthService {
                     this.refreshToken = response.data.refreshToken;
                 }
                 
-                // Set new token expiry
-                this.tokenExpiry = new Date(Date.now() + (24 * 60 * 60 * 1000));
+                // Parse JWT to get actual expiry time from the token
+                const decodedToken = decodeJWT(this.accessToken);
+                if (decodedToken && decodedToken.exp) {
+                    // Use the actual expiry time from the JWT (exp is in seconds)
+                    this.tokenExpiry = new Date(decodedToken.exp * 1000);
+                    console.log(`🔐 Refreshed token expires at: ${this.tokenExpiry.toISOString()}`);
+                } else {
+                    // Fallback to 24 hours if we can't parse the token
+                    this.tokenExpiry = new Date(Date.now() + (24 * 60 * 60 * 1000));
+                }
                 
                 // Cache the updated tokens
                 await this.saveCachedTokens();

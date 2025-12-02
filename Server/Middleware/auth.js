@@ -45,7 +45,23 @@ const requireAuth = async (req, res, next) => {
             return res.redirect('/auth/login?error=Your account is not active');
         }
         
+        // Refresh roles and permissions from database to ensure they're current
+        // This prevents stale session data from persisting after role changes
+        // Always get fresh data from database, not from session cache
+        const userWithPermissions = await UserModel.getUserWithPermissions(req.session.userId);
+        req.session.roles = userWithPermissions.roles.map(r => r.name);
+        req.session.permissions = userWithPermissions.permissions;
+        req.session.isSuperuser = user.is_superuser;
+        
+        // Save updated session data
+        req.session.save((err) => {
+            if (err) {
+                console.error('[AUTH MIDDLEWARE] Error saving updated session:', err);
+            }
+        });
+        
         console.log(`[AUTH MIDDLEWARE] Authentication successful, proceeding`);
+        console.log(`[AUTH MIDDLEWARE] Current roles: ${req.session.roles.join(', ')}`);
 
         // Attach user info to request
         req.user = {

@@ -97,8 +97,13 @@
         </div>
     </div>
     <div style="display: flex; gap: 8px;">
-        <% if (typeof isSalesRep === 'undefined' || !isSalesRep) { %>
+        <% if ((typeof isSalesRep === 'undefined' || !isSalesRep) && !isFulfillmentUser) { %>
             <button onclick="cloneInvoice()" class="btn btn-secondary" style="background: #6c757d; color: white; padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer;">Clone Invoice</button>
+        <% } %>
+        <% if (isFulfillmentUser) { %>
+            <span style="padding: 8px 16px; background: #e3f2fd; color: #1976d2; border-radius: 4px; font-size: 0.9rem;">
+                <i class="fas fa-lock"></i> Read-Only Mode
+            </span>
         <% } %>
         <!-- <a href="/admin/invoices" class="btn btn-secondary" style="background: #6c757d; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; display: inline-block;">← Back to Invoices</a> -->
     </div>
@@ -125,7 +130,7 @@
             <span class="status-badge status-<%= invoice.status.toLowerCase() %>">
                 <%= invoice.status %>
             </span>
-            <% if (invoice.status === 'Pending_Approval' && (isSalesAdmin || isSalesRep || isAdmin)) { %>
+            <% if (invoice.status === 'Pending_Approval' && (isSalesAdmin || isSalesRep || isAdmin) && !isFulfillmentUser) { %>
                 <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
                     <button onclick="approveInvoice()" class="btn btn-success" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer;">
                         <i class="fas fa-check"></i> Approve
@@ -135,7 +140,7 @@
                     </button>
                 </div>
             <% } %>
-            <% if (invoice.status === 'Draft' && (isSalesAdmin || isSalesRep || isAdmin)) { %>
+            <% if (invoice.status === 'Draft' && (isSalesAdmin || isSalesRep || isAdmin) && !isFulfillmentUser) { %>
                 <div style="margin-top: 1rem; display: flex; gap: 0.5rem;">
                     <button onclick="submitForFulfillment()" class="btn btn-success" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer;">
                         <i class="fas fa-paper-plane"></i> Submit for Fulfillment
@@ -324,7 +329,8 @@
         <% 
         // Allow editing if invoice is in Draft, Pending_Approval, Approved (before fulfillment starts), or Fulfillment_Issue status
         // Note: Backend will enforce that fulfillment hasn't started scanning
-        const canEdit = invoice.status === 'Draft' || invoice.status === 'Pending_Approval' || invoice.status === 'Approved' || invoice.status === 'Fulfillment_Issue';
+        // Fulfillment users have read-only access
+        const canEdit = !isFulfillmentUser && (invoice.status === 'Draft' || invoice.status === 'Pending_Approval' || invoice.status === 'Approved' || invoice.status === 'Fulfillment_Issue');
         %>
         <% if (canEdit && (isSalesAdmin || isSalesRep || isAdmin)) { %>
             <button onclick="toggleEditMode()" id="edit-line-items-btn" class="btn btn-primary" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer;">
@@ -415,6 +421,11 @@
                 <button onclick="saveLineItemChanges()" class="btn btn-primary">
                     <i class="fas fa-save"></i> Save Changes
                 </button>
+                <% if (invoice.status === 'Fulfillment_Issue' && !isFulfillmentUser) { %>
+                <button onclick="kickBackToFulfillment()" class="btn btn-success" id="kick-back-btn" style="display: none;">
+                    <i class="fas fa-arrow-right"></i> Kick Back to Fulfillment
+                </button>
+                <% } %>
                 <button onclick="cancelEditLineItems()" class="btn btn-secondary">
                     Cancel
                 </button>
@@ -454,9 +465,19 @@
 <!-- History -->
 <% if (history && history.length > 0) { %>
 <div class="invoice-details-card">
-    <h3 style="color: var(--text-color);">Change History</h3>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 style="color: var(--text-color); margin: 0;">Change History</h3>
+        <% if (history.length > 5) { %>
+            <button onclick="showAllHistory()" class="btn btn-secondary" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer;">
+                <i class="fas fa-list"></i> View All History (<%= history.length %>)
+            </button>
+        <% } %>
+    </div>
     <div class="history-timeline">
-        <% history.forEach(entry => { %>
+        <% 
+        // Show only last 5 entries
+        const recentHistory = history.slice(0, 5);
+        recentHistory.forEach(entry => { %>
             <div class="history-item">
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <strong style="color: var(--text-color); text-transform: capitalize;"><%= entry.modification_type.replace(/_/g, ' ') %></strong>
@@ -482,6 +503,23 @@
     </div>
 </div>
 <% } %>
+
+<!-- View All History Modal -->
+<div id="history-modal" class="rejection-alert-modal" style="display: none;">
+    <div class="rejection-alert-content" style="max-width: 800px; max-height: 80vh; overflow-y: auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+            <h3 style="margin: 0; color: var(--text-color);">
+                <i class="fas fa-history"></i> Full Change History
+            </h3>
+            <button onclick="closeHistoryModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-light);">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div id="full-history-content" class="history-timeline">
+            <p style="text-align: center; color: var(--text-light);">Loading history...</p>
+        </div>
+    </div>
+</div>
 
 <script>
 const invoiceId = <%= invoice.id %>;
@@ -1232,7 +1270,15 @@ async function saveLineItemChanges() {
         } else {
             alert('Line items updated successfully!');
         }
-        setTimeout(() => window.location.reload(), 1000);
+        
+        // Show "Kick Back to Fulfillment" button if invoice is in Fulfillment_Issue status
+        const kickBackBtn = document.getElementById('kick-back-btn');
+        if (kickBackBtn) {
+            kickBackBtn.style.display = 'inline-block';
+        }
+        
+        // Don't reload immediately - let user click "Kick Back to Fulfillment" if needed
+        // setTimeout(() => window.location.reload(), 1000);
     } catch (error) {
         console.error('Error:', error);
         if (typeof showNotification === 'function') {
@@ -1242,6 +1288,115 @@ async function saveLineItemChanges() {
         }
     }
 }
+
+/**
+ * Kick back invoice to fulfillment after fixing issues
+ */
+async function kickBackToFulfillment() {
+    if (!confirm('Are you sure you want to kick this invoice back to fulfillment? This will change the status from Fulfillment_Issue to Approved.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/v1/invoices/${invoiceId}/transition`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                status: 'Approved',
+                reason: 'Sales rep fixed fulfillment issues and kicked back to fulfillment'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            throw new Error(data.error || 'Failed to kick back to fulfillment');
+        }
+        
+        if (typeof showNotification === 'function') {
+            showNotification('Invoice kicked back to fulfillment successfully!', 'success');
+        } else {
+            alert('Invoice kicked back to fulfillment successfully!');
+        }
+        
+        setTimeout(() => window.location.reload(), 1000);
+    } catch (error) {
+        console.error('Error:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to kick back to fulfillment: ' + error.message, 'error');
+        } else {
+            alert('Failed to kick back to fulfillment: ' + error.message);
+        }
+    }
+}
+
+/**
+ * Show all history in modal
+ */
+async function showAllHistory() {
+    const modal = document.getElementById('history-modal');
+    const content = document.getElementById('full-history-content');
+    
+    modal.style.display = 'flex';
+    content.innerHTML = '<p style="text-align: center; color: var(--text-light);">Loading history...</p>';
+    
+    try {
+        const response = await fetch(`/api/v1/invoices/${invoiceId}/history`);
+        const data = await response.json();
+        
+        if (!data.success || !data.history) {
+            throw new Error(data.error || 'Failed to load history');
+        }
+        
+        if (data.history.length === 0) {
+            content.innerHTML = '<p style="text-align: center; color: var(--text-light);">No history available</p>';
+            return;
+        }
+        
+        content.innerHTML = data.history.map(entry => {
+            const changedBy = entry.changed_by_user_id 
+                ? `Changed by <strong>${entry.changed_by_name || 'User #' + entry.changed_by_user_id}</strong>${entry.changed_by_email ? ' (' + entry.changed_by_email + ')' : ''}`
+                : entry.changed_by_system 
+                    ? 'Changed by <strong>System</strong>'
+                    : 'Changed by <strong>Unknown</strong>';
+            
+            return `
+                <div class="history-item">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <strong style="color: var(--text-color); text-transform: capitalize;">${entry.modification_type.replace(/_/g, ' ')}</strong>
+                        <span style="font-size: 0.8rem; color: var(--text-light);">${new Date(entry.changed_at).toLocaleString()}</span>
+                    </div>
+                    <div style="color: var(--text-light); font-size: 0.9rem; margin-top: 4px;">
+                        ${entry.reason || 'No additional details provided.'}
+                    </div>
+                    <div style="margin-top: 6px; font-size: 0.8rem; color: #6366f1;">
+                        ${changedBy}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } catch (error) {
+        console.error('Error loading history:', error);
+        content.innerHTML = `<p style="text-align: center; color: #ef4444;">Error loading history: ${error.message}</p>`;
+    }
+}
+
+/**
+ * Close history modal
+ */
+function closeHistoryModal() {
+    document.getElementById('history-modal').style.display = 'none';
+}
+
+// Close modal when clicking outside
+document.addEventListener('click', (e) => {
+    const modal = document.getElementById('history-modal');
+    if (e.target === modal) {
+        closeHistoryModal();
+    }
+});
 </script>
 
 <!-- Include notification system -->

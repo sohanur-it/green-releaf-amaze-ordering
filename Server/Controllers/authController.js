@@ -1,6 +1,7 @@
 // Server/Controllers/authController.js
 
 const UserModel = require('../Models/userModel');
+const metrcAuth = require('../Services/metrcAuth');
 
 class AuthController {
     /**
@@ -8,8 +9,23 @@ class AuthController {
      */
     static showLogin(req, res) {
         if (req.session && req.session.userId) {
-            console.log(`[AUTH] User already logged in (ID: ${req.session.userId}), redirecting to admin`);
-            return res.redirect('/admin');
+            // Check if fulfillment user and redirect accordingly
+            const userRoles = req.session.roles || [];
+            const normalizeRole = (role) => role.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+            const isFulfillmentUser = userRoles.some(role => {
+                const normalized = normalizeRole(role);
+                return normalized === 'fulfillment team' || 
+                       normalized === 'fulfillment worker' || 
+                       normalized === 'fulfillment admin';
+            });
+            
+            if (isFulfillmentUser) {
+                console.log(`[AUTH] Fulfillment user already logged in, redirecting to fulfillment queue`);
+                return res.redirect('/admin/fulfillment/queue');
+            } else {
+                console.log(`[AUTH] User already logged in (ID: ${req.session.userId}), redirecting to admin`);
+                return res.redirect('/admin');
+            }
         }
 
         console.log('[AUTH] Showing login page');
@@ -145,7 +161,7 @@ class AuthController {
                 console.error('[AUTH] Error checking session in database:', dbErr);
             }
             
-            console.log('[AUTH] Session saved successfully, redirecting to admin...');
+            console.log('[AUTH] Session saved successfully, redirecting...');
             console.log(`[AUTH] Cookie will be set with session ID: ${req.sessionID}`);
             
             // Set cookie explicitly before redirect
@@ -157,7 +173,29 @@ class AuthController {
                 path: '/'
             });
             
-            res.redirect('/admin');
+            // Refresh METRC authentication tokens in background (non-blocking)
+            // This ensures token cache is always fresh when users log in
+            metrcAuth.ensureValidToken().catch(err => {
+                console.error('[AUTH] Failed to refresh METRC tokens during login:', err.message);
+                // Don't block login if METRC token refresh fails
+            });
+            
+            // Redirect fulfillment users to fulfillment queue, others to admin dashboard
+            const userRoles = req.session.roles || [];
+            const normalizeRole = (role) => role.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+            const isFulfillmentUser = userRoles.some(role => {
+                const normalized = normalizeRole(role);
+                return normalized === 'fulfillment team' || 
+                       normalized === 'fulfillment worker' || 
+                       normalized === 'fulfillment admin';
+            });
+            
+            if (isFulfillmentUser) {
+                console.log('[AUTH] Fulfillment user detected, redirecting to fulfillment queue');
+                res.redirect('/admin/fulfillment/queue');
+            } else {
+                res.redirect('/admin');
+            }
         } catch (error) {
             console.error('[AUTH] Login error:', error);
             console.error('[AUTH] Error stack:', error.stack);

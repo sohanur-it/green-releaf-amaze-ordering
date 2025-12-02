@@ -826,6 +826,16 @@ class PortalController {
                     if (availableQty === 0) {
                         console.log(`Auto-promoting On Deck batch ${batch_id} to Sellable (no sellable inventory available)`);
                         
+                        // Get batch details before update for audit log
+                        const batchInfo = await client.query(`
+                            SELECT id, batch_name, status, quantity, allocated_quantity, fk_master_product_id
+                            FROM "ORDERS-batches"
+                            WHERE id = $1
+                        `, [batch_id]);
+                        
+                        const batch = batchInfo.rows[0];
+                        const oldStatus = batch.status;
+                        
                         // Promote the batch to Sellable
                         await client.query(`
                             UPDATE "ORDERS-batches"
@@ -842,6 +852,36 @@ class PortalController {
                             ) VALUES ($1, 'status_changed', 'status', 'On Deck', 'Sellable', 
                                       'Auto-promoted: No sellable inventory available, batch requested via portal', true)
                         `, [batch_id]);
+                        
+                        // Log to audit trail
+                        try {
+                            const auditLogger = require('../Services/auditLogger');
+                            await auditLogger.logAction({
+                                userId: null, // System action
+                                action: 'batch_status_update',
+                                resourceType: 'Batch',
+                                resourceId: batch_id.toString(),
+                                details: {
+                                    message: `System automatically promoted Batch "${batch.batch_name}" from "${oldStatus}" to "Sellable" (Quantity: ${batch.quantity}) - Auto-promoted via portal due to no sellable inventory available`,
+                                    batch_id: batch_id,
+                                    batch_name: batch.batch_name,
+                                    old_status: oldStatus,
+                                    new_status: 'Sellable',
+                                    quantity: batch.quantity,
+                                    allocated_quantity: batch.allocated_quantity,
+                                    product_id: batch.fk_master_product_id,
+                                    reason: 'Auto-promoted: No sellable inventory available, batch requested via portal',
+                                    update_type: 'automatic_promotion',
+                                    triggered_by: 'portal_request',
+                                    changed: true
+                                },
+                                status: 'success',
+                                sourceIp: null
+                            });
+                        } catch (auditError) {
+                            console.error('⚠️ Failed to log batch status update to audit trail:', auditError.message);
+                            // Don't fail the transaction if audit logging fails
+                        }
                         
                         // Now fetch the batch as Sellable with FOR UPDATE lock
                         batchResult = await client.query(`

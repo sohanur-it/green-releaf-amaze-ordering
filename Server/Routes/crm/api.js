@@ -79,15 +79,15 @@ router.get('/locations/:locationId/delivery-windows', requireAuth, locationContr
 
 // @route   POST /api/crm/locations/:locationId/delivery-windows
 // @desc    Create a new delivery window for a location
-router.post('/locations/:locationId/delivery-windows', requireAuth, requireRole('Sales Admin', 'Administrator'), locationController.createDeliveryWindow);
+router.post('/locations/:locationId/delivery-windows', requireAuth, requireRole('Sales Admin', 'Administrator', 'Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin'), locationController.createDeliveryWindow);
 
 // @route   PATCH /api/crm/delivery-windows/:windowId
 // @desc    Update a delivery window
-router.patch('/delivery-windows/:windowId', requireAuth, requireRole('Sales Admin', 'Administrator'), locationController.updateDeliveryWindow);
+router.patch('/delivery-windows/:windowId', requireAuth, requireRole('Sales Admin', 'Administrator', 'Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin'), locationController.updateDeliveryWindow);
 
 // @route   DELETE /api/crm/delivery-windows/:windowId
 // @desc    Delete a delivery window
-router.delete('/delivery-windows/:windowId', requireAuth, requireRole('Sales Admin', 'Administrator'), locationController.deleteDeliveryWindow);
+router.delete('/delivery-windows/:windowId', requireAuth, requireRole('Sales Admin', 'Administrator', 'Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin'), locationController.deleteDeliveryWindow);
 
 // @route   POST /api/crm/locations/:locationId/validate-delivery-time
 // @desc    Validate if a delivery time falls within active windows

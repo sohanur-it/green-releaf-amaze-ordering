@@ -14,7 +14,7 @@ const { requireAuth, requireRole } = require('../Middleware/auth');
  * GET /api/v1/fulfillment/queue
  * Get fulfillment queue with filters and pagination
  */
-router.get('/queue', requireAuth, requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Administrator'), 
+router.get('/queue', requireAuth, requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Sales Representative', 'Administrator'), 
     fulfillmentController.getQueue.bind(fulfillmentController));
 
 /**

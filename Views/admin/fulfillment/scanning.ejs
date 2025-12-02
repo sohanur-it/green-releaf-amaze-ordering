@@ -401,9 +401,6 @@
                 <button class="btn-complete" id="btn-complete" onclick="completeScanning()" disabled>
                     <i class="fas fa-check"></i> Complete Scanning
                 </button>
-                <button class="btn-issue" onclick="showIssueModal()" style="background: #f59e0b; color: white; border: none; padding: 1rem 2rem; border-radius: 8px; font-weight: 600; cursor: pointer;">
-                    <i class="fas fa-exclamation-triangle"></i> Report Issue
-                </button>
                 <button class="btn-update-issue" onclick="showUpdateIssueModal()" style="background: #3b82f6; color: white; border: none; padding: 1rem 2rem; border-radius: 8px; font-weight: 600; cursor: pointer; display: none;" id="btn-update-issue">
                     <i class="fas fa-edit"></i> Update Issue
                 </button>
@@ -446,12 +443,17 @@
                 </select>
             </div>
             <div style="margin-bottom: 1rem;">
-                <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Line Item ID (optional)</label>
-                <input type="number" id="issue-line-item" placeholder="Leave blank for general issue" style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px;">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Select Affected Batches <span style="color: #ef4444;">*</span></label>
+                <div id="batch-selection-container" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px; padding: 0.5rem;">
+                    <p style="color: var(--text-light); font-size: 0.875rem; margin: 0.5rem 0;">Loading batches...</p>
+                </div>
+            </div>
+            <div id="batch-reasons-container" style="margin-bottom: 1rem;">
+                <!-- Dynamic batch reason fields will be added here -->
             </div>
             <div style="margin-bottom: 1rem;">
-                <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Description <span style="color: #ef4444;">*</span></label>
-                <textarea id="issue-description" required rows="4" placeholder="Describe the issue..." style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; resize: vertical;"></textarea>
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">General Description (optional)</label>
+                <textarea id="issue-description" rows="3" placeholder="Additional notes about the issue..." style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; resize: vertical;"></textarea>
             </div>
             <div class="alert-actions">
                 <button type="button" class="btn-skip" onclick="closeIssueModal()">Cancel</button>

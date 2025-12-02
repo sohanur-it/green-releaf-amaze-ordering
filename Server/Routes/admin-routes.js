@@ -283,8 +283,8 @@ router.get('/', async (req, res) => {
 // Route to render the CRM page, handled by our controller
 router.get('/crm', buyerController.getAllBuyers);
 
-// Delivery Windows Management Page
-router.get('/crm/locations/:locationId/delivery-windows', requireRole('Sales Admin', 'Administrator'), async (req, res) => {
+// Delivery Windows Management Page - Allow fulfillment users to edit
+router.get('/crm/locations/:locationId/delivery-windows', requireRole('Sales Admin', 'Administrator', 'Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin'), async (req, res) => {
     try {
         const locationId = parseInt(req.params.locationId);
         const { query } = require('../config/database');
@@ -394,8 +394,8 @@ router.get('/audit-logs', requirePermission('admin', 'audit'), (req, res) => {
 // INVOICE MANAGEMENT ROUTES (Module 4)
 // =============================================
 
-// List invoices - Sales Admin, Sales Rep, and Administrator can access invoices
-router.get('/invoices', requireRole('Sales Admin', 'Sales Representative', 'Administrator'), invoiceController.showInvoiceList);
+// List invoices - Sales Admin, Sales Rep, Administrator, and Fulfillment users can access invoices (fulfillment in read-only mode)
+router.get('/invoices', requireRole('Sales Admin', 'Sales Representative', 'Administrator', 'Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin'), invoiceController.showInvoiceList);
 
 // Show create invoice form
 router.get('/invoices/create', requireRole('Sales Admin', 'Sales Representative', 'Administrator'), invoiceController.showCreateInvoiceForm);
@@ -403,8 +403,8 @@ router.get('/invoices/create', requireRole('Sales Admin', 'Sales Representative'
 // Clone invoice
 router.post('/invoices/:id/clone', requireRole('Sales Admin', 'Administrator'), invoiceController.cloneInvoice.bind(invoiceController));
 
-// Show invoice details
-router.get('/invoices/:id', requireRole('Sales Admin', 'Sales Representative', 'Administrator'), invoiceController.showInvoiceDetails);
+// Show invoice details - Allow fulfillment users read-only access
+router.get('/invoices/:id', requireRole('Sales Admin', 'Sales Representative', 'Administrator', 'Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin'), invoiceController.showInvoiceDetails);
 
 // Approve pending invoice (Sales Admin, Sales Rep, and Administrator)
 router.post('/invoices/:id/approve', requireRole('Sales Admin', 'Sales Representative', 'Administrator'), invoiceController.approveInvoice);
@@ -552,12 +552,45 @@ router.get('/notifications', requireAuth, async (req, res) => {
 // =============================================
 
 // Fulfillment Queue
-router.get('/fulfillment/queue', requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Administrator'), async (req, res) => {
+router.get('/fulfillment/queue', requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Sales Representative', 'Administrator'), async (req, res) => {
     try {
+        // Detect if user is a sales user (read-only access)
+        // IMPORTANT: If user has BOTH sales AND fulfillment roles, they get full access (not read-only)
+        const userId = req.session.userId;
+        let isSalesUser = false;
+        let isFulfillmentUser = false;
+        
+        if (userId) {
+            const UserModel = require('../Models/userModel');
+            const userRoles = await UserModel.getUserRoles(userId);
+            const userRoleNames = userRoles.map(r => (r.name || r.role_name || '').trim()).filter(Boolean);
+            const normalizeRole = (role) => role.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+            
+            // Check if user has sales roles
+            const hasSalesRole = userRoleNames.some(r => {
+                const normalized = normalizeRole(r);
+                return normalized === 'sales admin' || normalized === 'sales representative';
+            });
+            
+            // Check if user has fulfillment roles
+            isFulfillmentUser = userRoleNames.some(r => {
+                const normalized = normalizeRole(r);
+                return normalized === 'fulfillment team' || 
+                       normalized === 'fulfillment worker' || 
+                       normalized === 'fulfillment admin';
+            });
+            
+            // Sales user (read-only) = has sales role but NOT fulfillment role
+            // If they have fulfillment role, they get full access regardless of sales role
+            isSalesUser = hasSalesRole && !isFulfillmentUser;
+        }
+        
         res.render('admin/fulfillment/queue', {
             title: 'Fulfillment Queue',
             layout: 'layouts/main',
-            currentUserId: req.session.userId
+            currentUserId: userId,
+            isSalesUser: isSalesUser,
+            isFulfillmentUser: isFulfillmentUser
         });
     } catch (error) {
         console.error('Error rendering fulfillment queue:', error);

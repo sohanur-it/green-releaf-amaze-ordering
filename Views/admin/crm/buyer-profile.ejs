@@ -8,6 +8,7 @@ const hasRole = (roleName) => {
 const isAdmin = isSuperuser || hasRole('Administrator');
 const isSalesAdmin = hasRole('Sales Admin');
 const canManagePurchaseLimits = isAdmin || isSalesAdmin;
+// isFulfillmentUser is passed from the controller
 %>
 
 <div class="profile-header">
@@ -104,11 +105,12 @@ const canManagePurchaseLimits = isAdmin || isSalesAdmin;
             <table class="info-table">
                 <thead>
                 <tr>
-                    <th style="width: 20%;">Name</th>
-                    <th style="width: 30%;">Address</th>
-                    <th style="width: 20%;">License</th>
-                    <th style="width: 25%;">Access Code</th>
-                    <th style="width: 5%;"></th> <!-- Actions -->
+                    <th style="width: 15%;">Name</th>
+                    <th style="width: 25%;">Address</th>
+                    <th style="width: 15%;">License</th>
+                    <th style="width: 15%;">Delivery Zone</th>
+                    <th style="width: 20%;">Access Code</th>
+                    <th style="width: 10%;"></th> <!-- Actions -->
                 </tr>
                 </thead>
                 <tbody id="locations-table-body">
@@ -118,6 +120,7 @@ const canManagePurchaseLimits = isAdmin || isSalesAdmin;
                             <td><%= location.name %></td>
                             <td><%= `${location.line_one}${location.line_two ? ', ' + location.line_two : ''}, ${location.city}, ${location.state} ${location.zip}` %></td>
                             <td><%= location.state_license || 'N/A' %></td>
+                            <td><%= location.delivery_zone || '' %></td>
                             <td><code><%= location.access_code %></code></td>
                             <td class="table-actions">
                                 <div style="display: flex; flex-direction: column; gap: 0.5rem;">
@@ -277,6 +280,7 @@ const canManagePurchaseLimits = isAdmin || isSalesAdmin;
         <div class="card-body">
             <ul class="details-list">
                 <li><strong>Buyer Type:</strong> <span><%= buyer.details.buyer_type || 'N/A' %></span></li>
+                <li><strong>Zone:</strong> <span><%= buyer.details.zone || 'N/A' %></span></li>
                 <li><strong>Website:</strong> <span><a href="<%= buyer.details.website_url %>" target="_blank"><%= buyer.details.website_url %></a></span></li>
                 <li><strong>Deal Flow:</strong> <span><%= buyer.details.deal_flow_name || 'N/A' %></span></li>
                 <li><strong>Source:</strong> <span><%= buyer.details.source %></span></li>
@@ -392,6 +396,11 @@ const canManagePurchaseLimits = isAdmin || isSalesAdmin;
 
 <!-- Include the location modal partial -->
 <%- include('../../partials/location-modal') %>
+
+<!-- Pass fulfillment user flag to JavaScript -->
+<script>
+    window.isFulfillmentUser = <%= (typeof isFulfillmentUser !== 'undefined' && isFulfillmentUser) ? 'true' : 'false' %>;
+</script>
 
 <!-- Merge Location Modal -->
 <div class="modal-overlay" id="mergeLocationModal" aria-hidden="true" onclick="handleModalOverlayClick(event)">

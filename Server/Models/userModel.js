@@ -575,6 +575,18 @@ class UserModel {
      * @returns {Promise<boolean>} True if user is superuser
      */
     static async isSuperuser(userId) {
+        // Check if user has Administrator role (more reliable than database flag)
+        const userRoles = await this.getUserRoles(userId);
+        const hasAdminRole = userRoles.some(role => {
+            const roleName = (role.name || role.role_name || '').toLowerCase().trim();
+            return roleName === 'administrator';
+        });
+        
+        if (hasAdminRole) {
+            return true;
+        }
+        
+        // Fallback to database flag check
         const sql = `
             SELECT COALESCE(is_superadmin, is_admin, false) as super_flag
             FROM users
@@ -582,6 +594,39 @@ class UserModel {
         `;
         const result = await query(sql, [userId]);
         return result.rows[0]?.super_flag || false;
+    }
+    
+    /**
+     * Update superuser flags in database based on user roles
+     * Sets is_superadmin and is_admin to true only if user has Administrator role
+     * @param {number} userId - User ID
+     * @returns {Promise<void>}
+     */
+    static async updateSuperuserFlags(userId) {
+        try {
+            // Get user roles
+            const userRoles = await this.getUserRoles(userId);
+            
+            // Check if user has Administrator role
+            const hasAdminRole = userRoles.some(role => {
+                const roleName = (role.name || role.role_name || '').toLowerCase().trim();
+                return roleName === 'administrator';
+            });
+            
+            // Update database flags based on Administrator role
+            const sql = `
+                UPDATE users
+                SET is_superadmin = $1, is_admin = $1, updated_at = NOW()
+                WHERE id = $2
+            `;
+            
+            await query(sql, [hasAdminRole, userId]);
+            
+            console.log(`[USER] Updated superuser flags for user ${userId}: is_superadmin=${hasAdminRole}, is_admin=${hasAdminRole}`);
+        } catch (error) {
+            console.error(`[USER] Error updating superuser flags for user ${userId}:`, error);
+            throw error;
+        }
     }
 
     /**
@@ -801,6 +846,36 @@ class UserModel {
             result.rows[0].status = 'rejected';
         }
         return result.rows[0];
+    }
+
+    /**
+     * Invalidate all sessions for a user (force re-login)
+     * This deletes all sessions from the user_sessions table for the specified user
+     * @param {number} userId - User ID
+     * @returns {Promise<void>}
+     */
+    static async invalidateUserSessions(userId) {
+        try {
+            // Delete all sessions for this user from user_sessions table
+            // The sess column contains JSON with userId, so we need to check it
+            // connect-pg-simple stores session data as JSON in the 'sess' column
+            const sql = `
+                DELETE FROM user_sessions
+                WHERE sess::text LIKE $1
+            `;
+            
+            // Search for sessions containing this userId in the session data
+            // The session JSON structure from connect-pg-simple includes userId
+            const userIdPattern = `%"userId":${userId}%`;
+            const result = await query(sql, [userIdPattern]);
+            
+            console.log(`[SESSION] Invalidated all sessions for user ${userId}`);
+            return result.rowCount || 0;
+        } catch (error) {
+            console.error(`[SESSION] Error invalidating sessions for user ${userId}:`, error);
+            // Don't throw - session invalidation failure shouldn't break role assignment
+            return 0;
+        }
     }
 }
 

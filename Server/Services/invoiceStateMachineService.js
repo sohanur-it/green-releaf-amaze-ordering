@@ -124,13 +124,23 @@ class InvoiceStateMachineService {
             `, [newStatus, invoiceId]);
             
             // Log history
+            // Use more descriptive modification_type for specific transitions
+            let modificationType = 'status_changed';
+            let logReason = reason;
+            
+            // Fulfillment_Issue → Approved: This is a "kick back to fulfillment"
+            if (currentStatus === 'Fulfillment_Issue' && newStatus === 'Approved') {
+                modificationType = 'kicked_back_to_fulfillment';
+                logReason = reason || 'Sales rep fixed fulfillment issues and kicked back to fulfillment';
+            }
+            
             // If userId is null (e.g., external portal order), mark as system change
             await client.query(`
                 INSERT INTO "ORDERS-invoice-history" (
                     fk_invoice_id, modification_type, field_name,
                     old_value, new_value, reason, changed_by_user_id, changed_by_system
-                ) VALUES ($1, 'status_changed', 'status', $2, $3, $4, $5, $6)
-            `, [invoiceId, currentStatus, newStatus, reason || null, userId, !userId]);
+                ) VALUES ($1, $2, 'status', $3, $4, $5, $6, $7)
+            `, [invoiceId, modificationType, currentStatus, newStatus, logReason, userId, !userId]);
             
             await client.query('COMMIT');
             
@@ -351,6 +361,12 @@ class InvoiceStateMachineService {
                     const notificationService = require('./notificationService');
                     await notificationService.notifyCustomerApproval(invoiceId);
                 }
+            }
+            
+            // Fulfillment_Issue → Approved: Notify fulfillment team that issue is resolved and order is ready
+            if (from === 'Fulfillment_Issue' && to === 'Approved') {
+                console.log(`[StateMachine] Fulfillment_Issue → Approved: Notifying fulfillment team for invoice ${invoiceId}`);
+                await this.notifyFulfillment(invoiceId);
             }
             
             // Fulfillment_Accepted: Notify fulfillment team

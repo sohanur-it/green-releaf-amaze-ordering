@@ -75,6 +75,17 @@ const getBuyerById = async (req, res, next) => {
             return next(err); // passes this to the main error handler
         }
 
+        // Check if user is fulfillment user for read-only restrictions
+        const userRoles = await UserModel.getUserRoles(req.session.userId);
+        const userRoleNames = userRoles.map(r => (r.name || r.role_name || '').trim()).filter(Boolean);
+        const normalizeRole = (role) => role.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+        const isFulfillmentUser = userRoleNames.some(r => {
+            const normalized = normalizeRole(r);
+            return normalized === 'fulfillment team' || 
+                   normalized === 'fulfillment worker' || 
+                   normalized === 'fulfillment admin';
+        });
+        
         // if we found the buyer, render the profile page and pass in all the data
         res.render('admin/crm/buyer-profile', {
             title: `CRM - ${buyerData.details.name}`,
@@ -84,6 +95,7 @@ const getBuyerById = async (req, res, next) => {
             availableDiscounts: availableDiscounts || [], // pass available discounts for assignment dropdown
             categories: categoriesResult.rows.map(r => r.category_name), // pass categories for rule editing
             products: productsResult.rows, // pass products for rule editing
+            isFulfillmentUser: isFulfillmentUser, // Pass fulfillment flag for read-only restrictions
             layout: 'layouts/main'
         });
 
@@ -121,6 +133,7 @@ const createBuyer = async (req, res, next) => {
             name: req.body.name,
             website_url: req.body.website_url,
             buyer_type: req.body.buyer_type,
+            zone: req.body.zone,
             fk_stage_id: req.body.fk_stage_id,
             fk_deal_flow_id: req.body.fk_deal_flow_id,
         };
@@ -167,13 +180,60 @@ const showEditBuyerForm = async (req, res, next) => {
 const updateBuyer = async (req, res, next) => {
     try {
         const buyerId = req.params.id;
-        const updatedData = {
-            name: req.body.name,
-            website_url: req.body.website_url,
-            buyer_type: req.body.buyer_type,
-            fk_stage_id: req.body.fk_stage_id,
-            fk_deal_flow_id: req.body.fk_deal_flow_id,
-        };
+        const userId = req.session?.userId;
+        
+        // Check if user is fulfillment user - restrict to zone only
+        let updatedData;
+        if (userId) {
+            const UserModel = require('../../Models/userModel');
+            const userRoles = await UserModel.getUserRoles(userId);
+            const userRoleNames = userRoles.map(r => (r.name || r.role_name || '').trim()).filter(Boolean);
+            const normalizeRole = (role) => role.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
+            const isFulfillmentUser = userRoleNames.some(r => {
+                const normalized = normalizeRole(r);
+                return normalized === 'fulfillment team' || 
+                       normalized === 'fulfillment worker' || 
+                       normalized === 'fulfillment admin';
+            });
+            
+            if (isFulfillmentUser) {
+                // Fulfillment users can only update zone field
+                // Get current buyer data first
+                const currentBuyer = await Buyer.findById(buyerId);
+                if (!currentBuyer) {
+                    return res.status(404).send("Buyer not found");
+                }
+                
+                updatedData = {
+                    name: currentBuyer.details.name,
+                    website_url: currentBuyer.details.website_url,
+                    buyer_type: currentBuyer.details.buyer_type,
+                    zone: req.body.zone, // Only zone can be updated
+                    fk_stage_id: currentBuyer.details.fk_stage_id,
+                    fk_deal_flow_id: currentBuyer.details.fk_deal_flow_id,
+                };
+            } else {
+                // Non-fulfillment users can update all fields
+                updatedData = {
+                    name: req.body.name,
+                    website_url: req.body.website_url,
+                    buyer_type: req.body.buyer_type,
+                    zone: req.body.zone,
+                    fk_stage_id: req.body.fk_stage_id,
+                    fk_deal_flow_id: req.body.fk_deal_flow_id,
+                };
+            }
+        } else {
+            // Fallback if no userId (shouldn't happen with requireAuth)
+            updatedData = {
+                name: req.body.name,
+                website_url: req.body.website_url,
+                buyer_type: req.body.buyer_type,
+                zone: req.body.zone,
+                fk_stage_id: req.body.fk_stage_id,
+                fk_deal_flow_id: req.body.fk_deal_flow_id,
+            };
+        }
 
         await Buyer.update(buyerId, updatedData);
 

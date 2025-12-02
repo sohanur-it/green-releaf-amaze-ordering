@@ -3,6 +3,7 @@
 
 let currentPage = 1;
 let totalPages = 1;
+let pageSize = 25; // Default page size
 let currentFilters = {
     status: '',
     location: '',
@@ -15,6 +16,13 @@ let currentFilters = {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     loadDeliveryZones();
+    
+    // Set initial page size from select element if it exists
+    const pageSizeSelect = document.getElementById('page-size-select');
+    if (pageSizeSelect) {
+        pageSize = parseInt(pageSizeSelect.value) || 25;
+    }
+    
     loadQueue();
     
     // Set up auto-refresh every 30 seconds
@@ -68,7 +76,7 @@ async function loadQueue() {
     try {
         const params = new URLSearchParams({
             page: currentPage,
-            limit: 25,
+            limit: pageSize,
             ...currentFilters
         });
 
@@ -80,7 +88,7 @@ async function loadQueue() {
         }
 
         renderQueue(data.queue);
-        updateStats(data.queue);
+        updateStats(data.summary || data.queue); // Use summary if available, fallback to calculating from queue
         updatePagination(data.pagination);
 
     } catch (error) {
@@ -120,6 +128,7 @@ function renderQueue(orders) {
         
         const canClaim = order.status === 'Approved' && !order.fulfillment_accepted_by;
         const isAssignedToMe = order.fulfillment_accepted_by === window.currentUserId;
+        const isSalesUserReadOnly = window.isSalesUser && !window.isFulfillmentUser;
 
         return `
             <div class="order-card ${statusClass}" data-invoice-id="${order.id}">
@@ -165,20 +174,20 @@ function renderQueue(orders) {
                 </div>
 
                 <div class="order-actions">
-                    ${canClaim ? `
+                    ${!isSalesUserReadOnly && canClaim ? `
                         <button class="btn-claim" onclick="claimOrder(${order.id})">
                             <i class="fas fa-hand-paper"></i> Claim Order
                         </button>
                     ` : ''}
-                    ${isAssignedToMe ? `
-                        <button class="btn-view" onclick="startScanning(${order.id})">
+                    ${!isSalesUserReadOnly && isAssignedToMe ? `
+                        <button class="btn-view" onclick="startScanning(${order.id})" ${order.status === 'Fulfillment_Issue' ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''} title="${order.status === 'Fulfillment_Issue' ? 'Cannot start scanning - invoice has an issue' : ''}">
                             <i class="fas fa-barcode"></i> Start Scanning
                         </button>
                         <button class="btn-view" style="background: #ef4444;" onclick="releaseOrder(${order.id})">
                             <i class="fas fa-undo"></i> Release
                         </button>
                     ` : ''}
-                    ${window.isAdmin || window.isFulfillmentAdmin ? `
+                    ${!isSalesUserReadOnly && (window.isAdmin || window.isFulfillmentAdmin) ? `
                         <button class="btn-view" style="background: #8b5cf6;" onclick="reassignOrder(${order.id})">
                             <i class="fas fa-user-exchange"></i> Reassign
                         </button>
@@ -186,6 +195,11 @@ function renderQueue(orders) {
                     <button class="btn-view" onclick="viewOrder(${order.id})">
                         <i class="fas fa-eye"></i> View Details
                     </button>
+                    ${isSalesUserReadOnly ? `
+                        <span style="color: var(--text-light); font-size: 0.875rem; margin-left: 1rem; display: inline-flex; align-items: center;">
+                            <i class="fas fa-lock" style="margin-right: 0.25rem;"></i> Read-Only
+                        </span>
+                    ` : ''}
                 </div>
             </div>
         `;
@@ -195,10 +209,26 @@ function renderQueue(orders) {
 /**
  * Update statistics
  */
-function updateStats(orders) {
-    const pending = orders.filter(o => o.status === 'Approved').length;
-    const inProgress = orders.filter(o => o.status === 'Fulfillment_Accepted').length;
-    const issues = orders.filter(o => o.status === 'Fulfillment_Issue').length;
+/**
+ * Update summary statistics
+ * @param {Object|Array} data - Either summary object with {pending, in_progress, issues} or array of orders
+ */
+function updateStats(data) {
+    let pending, inProgress, issues;
+    
+    // Check if data is a summary object (from API) or array of orders (fallback)
+    if (data && typeof data === 'object' && !Array.isArray(data) && 'pending' in data) {
+        // Use summary counts from API (unfiltered)
+        pending = data.pending || 0;
+        inProgress = data.in_progress || 0;
+        issues = data.issues || 0;
+    } else {
+        // Fallback: calculate from filtered orders array
+        const orders = Array.isArray(data) ? data : [];
+        pending = orders.filter(o => o.status === 'Approved').length;
+        inProgress = orders.filter(o => o.status === 'Fulfillment_Accepted').length;
+        issues = orders.filter(o => o.status === 'Fulfillment_Issue').length;
+    }
 
     document.getElementById('stat-pending').textContent = pending;
     document.getElementById('stat-in-progress').textContent = inProgress;
@@ -239,7 +269,23 @@ function applyFilters() {
         sortOrder: 'asc'
     };
     
+    // Update page size if changed
+    const newPageSize = parseInt(document.getElementById('page-size-select')?.value || pageSize);
+    if (newPageSize !== pageSize) {
+        pageSize = newPageSize;
+        currentPage = 1; // Reset to first page when page size changes
+    }
+    
     currentPage = 1;
+    loadQueue();
+}
+
+/**
+ * Handle page size change
+ */
+function changePageSize(newSize) {
+    pageSize = parseInt(newSize);
+    currentPage = 1; // Reset to first page
     loadQueue();
 }
 

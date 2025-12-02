@@ -311,6 +311,16 @@
                 <option value="delivery_zone">Delivery Zone</option>
             </select>
         </div>
+        <div class="filter-group">
+            <label>Items Per Page</label>
+            <select id="page-size-select" onchange="changePageSize(this.value)">
+                <option value="10">10</option>
+                <option value="20">20</option>
+                <option value="25" selected>25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+            </select>
+        </div>
     </div>
 
     <!-- Queue List -->
@@ -346,7 +356,19 @@
     <% } else { %>
     window.isFulfillmentAdmin = false;
     <% } %>
+    <% if (typeof isSalesUser !== 'undefined' && isSalesUser) { %>
+    window.isSalesUser = true;
+    <% } else { %>
+    window.isSalesUser = false;
+    <% } %>
+    <% if (typeof isFulfillmentUser !== 'undefined' && isFulfillmentUser) { %>
+    window.isFulfillmentUser = true;
+    <% } else { %>
+    window.isFulfillmentUser = false;
+    <% } %>
     console.log('Current User ID:', window.currentUserId); // Debug: check if it's set
+    console.log('Is Sales User (Read-Only):', window.isSalesUser);
+    console.log('Is Fulfillment User:', window.isFulfillmentUser);
 </script>
 <script src="/public/js/admin/fulfillment-queue.js"></script>
 

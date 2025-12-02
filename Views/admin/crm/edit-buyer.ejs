@@ -8,24 +8,29 @@
     </div>
 
     <!-- The form will POST its data to /admin/crm/buyers/:id -->
+    <% if (typeof isFulfillmentUser !== 'undefined' && isFulfillmentUser) { %>
+        <div style="padding: 1rem; background: #e3f2fd; color: #1976d2; border-radius: 4px; margin-bottom: 1rem;">
+            <i class="fas fa-info-circle"></i> <strong>Read-Only Mode:</strong> Fulfillment users can only edit the Zone field.
+        </div>
+    <% } %>
     <form action="/admin/crm/buyers/<%= buyer.details.entry_id %>" method="POST" class="styled-form">
         <div class="form-grid">
             <!-- Buyer Name -->
             <div class="form-group span-2">
                 <label for="name">Buyer Name</label>
-                <input type="text" id="name" name="name" required value="<%= buyer.details.name %>">
+                <input type="text" id="name" name="name" required value="<%= buyer.details.name %>" <%= (typeof isFulfillmentUser !== 'undefined' && isFulfillmentUser) ? 'readonly' : '' %>>
             </div>
 
             <!-- Website URL -->
             <div class="form-group span-2">
                 <label for="website_url">Website URL</label>
-                <input type="url" id="website_url" name="website_url" value="<%= buyer.details.website_url %>">
+                <input type="url" id="website_url" name="website_url" value="<%= buyer.details.website_url %>" <%= (typeof isFulfillmentUser !== 'undefined' && isFulfillmentUser) ? 'readonly' : '' %>>
             </div>
 
             <!-- Buyer Type -->
             <div class="form-group">
                 <label for="buyer_type">Buyer Type</label>
-                <select id="buyer_type" name="buyer_type">
+                <select id="buyer_type" name="buyer_type" <%= (typeof isFulfillmentUser !== 'undefined' && isFulfillmentUser) ? 'disabled' : '' %>>
                     <% const types = ["Dispensary", "Wholesaler", "Distributor", "Other"]; %>
                     <% types.forEach(type => { %>
                         <option value="<%= type %>" <% if (type === buyer.details.buyer_type) { %>selected<% } %>>
@@ -33,43 +38,60 @@
                         </option>
                     <% }); %>
                 </select>
+                <% if (typeof isFulfillmentUser !== 'undefined' && isFulfillmentUser) { %>
+                    <input type="hidden" name="buyer_type" value="<%= buyer.details.buyer_type %>">
+                <% } %>
+            </div>
+
+            <!-- Zone -->
+            <div class="form-group">
+                <label for="zone">Zone</label>
+                <input type="text" id="zone" name="zone" value="<%= buyer.details.zone || '' %>" placeholder="e.g., North, South, East, West">
             </div>
 
             <!-- Buyer Stage -->
             <div class="form-group">
                 <label for="fk_stage_id">Stage</label>
-                <select id="fk_stage_id" name="fk_stage_id" required>
+                <select id="fk_stage_id" name="fk_stage_id" required <%= (typeof isFulfillmentUser !== 'undefined' && isFulfillmentUser) ? 'disabled' : '' %>>
                     <% stages.forEach(stage => { %>
                         <option value="<%= stage.entry_id %>" <% if (stage.entry_id === buyer.details.fk_stage_id) { %>selected<% } %>>
                             <%= stage.name %>
                         </option>
                     <% }); %>
                 </select>
+                <% if (typeof isFulfillmentUser !== 'undefined' && isFulfillmentUser) { %>
+                    <input type="hidden" name="fk_stage_id" value="<%= buyer.details.fk_stage_id %>">
+                <% } %>
             </div>
 
             <!-- Deal Flow -->
             <div class="form-group span-2">
                 <label for="fk_deal_flow_id">Deal Flow</label>
-                <select id="fk_deal_flow_id" name="fk_deal_flow_id" required>
+                <select id="fk_deal_flow_id" name="fk_deal_flow_id" required <%= (typeof isFulfillmentUser !== 'undefined' && isFulfillmentUser) ? 'disabled' : '' %>>
                     <% dealFlows.forEach(flow => { %>
                         <option value="<%= flow.entry_id %>" <% if (flow.entry_id === buyer.details.fk_deal_flow_id) { %>selected<% } %>>
                             <%= flow.name %>
                         </option>
                     <% }); %>
                 </select>
+                <% if (typeof isFulfillmentUser !== 'undefined' && isFulfillmentUser) { %>
+                    <input type="hidden" name="fk_deal_flow_id" value="<%= buyer.details.fk_deal_flow_id %>">
+                <% } %>
             </div>
         </div>
 
         <div class="form-actions">
-            <div>
-                <button type="button" class="btn btn-danger"
-                        data-modal-target="#confirmationModal"
-                        data-modal-title="Delete Buyer?"
-                        data-modal-text="Are you sure you want to permanently delete <%= buyer.details.name %>? This action cannot be undone."
-                        data-modal-form-action="/admin/crm/buyers/<%= buyer.details.entry_id %>/delete">
-                    Delete Buyer
-                </button>
-            </div>
+            <% if (typeof isFulfillmentUser === 'undefined' || !isFulfillmentUser) { %>
+                <div>
+                    <button type="button" class="btn btn-danger"
+                            data-modal-target="#confirmationModal"
+                            data-modal-title="Delete Buyer?"
+                            data-modal-text="Are you sure you want to permanently delete <%= buyer.details.name %>? This action cannot be undone."
+                            data-modal-form-action="/admin/crm/buyers/<%= buyer.details.entry_id %>/delete">
+                        Delete Buyer
+                    </button>
+                </div>
+            <% } %>
             <div class="form-actions-right"> <!-- Added a wrapper for right-aligned buttons -->
                 <a href="/admin/crm/buyers/<%= buyer.details.entry_id %>" class="btn btn-secondary">Cancel</a>
                 <button type="submit" class="btn btn-primary">Save Changes</button>
