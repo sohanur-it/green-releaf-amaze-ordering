@@ -295,6 +295,23 @@ class InvoiceStateMachineService {
             
             // Fulfillment_Issue → Approved (Sales fixed the issue)
             if (from === 'Fulfillment_Issue' && to === 'Approved') {
+                // Validate that changes were made to line items before allowing kick back
+                const modifiedLineItems = await client.query(`
+                    SELECT COUNT(*) as count
+                    FROM "ORDERS-invoice-line-items"
+                    WHERE fk_invoice_id = $1 
+                    AND (was_modified = true OR fulfillment_issue_modification = true)
+                `, [invoiceId]);
+                
+                const hasModifications = parseInt(modifiedLineItems.rows[0]?.count || 0) > 0;
+                
+                if (!hasModifications) {
+                    return {
+                        success: false,
+                        error: 'Cannot kick back to fulfillment - no changes have been made to the invoice line items. Please modify at least one line item before returning to fulfillment.'
+                    };
+                }
+                
                 await client.query(`
                     UPDATE "ORDERS-invoices"
                     SET fulfillment_issue_reported_at = NULL, fulfillment_issue_note = NULL
@@ -361,8 +378,9 @@ class InvoiceStateMachineService {
                 console.log(`[StateMachine] Notification result:`, result);
             }
             
-            // Approved (from Pending): Notify fulfillment and customer (if external)
-            if (from === 'Pending_Approval' && to === 'Approved') {
+            // Approved (from Pending or Draft): Notify fulfillment and customer (if external)
+            if ((from === 'Pending_Approval' || from === 'Draft') && to === 'Approved') {
+                console.log(`[StateMachine] ${from} → Approved: Notifying fulfillment team for invoice ${invoiceId}`);
                 await this.notifyFulfillment(invoiceId);
                 
                 // Notify customer if external order

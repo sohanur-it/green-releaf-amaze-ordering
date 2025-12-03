@@ -131,7 +131,13 @@ async function loadQueue() {
         }
 
         renderQueue(data.queue);
-        updateStats(data.summary || data.queue); // Use summary if available, fallback to calculating from queue
+        // Always use summary counts from API (they are static and not affected by filters)
+        if (data.summary) {
+            updateStats(data.summary);
+        } else {
+            console.warn('Summary counts not provided by API, using fallback calculation');
+            updateStats(data.queue);
+        }
         updatePagination(data.pagination);
 
     } catch (error) {

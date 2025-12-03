@@ -98,6 +98,17 @@ function extractActionFromPath(req) {
         return 'batch_force_check';
     }
     
+    // Special handling for line item updates
+    if (path.includes('/invoices') && path.includes('/line-items')) {
+        if (method === 'patch' || method === 'put') {
+            return 'invoice_line_item_update';
+        } else if (method === 'post') {
+            return 'invoice_line_item_create';
+        } else if (method === 'delete') {
+            return 'invoice_line_item_delete';
+        }
+    }
+    
     // Extract resource from path
     let resource = 'unknown';
     if (path.includes('/orders')) resource = 'order';

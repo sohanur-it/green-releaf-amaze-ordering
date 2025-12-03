@@ -1372,6 +1372,27 @@ async function saveLineItemChanges() {
  * Kick back invoice to fulfillment after fixing issues
  */
 async function kickBackToFulfillment() {
+    // First check if any line items were modified
+    try {
+        const invoiceResponse = await fetch(`/api/v1/invoices/${invoiceId}`);
+        const invoiceData = await invoiceResponse.json();
+        
+        if (invoiceData.success && invoiceData.invoice) {
+            const lineItems = invoiceData.invoice.line_items || [];
+            const hasModifications = lineItems.some(item => 
+                item.was_modified === true || item.fulfillment_issue_modification === true
+            );
+            
+            if (!hasModifications) {
+                alert('Cannot kick back to fulfillment - no changes have been made to the invoice line items.\n\nPlease modify at least one line item (quantity, add, or remove items) before returning to fulfillment.');
+                return;
+            }
+        }
+    } catch (error) {
+        console.error('Error checking modifications:', error);
+        // Continue anyway - backend will validate
+    }
+    
     if (!confirm('Are you sure you want to kick this invoice back to fulfillment? This will change the status from Fulfillment_Issue to Approved.')) {
         return;
     }

@@ -92,6 +92,36 @@ class FulfillmentIssueService {
                 ]);
             }
 
+            // Log status change to invoice history (kicked back to sales)
+            await client.query(`
+                INSERT INTO "ORDERS-invoice-history" (
+                    fk_invoice_id,
+                    modification_type,
+                    field_name,
+                    old_value,
+                    new_value,
+                    reason,
+                    changed_by_user_id
+                ) VALUES ($1, 'status_changed', 'status', $2, 'Fulfillment_Issue', $3, $4)
+            `, [invoiceId, inv.status, `Invoice kicked back to sales team: ${issueNote}`, userId]);
+
+            // Log to audit log
+            const auditLogger = require('./auditLogger');
+            await auditLogger.logUserAction(
+                userId,
+                'invoice_kicked_back_to_sales',
+                'Invoice',
+                invoiceId.toString(),
+                {
+                    invoice_number: inv.invoice_number,
+                    old_status: inv.status,
+                    new_status: 'Fulfillment_Issue',
+                    issue_note: issueNote,
+                    issues: issues
+                },
+                'success'
+            );
+
             await client.query('COMMIT');
 
             // Notify assigned sales rep

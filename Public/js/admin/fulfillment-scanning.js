@@ -53,10 +53,83 @@ function getButtonByHandler(handlerName) {
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
-    initializeScanning();
+    // Check invoice status first before initializing scanning
+    checkInvoiceStatusBeforeInit();
     setupWebSocket();
     setupScannerInput();
 });
+
+/**
+ * Check invoice status before initializing scanning
+ */
+async function checkInvoiceStatusBeforeInit() {
+    try {
+        const response = await fetch(`/api/v1/invoices/${window.invoiceId}`);
+        if (response.ok) {
+            const data = await response.json();
+            if (data.success && data.data) {
+                const status = data.data.status;
+                
+                // If invoice has an issue, disable scanning and show message
+                if (status === 'Fulfillment_Issue') {
+                    disableScanningForIssue();
+                    return;
+                }
+            }
+        }
+        
+        // If no issue, proceed with normal initialization
+        initializeScanning();
+    } catch (error) {
+        console.error('Error checking invoice status:', error);
+        // Proceed with initialization anyway - backend will catch it
+        initializeScanning();
+    }
+}
+
+/**
+ * Disable scanning interface when invoice has an issue
+ */
+function disableScanningForIssue() {
+    // Disable scanner input
+    const scannerInput = document.getElementById('scanner-input');
+    if (scannerInput) {
+        scannerInput.disabled = true;
+        scannerInput.placeholder = 'Cannot scan - invoice has an active issue';
+        scannerInput.style.opacity = '0.5';
+        scannerInput.style.cursor = 'not-allowed';
+    }
+    
+    // Disable action buttons
+    const actionButtons = document.querySelectorAll('.action-buttons button');
+    actionButtons.forEach(btn => {
+        if (!btn.onclick || !btn.onclick.toString().includes('showIssueModal')) {
+            btn.disabled = true;
+            btn.style.opacity = '0.5';
+            btn.style.cursor = 'not-allowed';
+        }
+    });
+    
+    // Show warning message
+    const scanningContent = document.querySelector('.scanning-content');
+    if (scanningContent) {
+        const warningDiv = document.createElement('div');
+        warningDiv.style.cssText = 'padding: 1.5rem; background: #fef3c7; border: 2px solid #f59e0b; border-radius: 8px; margin-bottom: 1.5rem;';
+        warningDiv.innerHTML = `
+            <h3 style="margin: 0 0 0.5rem 0; color: #92400e;">
+                <i class="fas fa-exclamation-triangle"></i> Invoice Has Active Issue
+            </h3>
+            <p style="margin: 0; color: #78350f;">
+                This invoice has been returned to sales for resolution. Scanning is disabled until the issue is resolved.
+            </p>
+            <button onclick="window.location.href='/admin/fulfillment/queue'" 
+                    style="margin-top: 1rem; padding: 0.5rem 1rem; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                Return to Queue
+            </button>
+        `;
+        scanningContent.insertBefore(warningDiv, scanningContent.firstChild);
+    }
+}
 
 /**
  * Initialize scanning session
