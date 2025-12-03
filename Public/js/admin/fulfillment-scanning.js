@@ -4,6 +4,53 @@
 let scanningProgress = null;
 let websocketConnection = null;
 
+/**
+ * Utility: Show loading state on button
+ */
+function setButtonLoading(button, isLoading) {
+    if (!button) return;
+    
+    if (isLoading) {
+        button.classList.add('btn-loading');
+        button.disabled = true;
+        button.dataset.originalText = button.innerHTML;
+        // Keep the button text structure but make it transparent
+        const icon = button.querySelector('i');
+        if (icon) {
+            icon.style.opacity = '0';
+        }
+    } else {
+        button.classList.remove('btn-loading');
+        button.disabled = false;
+        if (button.dataset.originalText) {
+            button.innerHTML = button.dataset.originalText;
+            delete button.dataset.originalText;
+        }
+        const icon = button.querySelector('i');
+        if (icon) {
+            icon.style.opacity = '1';
+        }
+    }
+}
+
+/**
+ * Utility: Get button by onclick handler name or selector
+ */
+function getButtonByHandler(handlerName) {
+    // Try to find button by onclick attribute
+    const buttons = document.querySelectorAll(`button[onclick*="${handlerName}"]`);
+    if (buttons.length > 0) return buttons[0];
+    
+    // Try by class or id
+    const byClass = document.querySelector(`.${handlerName}`);
+    if (byClass) return byClass;
+    
+    const byId = document.getElementById(handlerName);
+    if (byId) return byId;
+    
+    return null;
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     initializeScanning();
@@ -333,6 +380,9 @@ function showRejectionAlert(alert, packageLabel) {
 async function verifyRejectedPackage() {
     if (!window.currentPackageLabel) return;
 
+    const button = document.querySelector('button[onclick="verifyRejectedPackage()"]');
+    setButtonLoading(button, true);
+
     try {
         const response = await fetch('/api/v1/fulfillment/scanning/verify-rejected', {
             method: 'POST',
@@ -361,6 +411,8 @@ async function verifyRejectedPackage() {
     } catch (error) {
         console.error('Error verifying package:', error);
         alert(`Error: ${error.message}`);
+    } finally {
+        setButtonLoading(button, false);
     }
 }
 
@@ -404,6 +456,9 @@ function showPackageRemovalConfirmation(alert, packageLabel) {
 async function acknowledgePackageRemoval() {
     if (!window.currentPackageLabel) return;
 
+    const button = document.querySelector('button[onclick="acknowledgePackageRemoval()"]');
+    setButtonLoading(button, true);
+
     try {
         // Log the acknowledgment
         const response = await fetch('/api/v1/fulfillment/scanning/acknowledge-removal', {
@@ -437,6 +492,8 @@ async function acknowledgePackageRemoval() {
     } catch (error) {
         console.error('Error acknowledging package removal:', error);
         alert(`Error: ${error.message}`);
+    } finally {
+        setButtonLoading(button, false);
     }
 }
 
@@ -539,8 +596,19 @@ async function completeScanning() {
         return;
     }
 
-    // Redirect to transportation details page
-    window.location.href = `/admin/fulfillment/transportation/${window.invoiceId}`;
+    const button = document.getElementById('btn-complete');
+    setButtonLoading(button, true);
+
+    try {
+        // Small delay to show loading state before redirect
+        await new Promise(resolve => setTimeout(resolve, 300));
+        // Redirect to transportation details page
+        window.location.href = `/admin/fulfillment/transportation/${window.invoiceId}`;
+    } catch (error) {
+        console.error('Error completing scanning:', error);
+        setButtonLoading(button, false);
+        alert(`Error: ${error.message}`);
+    }
 }
 
 /**
@@ -561,34 +629,76 @@ function showIssueModal() {
 /**
  * Populate batch selection in issue modal
  */
-function populateBatchSelection() {
+async function populateBatchSelection() {
     const container = document.getElementById('batch-selection-container');
     const reasonsContainer = document.getElementById('batch-reasons-container');
     
-    if (!scanningProgress || !scanningProgress.line_items || scanningProgress.line_items.length === 0) {
-        container.innerHTML = '<p style="color: var(--text-light); font-size: 0.875rem; margin: 0.5rem 0;">No line items available</p>';
-        return;
+    // Show loading state
+    container.innerHTML = '<p style="color: var(--text-light); font-size: 0.875rem; margin: 0.5rem 0;">Loading batches...</p>';
+    
+    try {
+        // Try to use cached scanningProgress first
+        let lineItems = null;
+        if (scanningProgress && scanningProgress.line_items && scanningProgress.line_items.length > 0) {
+            lineItems = scanningProgress.line_items;
+        } else {
+            // Fetch directly from API if not available
+            console.log('[Issue Modal] Fetching line items from API...');
+            const response = await fetch(`/api/v1/fulfillment/scanning/progress/${window.invoiceId}`);
+            const data = await response.json();
+            
+            if (response.ok && data.line_items && data.line_items.length > 0) {
+                lineItems = data.line_items;
+                // Update scanningProgress for future use
+                scanningProgress = data;
+            }
+        }
+        
+        if (!lineItems || lineItems.length === 0) {
+            container.innerHTML = '<p style="color: var(--text-light); font-size: 0.875rem; margin: 0.5rem 0; padding: 1rem; text-align: center;">No line items available for this invoice</p>';
+            return;
+        }
+        
+        container.innerHTML = lineItems.map(item => `
+            <div class="batch-selection-item" style="padding: 0.75rem; border-bottom: 1px solid var(--border-color, #e5e7eb); transition: background 0.2s;">
+                <label style="display: flex; align-items: center; cursor: pointer; gap: 0.75rem;">
+                    <input type="checkbox" 
+                           class="batch-checkbox" 
+                           data-line-item-id="${item.line_item_id}"
+                           data-batch-name="${item.batch_name || 'N/A'}"
+                           data-product-name="${item.product_name || 'Unknown Product'}"
+                           onchange="toggleBatchReason(${item.line_item_id})"
+                           style="margin: 0; width: 18px; height: 18px; cursor: pointer;">
+                    <div style="flex: 1;">
+                        <strong style="color: var(--text-color); display: block; margin-bottom: 0.25rem;">${item.product_name || 'Unknown Product'}</strong>
+                        <div style="font-size: 0.875rem; color: var(--text-light);">Batch: ${item.batch_name || 'N/A'}</div>
+                        ${item.quantity_ordered ? `<div style="font-size: 0.75rem; color: var(--text-light); margin-top: 0.25rem;">Qty: ${item.quantity_ordered}</div>` : ''}
+                    </div>
+                </label>
+            </div>
+        `).join('');
+        
+        // Add hover effect styles
+        const style = document.createElement('style');
+        style.textContent = `
+            .batch-selection-item:hover {
+                background: var(--hover-bg, #f3f4f6);
+            }
+            .dark-theme .batch-selection-item:hover {
+                background: var(--hover-bg, #2d3748);
+            }
+        `;
+        if (!document.getElementById('batch-selection-hover-style')) {
+            style.id = 'batch-selection-hover-style';
+            document.head.appendChild(style);
+        }
+        
+        reasonsContainer.innerHTML = '';
+        
+    } catch (error) {
+        console.error('Error loading batches for issue report:', error);
+        container.innerHTML = '<p style="color: #ef4444; font-size: 0.875rem; margin: 0.5rem 0; padding: 1rem; text-align: center;">Error loading batches. Please try again.</p>';
     }
-    
-    container.innerHTML = scanningProgress.line_items.map(item => `
-        <div style="padding: 0.5rem; border-bottom: 1px solid #eee;">
-            <label style="display: flex; align-items: center; cursor: pointer;">
-                <input type="checkbox" 
-                       class="batch-checkbox" 
-                       data-line-item-id="${item.line_item_id}"
-                       data-batch-name="${item.batch_name}"
-                       data-product-name="${item.product_name}"
-                       onchange="toggleBatchReason(${item.line_item_id})"
-                       style="margin-right: 0.5rem;">
-                <div style="flex: 1;">
-                    <strong>${item.product_name}</strong>
-                    <div style="font-size: 0.875rem; color: var(--text-light);">Batch: ${item.batch_name}</div>
-                </div>
-            </label>
-        </div>
-    `).join('');
-    
-    reasonsContainer.innerHTML = '';
 }
 
 /**
@@ -606,11 +716,11 @@ function toggleBatchReason(lineItemId) {
         reasonDiv.id = `batch-reason-${lineItemId}`;
         reasonDiv.style.marginBottom = '1rem';
         reasonDiv.style.padding = '1rem';
-        reasonDiv.style.background = '#f9fafb';
+        reasonDiv.style.background = 'var(--input-bg, #f9fafb)';
         reasonDiv.style.borderRadius = '6px';
-        reasonDiv.style.border = '1px solid #e5e7eb';
+        reasonDiv.style.border = '1px solid var(--border-color, #e5e7eb)';
         reasonDiv.innerHTML = `
-            <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: var(--text-color);">
                 Reason for ${productName} (${batchName}) <span style="color: #ef4444;">*</span>
             </label>
             <textarea 
@@ -619,7 +729,7 @@ function toggleBatchReason(lineItemId) {
                 required 
                 rows="3" 
                 placeholder="Describe the issue with this batch..." 
-                style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; resize: vertical;">
+                style="width: 100%; padding: 0.75rem; border: 1px solid var(--border-color, #ddd); border-radius: 6px; resize: vertical; background: var(--card-bg, white); color: var(--text-color);">
             </textarea>
         `;
         reasonsContainer.appendChild(reasonDiv);
@@ -900,6 +1010,14 @@ async function handleIssueReport(e) {
         issues[0].description += `\n\nGeneral Notes: ${generalDescription.trim()}`;
     }
 
+    // Get the submit button and show loading state
+    const submitButton = e.target.querySelector('button[type="submit"]') || 
+                         document.querySelector('#issue-form button[type="submit"]') ||
+                         document.querySelector('.btn-verify');
+    if (submitButton) {
+        setButtonLoading(submitButton, true);
+    }
+
     try {
         const response = await fetch('/api/v1/fulfillment/issues/report', {
             method: 'POST',
@@ -924,6 +1042,9 @@ async function handleIssueReport(e) {
     } catch (error) {
         console.error('Error reporting issue:', error);
         alert(`Error: ${error.message}`);
+        if (submitButton) {
+            setButtonLoading(submitButton, false);
+        }
     }
 }
 
@@ -967,6 +1088,9 @@ async function cancelScanning() {
         return;
     }
 
+    const button = document.querySelector('button[onclick="cancelScanning()"]');
+    setButtonLoading(button, true);
+
     try {
         const response = await fetch(`/api/v1/fulfillment/scanning/cancel/${window.sessionId}`, {
             method: 'POST',
@@ -990,6 +1114,7 @@ async function cancelScanning() {
     } catch (error) {
         console.error('Error cancelling scanning:', error);
         alert(`Error: ${error.message}`);
+        setButtonLoading(button, false);
     }
 }
 

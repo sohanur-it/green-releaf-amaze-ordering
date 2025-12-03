@@ -13,6 +13,49 @@ let currentFilters = {
     sortOrder: 'asc'
 };
 
+/**
+ * Utility: Show loading state on button
+ */
+function setButtonLoading(button, isLoading) {
+    if (!button) return;
+    
+    if (isLoading) {
+        button.classList.add('btn-loading');
+        button.disabled = true;
+        button.dataset.originalText = button.innerHTML;
+        // Keep the button text structure but make it transparent
+        const icon = button.querySelector('i');
+        if (icon) {
+            icon.style.opacity = '0';
+        }
+    } else {
+        button.classList.remove('btn-loading');
+        button.disabled = false;
+        if (button.dataset.originalText) {
+            button.innerHTML = button.dataset.originalText;
+            delete button.dataset.originalText;
+        }
+        const icon = button.querySelector('i');
+        if (icon) {
+            icon.style.opacity = '1';
+        }
+    }
+}
+
+/**
+ * Utility: Get button by event or selector
+ */
+function getButtonFromEvent(event, selector) {
+    if (event && event.target) {
+        return event.target.closest('button') || event.target;
+    }
+    if (selector) {
+        return document.querySelector(selector);
+    }
+    return null;
+}
+
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     loadDeliveryZones();
@@ -310,10 +353,18 @@ function refreshQueue() {
 /**
  * Claim an order
  */
+/**
+ * Claim an order
+ */
 async function claimOrder(invoiceId) {
     if (!confirm('Claim this order for fulfillment?')) {
         return;
     }
+
+    // Find the button that triggered this action
+    const button = document.querySelector(`button[onclick*="claimOrder(${invoiceId})"]`) ||
+                   document.querySelector(`button[onclick*="claimOrder('${invoiceId}')"]`);
+    setButtonLoading(button, true);
 
     try {
         const response = await fetch('/api/v1/fulfillment/queue/claim', {
@@ -336,6 +387,7 @@ async function claimOrder(invoiceId) {
     } catch (error) {
         console.error('Error claiming order:', error);
         alert(`Error: ${error.message}`);
+        setButtonLoading(button, false);
     }
 }
 
@@ -361,6 +413,11 @@ async function releaseOrder(invoiceId) {
         return;
     }
 
+    // Find the button that triggered this action
+    const button = document.querySelector(`button[onclick*="releaseOrder(${invoiceId})"]`) ||
+                   document.querySelector(`button[onclick*="releaseOrder('${invoiceId}')"]`);
+    setButtonLoading(button, true);
+
     try {
         const response = await fetch('/api/v1/fulfillment/queue/release', {
             method: 'POST',
@@ -382,6 +439,7 @@ async function releaseOrder(invoiceId) {
     } catch (error) {
         console.error('Error releasing order:', error);
         alert(`Error: ${error.message}`);
+        setButtonLoading(button, false);
     }
 }
 
@@ -393,6 +451,11 @@ async function reassignOrder(invoiceId) {
     if (!newWorkerId) {
         return;
     }
+
+    // Find the button that triggered this action
+    const button = document.querySelector(`button[onclick*="reassignOrder(${invoiceId})"]`) ||
+                   document.querySelector(`button[onclick*="reassignOrder('${invoiceId}')"]`);
+    setButtonLoading(button, true);
 
     try {
         const response = await fetch('/api/v1/fulfillment/admin/reassign', {
@@ -418,6 +481,18 @@ async function reassignOrder(invoiceId) {
     } catch (error) {
         console.error('Error reassigning order:', error);
         alert(`Error: ${error.message}`);
+        setButtonLoading(button, false);
     }
 }
+
+// Make functions globally accessible for onclick handlers
+window.claimOrder = claimOrder;
+window.releaseOrder = releaseOrder;
+window.reassignOrder = reassignOrder;
+window.startScanning = startScanning;
+window.viewOrder = viewOrder;
+window.refreshQueue = refreshQueue;
+window.applyFilters = applyFilters;
+window.changePageSize = changePageSize;
+window.changePage = changePage;
 

@@ -117,11 +117,24 @@ class InvoiceStateMachineService {
             }
             
             // Update status
-            await client.query(`
-                UPDATE "ORDERS-invoices"
-                SET status = $1, status_updated_at = NOW()
-                WHERE id = $2
-            `, [newStatus, invoiceId]);
+            // Special handling for Fulfillment_Issue → Approved: Clear fulfillment assignment
+            // so the order can be claimed again by any fulfillment worker
+            if (currentStatus === 'Fulfillment_Issue' && newStatus === 'Approved') {
+                await client.query(`
+                    UPDATE "ORDERS-invoices"
+                    SET status = $1, 
+                        status_updated_at = NOW(),
+                        fulfillment_accepted_by = NULL,
+                        fulfillment_accepted_at = NULL
+                    WHERE id = $2
+                `, [newStatus, invoiceId]);
+            } else {
+                await client.query(`
+                    UPDATE "ORDERS-invoices"
+                    SET status = $1, status_updated_at = NOW()
+                    WHERE id = $2
+                `, [newStatus, invoiceId]);
+            }
             
             // Log history
             // Use more descriptive modification_type for specific transitions

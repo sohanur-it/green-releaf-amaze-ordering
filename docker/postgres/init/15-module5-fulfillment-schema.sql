@@ -372,6 +372,7 @@ DO $$ BEGIN
     ALTER TYPE modification_type ADD VALUE IF NOT EXISTS 'destroyed_packages_finalized';
     ALTER TYPE modification_type ADD VALUE IF NOT EXISTS 'manifest_validation_failed';
     ALTER TYPE modification_type ADD VALUE IF NOT EXISTS 'partial_manifest_failure';
+    ALTER TYPE modification_type ADD VALUE IF NOT EXISTS 'kicked_back_to_fulfillment';
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;

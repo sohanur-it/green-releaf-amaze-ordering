@@ -27,12 +27,16 @@ const updateLocation = async (req, res) => {
             const userRoles = await UserModel.getUserRoles(userId);
             const userRoleNames = userRoles.map(r => (r.name || r.role_name || '').trim()).filter(Boolean);
             const normalizeRole = (role) => role.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
-            const isFulfillmentUser = userRoleNames.some(r => {
+            const isAdmin = userRoleNames.some(r => r.toLowerCase() === 'administrator');
+            const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
+            const hasFulfillmentRole = userRoleNames.some(r => {
                 const normalized = normalizeRole(r);
                 return normalized === 'fulfillment team' || 
                        normalized === 'fulfillment worker' || 
                        normalized === 'fulfillment admin';
             });
+            // Only treat as fulfillment-only user if they have fulfillment role BUT NOT Sales Admin/Rep or Admin
+            const isFulfillmentUser = hasFulfillmentRole && !isAdmin && !isSalesAdmin && !userRoleNames.some(r => r.toLowerCase() === 'sales representative');
             
             if (isFulfillmentUser) {
                 // Fulfillment users can only update delivery_zone

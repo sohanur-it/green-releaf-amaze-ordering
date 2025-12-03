@@ -76,15 +76,20 @@ const getBuyerById = async (req, res, next) => {
         }
 
         // Check if user is fulfillment user for read-only restrictions
+        // Only set isFulfillmentUser to true if user has ONLY fulfillment roles (no Sales Admin/Rep or Admin)
         const userRoles = await UserModel.getUserRoles(req.session.userId);
         const userRoleNames = userRoles.map(r => (r.name || r.role_name || '').trim()).filter(Boolean);
         const normalizeRole = (role) => role.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
-        const isFulfillmentUser = userRoleNames.some(r => {
+        const isAdmin = userRoleNames.some(r => r.toLowerCase() === 'administrator');
+        const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
+        const hasFulfillmentRole = userRoleNames.some(r => {
             const normalized = normalizeRole(r);
             return normalized === 'fulfillment team' || 
                    normalized === 'fulfillment worker' || 
                    normalized === 'fulfillment admin';
         });
+        // Only treat as fulfillment-only user if they have fulfillment role BUT NOT Sales Admin/Rep or Admin
+        const isFulfillmentUser = hasFulfillmentRole && !isAdmin && !isSalesAdmin && !userRoleNames.some(r => r.toLowerCase() === 'sales representative');
         
         // if we found the buyer, render the profile page and pass in all the data
         res.render('admin/crm/buyer-profile', {
@@ -189,12 +194,16 @@ const updateBuyer = async (req, res, next) => {
             const userRoles = await UserModel.getUserRoles(userId);
             const userRoleNames = userRoles.map(r => (r.name || r.role_name || '').trim()).filter(Boolean);
             const normalizeRole = (role) => role.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
-            const isFulfillmentUser = userRoleNames.some(r => {
+            const isAdmin = userRoleNames.some(r => r.toLowerCase() === 'administrator');
+            const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
+            const hasFulfillmentRole = userRoleNames.some(r => {
                 const normalized = normalizeRole(r);
                 return normalized === 'fulfillment team' || 
                        normalized === 'fulfillment worker' || 
                        normalized === 'fulfillment admin';
             });
+            // Only treat as fulfillment-only user if they have fulfillment role BUT NOT Sales Admin/Rep or Admin
+            const isFulfillmentUser = hasFulfillmentRole && !isAdmin && !isSalesAdmin && !userRoleNames.some(r => r.toLowerCase() === 'sales representative');
             
             if (isFulfillmentUser) {
                 // Fulfillment users can only update zone field

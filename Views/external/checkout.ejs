@@ -1204,6 +1204,7 @@ function updateCheckoutTotal() {
         // Total should be sum of all line_total values (already discounted) minus credits
         let totalVal = lineItemsSubtotal;
         let pricingResult = null;
+        let pricingApiSuccess = false; // Track if pricing API was called successfully
         
         console.log('[checkout] Initial values:', { subtotalVal, discountsVal, creditsVal, totalVal });
         
@@ -1235,6 +1236,7 @@ function updateCheckoutTotal() {
                 });
                 console.log('[checkout] pricing response status:', pricingRes.status);
                 if (pricingRes.ok) {
+                    pricingApiSuccess = true; // Mark pricing API as successful
                     const pricing = await pricingRes.json();
                     console.log('[checkout] pricing API full response:', JSON.stringify(pricing, null, 2));
                     pricingResult = pricing?.result || null;
@@ -1352,11 +1354,18 @@ function updateCheckoutTotal() {
             
             // Compute final total using consistent formula: subtotal - discounts - credits
             // This ensures all pages (cart, checkout, confirmation, orders) use the same calculation
-            if (pricingResult) {
+            if (pricingApiSuccess) {
                 // Pricing API was called successfully
                 // Pricing API total is: subtotal - discounts
                 // Final total should be: subtotal - discounts - credits
                 totalVal = Math.max(0, subtotalVal - discountsVal - creditsVal);
+                console.log('[checkout] ✅ Using pricing API values for total calculation:', {
+                    subtotalVal,
+                    discountsVal,
+                    creditsVal,
+                    totalVal,
+                    formula: `${subtotalVal} - ${discountsVal} - ${creditsVal} = ${totalVal}`
+                });
             } else {
                 // Fallback: if pricing API failed, use sum of line items
                 // Line items already have discounts applied in their line_total

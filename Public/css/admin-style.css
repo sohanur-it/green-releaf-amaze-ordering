@@ -1407,6 +1407,41 @@ html.sidebar-is-collapsed .sidebar-title-full {
 .btn-primary { background-color: var(--primary-color); color: #fff; }
 .btn-primary:hover { background-color: var(--primary-hover); }
 #addItemBtn.btn.btn-primary.btn-block { width: 100%; display: block; }
+
+/* Button Loading States - Global */
+.btn-loading {
+    position: relative;
+    color: transparent !important;
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.btn-loading::after {
+    content: "";
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    top: 50%;
+    left: 50%;
+    margin-left: -10px;
+    margin-top: -10px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: button-spin 0.8s linear infinite;
+}
+
+@keyframes button-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Dark theme button loading */
+.dark-theme .btn-loading::after {
+    border-color: rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+}
 .btn-block { width: 100%; display: block; }
 #buyer-table-wrapper { background-color: var(--card-bg, #fff); border-radius: 10px; padding: 10px; transition: background-color 0.3s ease; }
 /* Sales Rep Modal - Full Width Fields */

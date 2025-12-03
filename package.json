@@ -33,6 +33,8 @@
     "db:backup-schema-node": "node scripts/backup-production-schema.js",
     "db:setup-local": "node scripts/setup-local-database.js",
     "db:setup-local-with-data": "node scripts/setup-local-database.js --with-data",
+    "db:add-kicked-back-enum": "node scripts/add-kicked-back-to-fulfillment-enum.js",
+    "db:add-kicked-back-enum:prod": "NODE_ENV=production node scripts/add-kicked-back-to-fulfillment-enum.js",
     "db:backup-production-with-data": "./scripts/backup-production-with-data.sh",
     "test:metrc": "node tests/api/test-metrc-apis.js",
     "test:production": "node tests/integration/test-production-sync.js",

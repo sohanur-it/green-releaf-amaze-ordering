@@ -284,6 +284,41 @@
     background: #dc2626;
 }
 
+/* Button Loading States */
+.btn-loading {
+    position: relative;
+    color: transparent !important;
+    pointer-events: none;
+    opacity: 0.7;
+}
+
+.btn-loading::after {
+    content: "";
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    top: 50%;
+    left: 50%;
+    margin-left: -10px;
+    margin-top: -10px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: button-spin 0.8s linear infinite;
+}
+
+@keyframes button-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* Dark theme button loading */
+.dark-theme .btn-loading::after {
+    border-color: rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+}
+
 .rejection-alert-modal {
     display: none;
     position: fixed;
@@ -308,6 +343,13 @@
     max-width: 500px;
     width: 90%;
     box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+    color: var(--text-color);
+}
+
+.dark-theme .rejection-alert-content {
+    background: var(--card-bg, #242933);
+    border: 1px solid var(--border-color, #374151);
+    color: var(--text-color);
 }
 
 .rejection-alert-content h3 {
@@ -315,11 +357,20 @@
     color: #991b1b;
 }
 
+.dark-theme .rejection-alert-content h3 {
+    color: #fca5a5;
+}
+
 .rejection-alert-content .alert-details {
     background: #fee2e2;
     padding: 1rem;
     border-radius: 8px;
     margin: 1rem 0;
+}
+
+.dark-theme .rejection-alert-content .alert-details {
+    background: #7f1d1d;
+    color: #fee2e2;
 }
 
 .rejection-alert-content .alert-actions {
@@ -348,6 +399,49 @@
     font-weight: 600;
     cursor: pointer;
     flex: 1;
+}
+
+/* Dark mode styles for issue modal */
+.dark-theme .rejection-alert-content label {
+    color: var(--text-color);
+}
+
+.dark-theme .rejection-alert-content select,
+.dark-theme .rejection-alert-content textarea,
+.dark-theme .rejection-alert-content input[type="text"],
+.dark-theme .rejection-alert-content input[type="number"] {
+    background: var(--input-bg, #1f2937);
+    border-color: var(--border-color, #374151);
+    color: var(--text-color);
+}
+
+.dark-theme .rejection-alert-content select:focus,
+.dark-theme .rejection-alert-content textarea:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+.dark-theme #batch-selection-container {
+    background: var(--input-bg, #1f2937);
+    border-color: var(--border-color, #374151);
+}
+
+.dark-theme #batch-selection-container > div {
+    border-bottom-color: var(--border-color, #374151);
+}
+
+.dark-theme #batch-selection-container > div:hover {
+    background: var(--hover-bg, #2d3748);
+}
+
+.dark-theme #batch-selection-container input[type="checkbox"] {
+    accent-color: #3b82f6;
+}
+
+.dark-theme #batch-reasons-container > div {
+    background: var(--input-bg, #1f2937);
+    border-color: var(--border-color, #374151);
 }
 </style>
 
@@ -432,8 +526,8 @@
         <h3><i class="fas fa-exclamation-triangle"></i> Report Fulfillment Issue</h3>
         <form id="issue-form">
             <div style="margin-bottom: 1rem;">
-                <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Issue Type</label>
-                <select id="issue-type" required style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px;">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: var(--text-color);">Issue Type</label>
+                <select id="issue-type" required style="width: 100%; padding: 0.75rem; border: 1px solid var(--border-color, #ddd); border-radius: 6px; background: var(--input-bg, white); color: var(--text-color);">
                     <option value="">Select Issue Type</option>
                     <option value="batch_unavailable">Batch Unavailable</option>
                     <option value="package_damaged">Package Damaged</option>
@@ -443,8 +537,8 @@
                 </select>
             </div>
             <div style="margin-bottom: 1rem;">
-                <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Select Affected Batches <span style="color: #ef4444;">*</span></label>
-                <div id="batch-selection-container" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px; padding: 0.5rem;">
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: var(--text-color);">Select Affected Batches <span style="color: #ef4444;">*</span></label>
+                <div id="batch-selection-container" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border-color, #ddd); border-radius: 6px; padding: 0.5rem; background: var(--input-bg, #f9fafb);">
                     <p style="color: var(--text-light); font-size: 0.875rem; margin: 0.5rem 0;">Loading batches...</p>
                 </div>
             </div>
@@ -452,8 +546,8 @@
                 <!-- Dynamic batch reason fields will be added here -->
             </div>
             <div style="margin-bottom: 1rem;">
-                <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">General Description (optional)</label>
-                <textarea id="issue-description" rows="3" placeholder="Additional notes about the issue..." style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; resize: vertical;"></textarea>
+                <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: var(--text-color);">General Description (optional)</label>
+                <textarea id="issue-description" rows="3" placeholder="Additional notes about the issue..." style="width: 100%; padding: 0.75rem; border: 1px solid var(--border-color, #ddd); border-radius: 6px; resize: vertical; background: var(--input-bg, white); color: var(--text-color);"></textarea>
             </div>
             <div class="alert-actions">
                 <button type="button" class="btn-skip" onclick="closeIssueModal()">Cancel</button>

@@ -359,13 +359,16 @@ class InvoiceController {
             const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
             
             // Check if user is fulfillment user (normalize role names for comparison)
+            // Only set isFulfillmentUser to true if user has ONLY fulfillment roles (no Sales Admin/Rep or Admin)
             const normalizeRole = (role) => role ? role.toLowerCase().replace(/[\s_-]+/g, ' ').trim() : '';
-            const isFulfillmentUser = userRoleNames.some(r => {
+            const hasFulfillmentRole = userRoleNames.some(r => {
                 const normalized = normalizeRole(r);
                 return normalized === 'fulfillment team' || 
                        normalized === 'fulfillment worker' || 
                        normalized === 'fulfillment admin';
             });
+            // Only treat as fulfillment-only user if they have fulfillment role BUT NOT Sales Admin/Rep or Admin
+            const isFulfillmentUser = hasFulfillmentRole && !isAdmin && !isSalesAdmin && !userRoleNames.some(r => r.toLowerCase() === 'sales representative');
             
             // Use LEFT JOIN to show invoices even if buyer/location is missing
             let queryStr = `
@@ -977,15 +980,18 @@ class InvoiceController {
             const userRoleNames = userRoles.map(r => r.name || r.role_name).filter(Boolean);
             
             const normalizeRole = (role) => role.toLowerCase().replace(/[\s_-]+/g, ' ').trim();
-            const isFulfillmentUser = userRoleNames.some(r => {
+            
+            const isAdmin = isSuperuser || userRoleNames.some(r => r.toLowerCase() === 'administrator');
+            const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
+            const hasFulfillmentRole = userRoleNames.some(r => {
                 const normalized = normalizeRole(r);
                 return normalized === 'fulfillment team' || 
                        normalized === 'fulfillment worker' || 
                        normalized === 'fulfillment admin';
             });
-            
-            const isAdmin = isSuperuser || userRoleNames.some(r => r.toLowerCase() === 'administrator');
-            const isSalesAdmin = userRoleNames.some(r => r.toLowerCase() === 'sales admin');
+            // Only treat as fulfillment-only user if they have fulfillment role BUT NOT Sales Admin/Rep or Admin
+            // Users with Sales Admin + Fulfillment should get Sales Admin permissions (write access)
+            const isFulfillmentUser = hasFulfillmentRole && !isAdmin && !isSalesAdmin && !userRoleNames.some(r => r.toLowerCase() === 'sales representative');
             const isSalesRep = !isAdmin && !isSalesAdmin && !isFulfillmentUser && userRoleNames.some(r => r.toLowerCase() === 'sales representative');
             
             // Get invoice with location info

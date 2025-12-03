@@ -85,6 +85,27 @@
 .status-shipped { background: #e8eaf6; color: #283593; }
 .status-delivered { background: #c8e6c9; color: #1b5e20; }
 .status-paid { background: #4caf50; color: white; }
+
+/* Fulfillment Issue Alert */
+.fulfillment-issue-alert {
+    background: #fef3c7;
+    border: 1px solid #f59e0b;
+    border-left: 4px solid #f59e0b;
+}
+
+.dark-theme .fulfillment-issue-alert {
+    background: #78350f;
+    border-color: #f59e0b;
+    color: var(--text-color);
+}
+
+.dark-theme .fulfillment-issue-alert h4 {
+    color: #fbbf24;
+}
+
+.dark-theme .fulfillment-issue-alert p {
+    color: #fcd34d;
+}
 </style>
 
 <div class="page-header">
@@ -421,16 +442,30 @@
                 <button onclick="saveLineItemChanges()" class="btn btn-primary">
                     <i class="fas fa-save"></i> Save Changes
                 </button>
-                <% if (invoice.status === 'Fulfillment_Issue' && !isFulfillmentUser) { %>
-                <button onclick="kickBackToFulfillment()" class="btn btn-success" id="kick-back-btn" style="display: none;">
-                    <i class="fas fa-arrow-right"></i> Kick Back to Fulfillment
-                </button>
-                <% } %>
                 <button onclick="cancelEditLineItems()" class="btn btn-secondary">
                     Cancel
                 </button>
             </div>
         </div>
+        
+        <!-- Kick Back to Fulfillment Button - Always visible when invoice is in Fulfillment_Issue status -->
+        <% if (invoice.status === 'Fulfillment_Issue' && !isFulfillmentUser) { %>
+        <div class="fulfillment-issue-alert" style="margin-top: 1.5rem; padding: 1rem; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; border-left: 4px solid #f59e0b;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                <div style="flex: 1; min-width: 250px;">
+                    <h4 style="margin: 0 0 0.5rem 0; color: var(--text-color);">
+                        <i class="fas fa-exclamation-triangle" style="color: #f59e0b;"></i> Fulfillment Issue Reported
+                    </h4>
+                    <p style="margin: 0; color: var(--text-light); font-size: 0.875rem;">
+                        This invoice has a fulfillment issue. After making necessary changes, click below to return it to the fulfillment queue.
+                    </p>
+                </div>
+                <button onclick="kickBackToFulfillment()" class="btn btn-success" id="kick-back-btn" style="white-space: nowrap; flex-shrink: 0;">
+                    <i class="fas fa-arrow-right"></i> Kick Back to Fulfillment
+                </button>
+            </div>
+        </div>
+        <% } %>
         
         <!-- Invoice Totals Breakdown -->
         <div style="margin-top: 2rem; padding-top: 1.5rem; border-top: 2px solid var(--border-color, #dee2e6);">
@@ -523,7 +558,48 @@
 
 <script>
 const invoiceId = <%= invoice.id %>;
+const invoiceStatus = '<%= invoice.status %>';
 let isEditMode = false;
+
+/**
+ * Utility: Show loading state on button
+ */
+function setButtonLoading(button, isLoading) {
+    if (!button) return;
+    
+    if (isLoading) {
+        button.classList.add('btn-loading');
+        button.disabled = true;
+        button.dataset.originalText = button.innerHTML;
+        // Keep the button text structure but make it transparent
+        const icon = button.querySelector('i');
+        if (icon) {
+            icon.style.opacity = '0';
+        }
+    } else {
+        button.classList.remove('btn-loading');
+        button.disabled = false;
+        if (button.dataset.originalText) {
+            button.innerHTML = button.dataset.originalText;
+            delete button.dataset.originalText;
+        }
+        const icon = button.querySelector('i');
+        if (icon) {
+            icon.style.opacity = '1';
+        }
+    }
+}
+
+// Initialize page - ensure "Kick Back to Fulfillment" button is visible if invoice is in Fulfillment_Issue status
+document.addEventListener('DOMContentLoaded', () => {
+    if (invoiceStatus === 'Fulfillment_Issue') {
+        const kickBackBtn = document.getElementById('kick-back-btn');
+        if (kickBackBtn) {
+            // Button should already be visible from server-side rendering, but ensure it's shown
+            kickBackBtn.style.display = 'inline-block';
+        }
+    }
+});
 
 async function cloneInvoice() {
     if (!confirm('Create a duplicate of this invoice? This will copy all products and amounts.')) {
@@ -1247,7 +1323,11 @@ async function saveLineItemChanges() {
         }
         return;
     }
-    
+
+    // Get the save button and show loading state
+    const saveButton = document.querySelector('button[onclick="saveLineItemChanges()"]');
+    setButtonLoading(saveButton, true);
+
     try {
         // Update each line item
         for (const change of changes) {
@@ -1271,11 +1351,8 @@ async function saveLineItemChanges() {
             alert('Line items updated successfully!');
         }
         
-        // Show "Kick Back to Fulfillment" button if invoice is in Fulfillment_Issue status
-        const kickBackBtn = document.getElementById('kick-back-btn');
-        if (kickBackBtn) {
-            kickBackBtn.style.display = 'inline-block';
-        }
+        // "Kick Back to Fulfillment" button should already be visible from server-side rendering
+        // No need to show/hide it - it's always visible when invoice is in Fulfillment_Issue status
         
         // Don't reload immediately - let user click "Kick Back to Fulfillment" if needed
         // setTimeout(() => window.location.reload(), 1000);
@@ -1286,6 +1363,8 @@ async function saveLineItemChanges() {
         } else {
             alert('Failed to update line items: ' + error.message);
         }
+    } finally {
+        setButtonLoading(saveButton, false);
     }
 }
 
@@ -1296,6 +1375,10 @@ async function kickBackToFulfillment() {
     if (!confirm('Are you sure you want to kick this invoice back to fulfillment? This will change the status from Fulfillment_Issue to Approved.')) {
         return;
     }
+    
+    // Get the button and show loading state
+    const button = document.getElementById('kick-back-btn');
+    setButtonLoading(button, true);
     
     try {
         const response = await fetch(`/api/v1/invoices/${invoiceId}/transition`, {
@@ -1324,6 +1407,7 @@ async function kickBackToFulfillment() {
         setTimeout(() => window.location.reload(), 1000);
     } catch (error) {
         console.error('Error:', error);
+        setButtonLoading(button, false);
         if (typeof showNotification === 'function') {
             showNotification('Failed to kick back to fulfillment: ' + error.message, 'error');
         } else {
