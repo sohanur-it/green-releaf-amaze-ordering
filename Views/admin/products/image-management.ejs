@@ -1,146 +1,180 @@
 <!-- Product Image Management Page -->
 <div class="image-management-container">
-    <div class="page-header">
-        <a href="/admin/products" class="back-link" title="Back to Products">&larr;</a>
-        <div>
-            <h2>Manage Product Images</h2>
-            <p class="product-name"><%= product.name %></p>
+  <div class="page-header">
+    <a href="/admin/products" class="back-link" title="Back to Products"
+      >&larr;</a
+    >
+    <div>
+      <h2>Manage Product Images</h2>
+      <p class="product-name"><%= product.name %></p>
+    </div>
+  </div>
+
+  <div class="image-management-content">
+    <!-- Upload Section -->
+    <div class="upload-section">
+      <h3>Upload New Images</h3>
+      <div class="image-upload-dropzone" id="imageDropzone">
+        <input
+          type="file"
+          id="product-images-input"
+          multiple
+          accept="image/*"
+          style="display: none"
+        />
+        <div class="dropzone-content">
+          <i class="fas fa-cloud-upload-alt"></i>
+          <p>Click to upload or drag and drop</p>
+          <small>PNG, JPG, GIF up to 5MB each (max 10 images)</small>
         </div>
+      </div>
+      <button
+        type="button"
+        id="uploadBtn"
+        class="btn btn-primary mt-3"
+        style="display: none"
+      >
+        <i class="fas fa-upload"></i> Upload Images
+      </button>
+      <!-- Upload Progress -->
+      <div
+        id="uploadProgressContainer"
+        class="upload-progress-container"
+        style="display: none"
+      >
+        <div class="upload-progress-header">
+          <span id="uploadProgressText">Uploading...</span>
+          <span id="uploadProgressPercent">0%</span>
+        </div>
+        <div class="upload-progress-bar">
+          <div id="uploadProgressBar" class="upload-progress-fill"></div>
+        </div>
+        <div id="uploadFileList" class="upload-file-list"></div>
+      </div>
     </div>
 
-    <div class="image-management-content">
-        <!-- Upload Section -->
-        <div class="upload-section">
-            <h3>Upload New Images</h3>
-            <div class="image-upload-dropzone" id="imageDropzone">
-                <input type="file" id="product-images-input" multiple accept="image/*" style="display: none;">
-                <div class="dropzone-content">
-                    <i class="fas fa-cloud-upload-alt"></i>
-                    <p>Click to upload or drag and drop</p>
-                    <small>PNG, JPG, GIF up to 5MB each (max 10 images)</small>
-                </div>
-            </div>
-            <button type="button" id="uploadBtn" class="btn btn-primary mt-3" style="display: none;">
-                <i class="fas fa-upload"></i> Upload Images
-            </button>
-            <!-- Upload Progress -->
-            <div id="uploadProgressContainer" class="upload-progress-container" style="display: none;">
-                <div class="upload-progress-header">
-                    <span id="uploadProgressText">Uploading...</span>
-                    <span id="uploadProgressPercent">0%</span>
-                </div>
-                <div class="upload-progress-bar">
-                    <div id="uploadProgressBar" class="upload-progress-fill"></div>
-                </div>
-                <div id="uploadFileList" class="upload-file-list"></div>
-            </div>
+    <!-- Existing Images Section -->
+    <div class="existing-images-section">
+      <h3>
+        Existing Images
+        <span class="badge bg-secondary" id="imageCount"
+          ><%= images.length %></span
+        >
+      </h3>
+      <div id="imagesGrid" class="images-grid">
+        <% if (images.length === 0) { %>
+        <div class="empty-state">
+          <i class="fas fa-images fa-3x"></i>
+          <p>No images uploaded yet</p>
         </div>
-
-        <!-- Existing Images Section -->
-        <div class="existing-images-section">
-            <h3>Existing Images <span class="badge bg-secondary" id="imageCount"><%= images.length %></span></h3>
-            <div id="imagesGrid" class="images-grid">
-                <% if (images.length === 0) { %>
-                    <div class="empty-state">
-                        <i class="fas fa-images fa-3x"></i>
-                        <p>No images uploaded yet</p>
-                    </div>
-                <% } else { %>
-                    <% images.forEach((image, index) => { %>
-                        <div class="image-card <%= image.is_featured ? 'featured' : '' %>" data-image-id="<%= image.id %>">
-                            <div class="image-wrapper">
-                                <img src="<%= image.url %>" alt="<%= image.alt_text || product.name %>" 
-                                     onerror="this.src='/public/images/placeholder.jpg'">
-                                <% if (image.is_featured) { %>
-                                    <span class="primary-badge">Featured</span>
-                                <% } %>
-                                <div class="image-actions">
-                                    <% if (!image.is_featured) { %>
-                                        <button class="set-featured-btn" data-image-id="<%= image.id %>" title="Set as Featured">
-                                            <i class="fas fa-star"></i>
-                                        </button>
-                                    <% } %>
-                                    <button class="delete-image-btn" data-image-id="<%= image.id %>" title="Delete Image">
-                                        <i class="fas fa-trash"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="image-info">
-                                <p class="image-filename"><%= image.original_filename %></p>
-                                <small class="text-muted">
-                                    <%= new Date(image.uploaded_at).toLocaleDateString() %>
-                                    • <%= (image.file_size / 1024).toFixed(1) %> KB
-                                </small>
-                            </div>
-                        </div>
-                    <% }); %>
-                <% } %>
+        <% } else { %> <% images.forEach((image, index) => { %>
+        <div
+          class="image-card <%= image.is_featured ? 'featured' : '' %>"
+          data-image-id="<%= image.id %>"
+        >
+          <div class="image-wrapper">
+            <img
+              src="<%= image.url %>"
+              alt="<%= image.alt_text || product.name %>"
+              onerror="this.src='/public/images/placeholder.jpg'"
+            />
+            <% if (image.is_featured) { %>
+            <span class="primary-badge">Featured</span>
+            <% } %>
+            <div class="image-actions">
+              <% if (!image.is_featured) { %>
+              <button
+                class="set-featured-btn"
+                data-image-id="<%= image.id %>"
+                title="Set as Featured"
+              >
+                <i class="fas fa-star"></i>
+              </button>
+              <% } %>
+              <button
+                class="delete-image-btn"
+                data-image-id="<%= image.id %>"
+                title="Delete Image"
+              >
+                <i class="fas fa-trash"></i>
+              </button>
             </div>
+          </div>
+          <div class="image-info">
+            <p class="image-filename"><%= image.original_filename %></p>
+            <small class="text-muted">
+              <%= new Date(image.uploaded_at).toLocaleDateString() %> • <%=
+              (image.file_size / 1024).toFixed(1) %> KB
+            </small>
+          </div>
         </div>
+        <% }); %> <% } %>
+      </div>
     </div>
+  </div>
 </div>
 
 <style>
-.image-management-container {
+  .image-management-container {
     max-width: 1200px;
     margin: 2rem auto;
     padding: 0 1rem;
-}
+  }
 
-.page-header {
+  .page-header {
     display: flex;
     align-items: center;
     gap: 1rem;
     margin-bottom: 2rem;
     padding-bottom: 1rem;
     border-bottom: 2px solid #f3f4f6;
-}
+  }
 
-.back-link {
+  .back-link {
     font-size: 1.5rem;
     color: #667eea;
     text-decoration: none;
     padding: 0.5rem;
     transition: color 0.3s;
-}
+  }
 
-.back-link:hover {
+  .back-link:hover {
     color: #764ba2;
-}
+  }
 
-.page-header h2 {
+  .page-header h2 {
     margin: 0;
-}
+  }
 
-.product-name {
+  .product-name {
     margin: 0.25rem 0 0 0;
     color: #6b7280;
     font-size: 1rem;
-}
+  }
 
-.image-management-content {
+  .image-management-content {
     display: grid;
     gap: 2rem;
-}
+  }
 
-.upload-section,
-.existing-images-section {
+  .upload-section,
+  .existing-images-section {
     background: white;
     border-radius: 15px;
     padding: 2rem;
-    box-shadow: 0 5px 15px rgba(0,0,0,0.08);
-}
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.08);
+  }
 
-.upload-section h3,
-.existing-images-section h3 {
+  .upload-section h3,
+  .existing-images-section h3 {
     margin: 0 0 1.5rem 0;
     color: #1f2937;
     display: flex;
     align-items: center;
     gap: 0.5rem;
-}
+  }
 
-.image-upload-dropzone {
+  .image-upload-dropzone {
     border: 2px dashed #ddd;
     border-radius: 8px;
     padding: 3rem;
@@ -148,71 +182,71 @@
     cursor: pointer;
     transition: all 0.3s;
     background: #f9fafb;
-}
+  }
 
-.image-upload-dropzone:hover {
+  .image-upload-dropzone:hover {
     border-color: #667eea;
     background: #f0f4ff;
-}
+  }
 
-.image-upload-dropzone.dragover {
+  .image-upload-dropzone.dragover {
     border-color: #667eea;
     background: #e8f0fe;
-}
+  }
 
-.dropzone-content i {
+  .dropzone-content i {
     font-size: 3rem;
     color: #667eea;
     margin-bottom: 1rem;
-}
+  }
 
-.dropzone-content p {
+  .dropzone-content p {
     margin: 0.5rem 0;
     color: #4b5563;
     font-weight: 500;
-}
+  }
 
-.dropzone-content small {
+  .dropzone-content small {
     color: #6b7280;
-}
+  }
 
-.images-grid {
+  .images-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
     gap: 1.5rem;
-}
+  }
 
-.image-card {
+  .image-card {
     background: white;
     border-radius: 8px;
     overflow: hidden;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
     transition: transform 0.2s, box-shadow 0.2s;
-}
+  }
 
-.image-card:hover {
+  .image-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-}
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
 
-.image-wrapper {
+  .image-wrapper {
     position: relative;
     width: 100%;
     padding-top: 100%; /* 1:1 aspect ratio */
     background: #f9fafb;
     overflow: hidden;
-}
+  }
 
-.image-wrapper img {
+  .image-wrapper img {
     position: absolute;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
     object-fit: cover;
-}
+  }
 
-.primary-badge {
+  .primary-badge {
     position: absolute;
     top: 0.5rem;
     left: 0.5rem;
@@ -222,9 +256,9 @@
     border-radius: 4px;
     font-size: 0.75rem;
     font-weight: 600;
-}
+  }
 
-.image-actions {
+  .image-actions {
     position: absolute;
     top: 0.5rem;
     right: 0.5rem;
@@ -232,14 +266,14 @@
     gap: 0.5rem;
     opacity: 0;
     transition: opacity 0.2s;
-}
+  }
 
-.image-card:hover .image-actions {
+  .image-card:hover .image-actions {
     opacity: 1;
-}
+  }
 
-.set-featured-btn,
-.delete-image-btn {
+  .set-featured-btn,
+  .delete-image-btn {
     background: rgba(255, 255, 255, 0.9);
     color: #333;
     border: none;
@@ -251,140 +285,140 @@
     align-items: center;
     justify-content: center;
     transition: all 0.2s;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-}
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
 
-.set-featured-btn {
+  .set-featured-btn {
     background: rgba(255, 193, 7, 0.9);
     color: #fff;
-}
+  }
 
-.set-featured-btn:hover {
+  .set-featured-btn:hover {
     background: #ffc107;
     transform: scale(1.1);
-}
+  }
 
-.delete-image-btn {
+  .delete-image-btn {
     background: rgba(220, 53, 69, 0.9);
     color: white;
-}
+  }
 
-.delete-image-btn:hover {
+  .delete-image-btn:hover {
     background: #dc3545;
     transform: scale(1.1);
-}
+  }
 
-.image-card.featured {
+  .image-card.featured {
     border: 2px solid #ffc107;
-}
+  }
 
-.image-card.featured .primary-badge {
+  .image-card.featured .primary-badge {
     background: #ffc107;
     color: #000;
     font-weight: 700;
-}
+  }
 
-/* Upload Progress Styles */
-.upload-progress-container {
+  /* Upload Progress Styles */
+  .upload-progress-container {
     margin-top: 1.5rem;
     padding: 1rem;
     background: #f8f9fa;
     border-radius: 8px;
     border: 1px solid #e0e0e0;
-}
+  }
 
-.upload-progress-header {
+  .upload-progress-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
     margin-bottom: 0.5rem;
     font-weight: 500;
     color: #333;
-}
+  }
 
-.upload-progress-percent {
+  .upload-progress-percent {
     font-weight: 600;
     color: #667eea;
-}
+  }
 
-.upload-progress-bar {
+  .upload-progress-bar {
     width: 100%;
     height: 8px;
     background: #e0e0e0;
     border-radius: 4px;
     overflow: hidden;
     margin-bottom: 0.5rem;
-}
+  }
 
-.upload-progress-fill {
+  .upload-progress-fill {
     height: 100%;
     background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
     border-radius: 4px;
     width: 0%;
     transition: width 0.3s ease;
-}
+  }
 
-.upload-file-list {
+  .upload-file-list {
     margin-top: 0.5rem;
     font-size: 0.875rem;
     color: #666;
-}
+  }
 
-.upload-file-item {
+  .upload-file-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
     padding: 0.25rem 0;
     border-bottom: 1px solid #e0e0e0;
-}
+  }
 
-.upload-file-item:last-child {
+  .upload-file-item:last-child {
     border-bottom: none;
-}
+  }
 
-.upload-file-name {
+  .upload-file-name {
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
+  }
 
-.upload-file-size {
+  .upload-file-size {
     color: #999;
     margin-left: 0.5rem;
-}
+  }
 
-/* Dark Theme for Progress */
-.dark-theme .upload-progress-container {
+  /* Dark Theme for Progress */
+  .dark-theme .upload-progress-container {
     background: var(--input-bg);
     border-color: var(--border-color);
-}
+  }
 
-.dark-theme .upload-progress-header {
+  .dark-theme .upload-progress-header {
     color: var(--text-color);
-}
+  }
 
-.dark-theme .upload-progress-bar {
+  .dark-theme .upload-progress-bar {
     background: var(--border-color);
-}
+  }
 
-.dark-theme .upload-file-list {
+  .dark-theme .upload-file-list {
     color: var(--text-light);
-}
+  }
 
-.dark-theme .upload-file-item {
+  .dark-theme .upload-file-item {
     border-bottom-color: var(--border-color);
-}
+  }
 
-.dark-theme .upload-file-size {
+  .dark-theme .upload-file-size {
     color: var(--text-light);
-}
+  }
 
-.image-info {
+  .image-info {
     padding: 1rem;
-}
+  }
 
-.image-filename {
+  .image-filename {
     margin: 0 0 0.5rem 0;
     font-size: 0.875rem;
     font-weight: 500;
@@ -392,335 +426,334 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-}
+  }
 
-.empty-state {
+  .empty-state {
     grid-column: 1 / -1;
     text-align: center;
     padding: 3rem;
     color: #6b7280;
-}
+  }
 
-.empty-state i {
+  .empty-state i {
     margin-bottom: 1rem;
     opacity: 0.5;
-}
+  }
 
-/* Dark Theme */
-.dark-theme .upload-section,
-.dark-theme .existing-images-section {
+  /* Dark Theme */
+  .dark-theme .upload-section,
+  .dark-theme .existing-images-section {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
-}
+  }
 
-.dark-theme .page-header {
+  .dark-theme .page-header {
     border-bottom-color: var(--border-color);
-}
+  }
 
-.dark-theme .page-header h2 {
+  .dark-theme .page-header h2 {
     color: var(--text-color);
-}
+  }
 
-.dark-theme .product-name {
+  .dark-theme .product-name {
     color: var(--text-light);
-}
+  }
 
-.dark-theme .upload-section h3,
-.dark-theme .existing-images-section h3 {
+  .dark-theme .upload-section h3,
+  .dark-theme .existing-images-section h3 {
     color: var(--text-color);
-}
+  }
 
-.dark-theme .image-upload-dropzone {
+  .dark-theme .image-upload-dropzone {
     border-color: var(--border-color);
     background: var(--input-bg);
-}
+  }
 
-.dark-theme .image-upload-dropzone:hover {
+  .dark-theme .image-upload-dropzone:hover {
     border-color: #4a90e2;
     background: rgba(74, 144, 226, 0.1);
-}
+  }
 
-.dark-theme .image-upload-dropzone.dragover {
+  .dark-theme .image-upload-dropzone.dragover {
     border-color: #4a90e2;
     background: rgba(74, 144, 226, 0.2);
-}
+  }
 
-.dark-theme .dropzone-content p {
+  .dark-theme .dropzone-content p {
     color: var(--text-color);
-}
+  }
 
-.dark-theme .dropzone-content small {
+  .dark-theme .dropzone-content small {
     color: var(--text-light);
-}
+  }
 
-.dark-theme .image-card {
+  .dark-theme .image-card {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
-}
+  }
 
-.dark-theme .image-wrapper {
+  .dark-theme .image-wrapper {
     background: var(--input-bg);
-}
+  }
 
-.dark-theme .image-filename {
+  .dark-theme .image-filename {
     color: var(--text-color);
-}
+  }
 
-.dark-theme .empty-state {
+  .dark-theme .empty-state {
     color: var(--text-light);
-}
+  }
 
-.dark-theme .back-link {
+  .dark-theme .back-link {
     color: #4a90e2;
-}
+  }
 
-.dark-theme .back-link:hover {
+  .dark-theme .back-link:hover {
     color: #6ba3e6;
-}
+  }
 </style>
 
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const dropzone = document.getElementById('imageDropzone');
-    const fileInput = document.getElementById('product-images-input');
-    const uploadBtn = document.getElementById('uploadBtn');
-    const productId = <%= product.entry_id %>;
-    let selectedFiles = [];
+  document.addEventListener('DOMContentLoaded', function() {
+      const dropzone = document.getElementById('imageDropzone');
+      const fileInput = document.getElementById('product-images-input');
+      const uploadBtn = document.getElementById('uploadBtn');
+      const productId = <%= product.entry_id %>;
+      let selectedFiles = [];
 
-    // Click to open file picker
-    dropzone.addEventListener('click', () => fileInput.click());
+      // Click to open file picker
+      dropzone.addEventListener('click', () => fileInput.click());
 
-    // File input change
-    fileInput.addEventListener('change', handleFiles);
+      // File input change
+      fileInput.addEventListener('change', handleFiles);
 
-    // Drag and drop
-    dropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropzone.classList.add('dragover');
-    });
+      // Drag and drop
+      dropzone.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          dropzone.classList.add('dragover');
+      });
 
-    dropzone.addEventListener('dragleave', () => {
-        dropzone.classList.remove('dragover');
-    });
+      dropzone.addEventListener('dragleave', () => {
+          dropzone.classList.remove('dragover');
+      });
 
-    dropzone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropzone.classList.remove('dragover');
-        const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
-        handleFileList(files);
-    });
+      dropzone.addEventListener('drop', (e) => {
+          e.preventDefault();
+          dropzone.classList.remove('dragover');
+          const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+          handleFileList(files);
+      });
 
-    function handleFiles(e) {
-        const files = Array.from(e.target.files);
-        handleFileList(files);
-    }
+      function handleFiles(e) {
+          const files = Array.from(e.target.files);
+          handleFileList(files);
+      }
 
-    function handleFileList(files) {
-        selectedFiles = [];
-        files.forEach(file => {
-            if (file.size > 5 * 1024 * 1024) {
-                alert(`File ${file.name} is too large. Maximum size is 5MB.`);
-                return;
-            }
-            if (!file.type.startsWith('image/')) {
-                alert(`File ${file.name} is not an image.`);
-                return;
-            }
-            if (selectedFiles.length >= 10) {
-                alert('Maximum 10 images allowed.');
-                return;
-            }
-            selectedFiles.push(file);
-        });
+      function handleFileList(files) {
+          selectedFiles = [];
+          files.forEach(file => {
+              if (file.size > 5 * 1024 * 1024) {
+                  alert(`File ${file.name} is too large. Maximum size is 5MB.`);
+                  return;
+              }
+              if (!file.type.startsWith('image/')) {
+                  alert(`File ${file.name} is not an image.`);
+                  return;
+              }
+              if (selectedFiles.length >= 10) {
+                  alert('Maximum 10 images allowed.');
+                  return;
+              }
+              selectedFiles.push(file);
+          });
 
-        if (selectedFiles.length > 0) {
-            uploadBtn.style.display = 'inline-block';
-        } else {
-            uploadBtn.style.display = 'none';
-        }
-    }
+          if (selectedFiles.length > 0) {
+              uploadBtn.style.display = 'inline-block';
+          } else {
+              uploadBtn.style.display = 'none';
+          }
+      }
 
-    // Upload button
-    uploadBtn.addEventListener('click', () => {
-        if (selectedFiles.length === 0) return;
+      // Upload button
+      uploadBtn.addEventListener('click', () => {
+          if (selectedFiles.length === 0) return;
 
-        const formData = new FormData();
-        selectedFiles.forEach(file => {
-            formData.append('images', file);
-        });
+          const formData = new FormData();
+          selectedFiles.forEach(file => {
+              formData.append('images', file);
+          });
 
-        // Hide upload button and show progress
-        uploadBtn.style.display = 'none';
-        const progressContainer = document.getElementById('uploadProgressContainer');
-        const progressBar = document.getElementById('uploadProgressBar');
-        const progressPercent = document.getElementById('uploadProgressPercent');
-        const progressText = document.getElementById('uploadProgressText');
-        const fileList = document.getElementById('uploadFileList');
+          // Hide upload button and show progress
+          uploadBtn.style.display = 'none';
+          const progressContainer = document.getElementById('uploadProgressContainer');
+          const progressBar = document.getElementById('uploadProgressBar');
+          const progressPercent = document.getElementById('uploadProgressPercent');
+          const progressText = document.getElementById('uploadProgressText');
+          const fileList = document.getElementById('uploadFileList');
 
-        progressContainer.style.display = 'block';
-        progressBar.style.width = '0%';
-        progressPercent.textContent = '0%';
-        progressText.textContent = 'Uploading...';
+          progressContainer.style.display = 'block';
+          progressBar.style.width = '0%';
+          progressPercent.textContent = '0%';
+          progressText.textContent = 'Uploading...';
 
-        // Show file list
-        fileList.innerHTML = '';
-        selectedFiles.forEach(file => {
-            const fileItem = document.createElement('div');
-            fileItem.className = 'upload-file-item';
-            fileItem.innerHTML = `
-                <span class="upload-file-name">${file.name}</span>
-                <span class="upload-file-size">${(file.size / 1024).toFixed(1)} KB</span>
-            `;
-            fileList.appendChild(fileItem);
-        });
+          // Show file list
+          fileList.innerHTML = '';
+          selectedFiles.forEach(file => {
+              const fileItem = document.createElement('div');
+              fileItem.className = 'upload-file-item';
+              fileItem.innerHTML = `
+                  <span class="upload-file-name">${file.name}</span>
+                  <span class="upload-file-size">${(file.size / 1024).toFixed(1)} KB</span>
+              `;
+              fileList.appendChild(fileItem);
+          });
 
-        // Use XMLHttpRequest for progress tracking
-        const xhr = new XMLHttpRequest();
+          // Use XMLHttpRequest for progress tracking
+          const xhr = new XMLHttpRequest();
 
-        xhr.upload.addEventListener('progress', (e) => {
-            if (e.lengthComputable) {
-                const percentComplete = (e.loaded / e.total) * 100;
-                progressBar.style.width = percentComplete + '%';
-                progressPercent.textContent = Math.round(percentComplete) + '%';
-                
-                if (percentComplete < 100) {
-                    progressText.textContent = `Uploading... ${Math.round(percentComplete)}%`;
-                } else {
-                    progressText.textContent = 'Processing...';
-                }
-            }
-        });
+          xhr.upload.addEventListener('progress', (e) => {
+              if (e.lengthComputable) {
+                  const percentComplete = (e.loaded / e.total) * 100;
+                  progressBar.style.width = percentComplete + '%';
+                  progressPercent.textContent = Math.round(percentComplete) + '%';
 
-        xhr.addEventListener('load', () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-                try {
-                    const data = JSON.parse(xhr.responseText);
-                    console.log('Upload response:', data);
+                  if (percentComplete < 100) {
+                      progressText.textContent = `Uploading... ${Math.round(percentComplete)}%`;
+                  } else {
+                      progressText.textContent = 'Processing...';
+                  }
+              }
+          });
 
-                    if (data.success) {
-                        progressBar.style.width = '100%';
-                        progressPercent.textContent = '100%';
-                        progressText.textContent = 'Upload complete!';
-                        progressBar.style.background = 'linear-gradient(90deg, #28a745 0%, #20c997 100%)';
-                        
-                        notify.success(data.message || 'Images uploaded successfully');
-                        setTimeout(() => {
-                            window.location.reload();
-                        }, 1000);
-                    } else {
-                        progressText.textContent = 'Upload failed';
-                        progressBar.style.background = '#dc3545';
-                        notify.error(data.error || 'Failed to upload images');
-                        resetUploadUI();
-                    }
-                } catch (error) {
-                    console.error('Error parsing response:', error);
-                    progressText.textContent = 'Upload failed';
-                    progressBar.style.background = '#dc3545';
-                    notify.error('Failed to parse server response');
-                    resetUploadUI();
-                }
-            } else {
-                console.error('Upload failed:', xhr.status, xhr.responseText);
-                let errorData;
-                try {
-                    errorData = JSON.parse(xhr.responseText);
-                } catch {
-                    errorData = { error: xhr.responseText || 'Upload failed' };
-                }
-                progressText.textContent = 'Upload failed';
-                progressBar.style.background = '#dc3545';
-                notify.error(errorData.error || `Upload failed (${xhr.status})`);
-                resetUploadUI();
-            }
-        });
+          xhr.addEventListener('load', () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                  try {
+                      const data = JSON.parse(xhr.responseText);
+                      console.log('Upload response:', data);
 
-        xhr.addEventListener('error', () => {
-            console.error('Upload error');
-            progressText.textContent = 'Upload error';
-            progressBar.style.background = '#dc3545';
-            notify.error('Network error during upload');
-            resetUploadUI();
-        });
+                      if (data.success) {
+                          progressBar.style.width = '100%';
+                          progressPercent.textContent = '100%';
+                          progressText.textContent = 'Upload complete!';
+                          progressBar.style.background = 'linear-gradient(90deg, #28a745 0%, #20c997 100%)';
 
-        xhr.addEventListener('abort', () => {
-            console.log('Upload aborted');
-            progressText.textContent = 'Upload cancelled';
-            resetUploadUI();
-        });
+                          notify.success(data.message || 'Images uploaded successfully');
+                          setTimeout(() => {
+                              window.location.reload();
+                          }, 1000);
+                      } else {
+                          progressText.textContent = 'Upload failed';
+                          progressBar.style.background = '#dc3545';
+                          notify.error(data.error || 'Failed to upload images');
+                          resetUploadUI();
+                      }
+                  } catch (error) {
+                      console.error('Error parsing response:', error);
+                      progressText.textContent = 'Upload failed';
+                      progressBar.style.background = '#dc3545';
+                      notify.error('Failed to parse server response');
+                      resetUploadUI();
+                  }
+              } else {
+                  console.error('Upload failed:', xhr.status, xhr.responseText);
+                  let errorData;
+                  try {
+                      errorData = JSON.parse(xhr.responseText);
+                  } catch {
+                      errorData = { error: xhr.responseText || 'Upload failed' };
+                  }
+                  progressText.textContent = 'Upload failed';
+                  progressBar.style.background = '#dc3545';
+                  notify.error(errorData.error || `Upload failed (${xhr.status})`);
+                  resetUploadUI();
+              }
+          });
 
-        xhr.open('POST', `/api/v1/products/${productId}/images`);
-        xhr.send(formData);
+          xhr.addEventListener('error', () => {
+              console.error('Upload error');
+              progressText.textContent = 'Upload error';
+              progressBar.style.background = '#dc3545';
+              notify.error('Network error during upload');
+              resetUploadUI();
+          });
 
-        function resetUploadUI() {
-            setTimeout(() => {
-                progressContainer.style.display = 'none';
-                uploadBtn.style.display = 'inline-block';
-                uploadBtn.disabled = false;
-                uploadBtn.innerHTML = '<i class="fas fa-upload"></i> Upload Images';
-                progressBar.style.background = 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)';
-                selectedFiles = [];
-                fileInput.value = '';
-            }, 3000);
-        }
-    });
+          xhr.addEventListener('abort', () => {
+              console.log('Upload aborted');
+              progressText.textContent = 'Upload cancelled';
+              resetUploadUI();
+          });
 
-    // Set featured buttons
-    document.querySelectorAll('.set-featured-btn').forEach(btn => {
-        btn.addEventListener('click', async function() {
-            const imageId = this.dataset.imageId;
+          xhr.open('POST', `/api/v1/products/${productId}/images`);
+          xhr.send(formData);
 
-            try {
-                const response = await fetch(`/api/v1/products/${productId}/images/${imageId}/featured`, {
-                    method: 'POST'
-                });
+          function resetUploadUI() {
+              setTimeout(() => {
+                  progressContainer.style.display = 'none';
+                  uploadBtn.style.display = 'inline-block';
+                  uploadBtn.disabled = false;
+                  uploadBtn.innerHTML = '<i class="fas fa-upload"></i> Upload Images';
+                  progressBar.style.background = 'linear-gradient(90deg, #667eea 0%, #764ba2 100%)';
+                  selectedFiles = [];
+                  fileInput.value = '';
+              }, 3000);
+          }
+      });
 
-                const data = await response.json();
+      // Set featured buttons
+      document.querySelectorAll('.set-featured-btn').forEach(btn => {
+          btn.addEventListener('click', async function() {
+              const imageId = this.dataset.imageId;
 
-                if (data.success) {
-                    notify.success('Featured image updated successfully');
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 1000);
-                } else {
-                    notify.error(data.error || 'Failed to set featured image');
-                }
-            } catch (error) {
-                console.error('Set featured error:', error);
-                notify.error('Failed to set featured image');
-            }
-        });
-    });
+              try {
+                  const response = await fetch(`/api/v1/products/${productId}/images/${imageId}/featured`, {
+                      method: 'POST'
+                  });
 
-    // Delete buttons
-    document.querySelectorAll('.delete-image-btn').forEach(btn => {
-        btn.addEventListener('click', async function() {
-            const imageId = this.dataset.imageId;
-            if (!confirm('Are you sure you want to delete this image?')) {
-                return;
-            }
+                  const data = await response.json();
 
-            try {
-                const response = await fetch(`/api/v1/products/${productId}/images/${imageId}`, {
-                    method: 'DELETE'
-                });
+                  if (data.success) {
+                      notify.success('Featured image updated successfully');
+                      setTimeout(() => {
+                          window.location.reload();
+                      }, 1000);
+                  } else {
+                      notify.error(data.error || 'Failed to set featured image');
+                  }
+              } catch (error) {
+                  console.error('Set featured error:', error);
+                  notify.error('Failed to set featured image');
+              }
+          });
+      });
 
-                const data = await response.json();
+      // Delete buttons
+      document.querySelectorAll('.delete-image-btn').forEach(btn => {
+          btn.addEventListener('click', async function() {
+              const imageId = this.dataset.imageId;
+              if (!confirm('Are you sure you want to delete this image?')) {
+                  return;
+              }
 
-                if (data.success) {
-                    notify.success('Image deleted successfully');
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 1000);
-                } else {
-                    notify.error(data.error || 'Failed to delete image');
-                }
-            } catch (error) {
-                console.error('Delete error:', error);
-                notify.error('Failed to delete image');
-            }
-        });
-    });
-});
+              try {
+                  const response = await fetch(`/api/v1/products/${productId}/images/${imageId}`, {
+                      method: 'DELETE'
+                  });
+
+                  const data = await response.json();
+
+                  if (data.success) {
+                      notify.success('Image deleted successfully');
+                      setTimeout(() => {
+                          window.location.reload();
+                      }, 1000);
+                  } else {
+                      notify.error(data.error || 'Failed to delete image');
+                  }
+              } catch (error) {
+                  console.error('Delete error:', error);
+                  notify.error('Failed to delete image');
+              }
+          });
+      });
+  });
 </script>
-

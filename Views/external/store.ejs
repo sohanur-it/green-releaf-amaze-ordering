@@ -339,7 +339,7 @@
                                         <img src="<%= product.primary_image_url %>" 
                                              alt="<%= product.product_name %>" 
                                              class="product-image"
-                                             onerror="this.onerror=null; this.src='/public/images/placeholder.jpg';">
+                                             onerror="if(this.src.indexOf('placeholder.jpg')===-1){this.onerror=null;this.src='/public/images/placeholder.jpg';}else{this.onerror=null;this.style.display='none';}">
                                     <% } else { %>
                                         <div class="product-image-placeholder">
                                             <div class="placeholder-icon">🍃</div>
@@ -477,7 +477,7 @@
                                                              alt="<%= product.product_name %>"
                                                              class="table-product-thumbnail"
                                                              data-full-image="<%= product.primary_image_url %>"
-                                                             onerror="this.onerror=null; this.src='/public/images/placeholder.jpg';">
+                                                             onerror="if(this.src.indexOf('placeholder.jpg')===-1){this.onerror=null;this.src='/public/images/placeholder.jpg';}else{this.onerror=null;this.style.display='none';}">
                                                     <% } else { %>
                                                         <img src="/public/images/placeholder.jpg" 
                                                              alt="<%= product.product_name %>"
@@ -1997,7 +1997,7 @@ function renderCart() {
                     <img src="${imageUrl}" 
                          alt="${item.product_name}" 
                          class="cart-item-image"
-                         onerror="this.src='/public/images/placeholder.jpg'; this.onerror=null;">
+                         onerror="if(this.src.indexOf('placeholder.jpg')===-1){this.src='/public/images/placeholder.jpg';}else{this.onerror=null;this.style.display='none';}">
                     <div class="cart-item-info">
                         <h4 class="cart-item-name">${item.product_name}</h4>
                         <div class="cart-item-attributes">
@@ -3510,7 +3510,7 @@ function setupTableImageHover() {
         // Add new event listeners
         newImg.addEventListener('mouseenter', function(e) {
             const fullImageUrl = this.dataset.fullImage || this.src || '/public/images/placeholder.jpg';
-            previewEl.innerHTML = `<img src="${fullImageUrl}" alt="${this.alt || 'Product'}" onerror="this.onerror=null; this.src='/public/images/placeholder.jpg';">`;
+            previewEl.innerHTML = `<img src="${fullImageUrl}" alt="${this.alt || 'Product'}" onerror="if(this.src.indexOf('placeholder.jpg')===-1){this.onerror=null;this.src='/public/images/placeholder.jpg';}else{this.onerror=null;this.style.display='none';}">`;
             previewEl.style.display = 'block';
             
             // Position preview near mouse cursor

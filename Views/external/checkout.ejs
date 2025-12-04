@@ -885,7 +885,7 @@ function renderCart() {
                     <img src="${imageUrl}" 
                          alt="${item.product_name}" 
                          class="cart-item-image"
-                         onerror="this.src='/public/images/placeholder.jpg'; this.onerror=null;">
+                         onerror="if(this.src.indexOf('placeholder.jpg')===-1){this.src='/public/images/placeholder.jpg';}else{this.onerror=null;this.style.display='none';}">
                     <div class="cart-item-info">
                         <div class="cart-item-name">${item.product_name || 'Product'}</div>
                         <div class="cart-item-details">

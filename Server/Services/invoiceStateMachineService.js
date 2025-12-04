@@ -522,12 +522,46 @@ class InvoiceStateMachineService {
                 const batchId = item.fk_batch_id;
                 const quantity = item.quantity_fulfilled;
                 
-                // Decrease actual quantity AND allocated_quantity
-                await client.query(`
-                    UPDATE "ORDERS-batches"
-                    SET quantity = quantity - $1, allocated_quantity = allocated_quantity - $1
-                    WHERE id = $2
-                `, [quantity, batchId]);
+                // Get current batch state to validate
+                const batch = await client.query(`
+                    SELECT quantity, allocated_quantity
+                    FROM "ORDERS-batches"
+                    WHERE id = $1
+                    FOR UPDATE
+                `, [batchId]);
+                
+                if (batch.rows.length === 0) {
+                    console.error(`⚠️ Batch ${batchId} not found when finalizing inventory for invoice ${invoiceId}`);
+                    continue;
+                }
+                
+                const currentQuantity = parseFloat(batch.rows[0].quantity || 0);
+                const currentAllocated = parseFloat(batch.rows[0].allocated_quantity || 0);
+                
+                // Validate: ensure we don't go negative
+                if (currentQuantity < quantity) {
+                    console.error(`❌ CRITICAL: Attempting to deduct ${quantity} from batch ${batchId} which only has ${currentQuantity} units. Invoice: ${invoiceId}`);
+                    // Use the actual available quantity instead
+                    const safeQuantity = Math.max(0, currentQuantity);
+                    const safeAllocated = Math.min(quantity, currentAllocated);
+                    
+                    await client.query(`
+                        UPDATE "ORDERS-batches"
+                        SET quantity = GREATEST(0, quantity - $1), 
+                            allocated_quantity = GREATEST(0, allocated_quantity - $2)
+                        WHERE id = $3
+                    `, [safeQuantity, safeAllocated, batchId]);
+                    
+                    console.error(`⚠️ Applied safe deduction: quantity=${safeQuantity}, allocated=${safeAllocated} for batch ${batchId}`);
+                } else {
+                    // Safe to decrement normally
+                    await client.query(`
+                        UPDATE "ORDERS-batches"
+                        SET quantity = GREATEST(0, quantity - $1), 
+                            allocated_quantity = GREATEST(0, allocated_quantity - $1)
+                        WHERE id = $2
+                    `, [quantity, batchId]);
+                }
                 
                 // Log the final deduction
                 await client.query(`

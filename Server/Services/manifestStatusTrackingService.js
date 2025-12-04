@@ -348,13 +348,50 @@ class ManifestStatusTrackingService {
 
         // Apply batch updates
         for (const [batchId, updates] of Object.entries(batchUpdates)) {
-            await client.query(`
-                UPDATE "ORDERS-batches"
-                SET 
-                    quantity = quantity - $1,
-                    allocated_quantity = allocated_quantity - $2
-                WHERE id = $3
-            `, [updates.quantity, updates.allocated, batchId]);
+            // Get current batch state to validate before decrementing
+            const batch = await client.query(`
+                SELECT quantity, allocated_quantity
+                FROM "ORDERS-batches"
+                WHERE id = $1
+                FOR UPDATE
+            `, [batchId]);
+            
+            if (batch.rows.length === 0) {
+                console.error(`⚠️ Batch ${batchId} not found when finalizing inventory for invoice ${invoiceId}`);
+                continue;
+            }
+            
+            const currentQuantity = parseFloat(batch.rows[0].quantity || 0);
+            const currentAllocated = parseFloat(batch.rows[0].allocated_quantity || 0);
+            const quantityToDeduct = parseFloat(updates.quantity || 0);
+            const allocatedToDeduct = parseFloat(updates.allocated || 0);
+            
+            // Validate: ensure we don't go negative
+            if (currentQuantity < quantityToDeduct || currentAllocated < allocatedToDeduct) {
+                console.error(`❌ CRITICAL: Attempting to deduct quantity=${quantityToDeduct}, allocated=${allocatedToDeduct} from batch ${batchId} which has quantity=${currentQuantity}, allocated=${currentAllocated}. Invoice: ${invoiceId}`);
+                // Use safe values that won't go negative
+                const safeQuantity = Math.min(quantityToDeduct, currentQuantity);
+                const safeAllocated = Math.min(allocatedToDeduct, currentAllocated);
+                
+                await client.query(`
+                    UPDATE "ORDERS-batches"
+                    SET 
+                        quantity = GREATEST(0, quantity - $1),
+                        allocated_quantity = GREATEST(0, allocated_quantity - $2)
+                    WHERE id = $3
+                `, [safeQuantity, safeAllocated, batchId]);
+                
+                console.error(`⚠️ Applied safe deduction: quantity=${safeQuantity}, allocated=${safeAllocated} for batch ${batchId}`);
+            } else {
+                // Safe to decrement normally
+                await client.query(`
+                    UPDATE "ORDERS-batches"
+                    SET 
+                        quantity = GREATEST(0, quantity - $1),
+                        allocated_quantity = GREATEST(0, allocated_quantity - $2)
+                    WHERE id = $3
+                `, [quantityToDeduct, allocatedToDeduct, batchId]);
+            }
 
             // Log to batch history
             await client.query(`
@@ -378,14 +415,14 @@ class ManifestStatusTrackingService {
             ]);
 
             // Check if batch is now depleted and trigger auto-promotion
-            const batch = await client.query(`
+            const batchStatus = await client.query(`
                 SELECT quantity, allocated_quantity, status
                 FROM "ORDERS-batches"
                 WHERE id = $1
             `, [batchId]);
 
-            if (batch.rows.length > 0) {
-                const b = batch.rows[0];
+            if (batchStatus.rows.length > 0) {
+                const b = batchStatus.rows[0];
                 const available = parseFloat(b.quantity) - parseFloat(b.allocated_quantity);
                 
                 if (available <= 0 && b.status === 'Sellable') {

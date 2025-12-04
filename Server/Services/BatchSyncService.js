@@ -20,8 +20,10 @@ class BatchSyncService {
             user: process.env.DB_USER || 'postgres',
             password: process.env.DB_PASSWORD || 'postgres',
             max: 20,
-            idleTimeoutMillis: 30000,
-            connectionTimeoutMillis: 30000,
+            idleTimeoutMillis: 300000, // 5 minutes for idle connections
+            connectionTimeoutMillis: 60000, // 60 seconds to establish connection
+            // Prevent connection termination by keeping them active longer
+            // Note: PostgreSQL keep-alive is handled at TCP level, but we can set longer timeouts
             // Only use SSL in production
             ...(isDevelopment ? {} : {
                 ssl: { rejectUnauthorized: false }
@@ -29,6 +31,21 @@ class BatchSyncService {
         };
         
         this.pool = new Pool(this.dbConfig);
+        
+        // Handle pool errors - don't exit, just log and allow retry
+        this.pool.on('error', (err) => {
+            console.error('❌ Unexpected database pool error:', err.message);
+            // Don't exit process, allow retry logic to handle it
+        });
+        
+        // Handle connection errors more gracefully
+        this.pool.on('connect', (client) => {
+            // Set keep-alive query on each new connection
+            client.on('error', (err) => {
+                console.error('❌ Client connection error:', err.message);
+            });
+        });
+        
         this.batchExtractionQuery = null;
         
         // Load the batch extraction query
@@ -50,28 +67,172 @@ class BatchSyncService {
     }
 
     /**
+     * Get a healthy database client with retry logic
+     */
+    async getHealthyClient(maxRetries = 3) {
+        let retries = maxRetries;
+        let lastError;
+        
+        while (retries > 0) {
+            try {
+                const client = await this.pool.connect();
+                
+                // Test the connection with a simple query (with timeout)
+                try {
+                    await Promise.race([
+                        client.query('SELECT 1'),
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Connection test timeout')), 10000)
+                        )
+                    ]);
+                } catch (testError) {
+                    client.release();
+                    throw testError;
+                }
+                
+                // Set statement timeout for this connection (6 minutes)
+                try {
+                    await client.query('SET statement_timeout = 360000');
+                } catch (timeoutError) {
+                    // If setting timeout fails, connection might be bad - release and retry
+                    client.release();
+                    throw timeoutError;
+                }
+                
+                // Add error handler to client to catch connection termination
+                const originalRelease = client.release.bind(client);
+                client.release = function() {
+                    try {
+                        originalRelease();
+                    } catch (err) {
+                        console.error('   ⚠️ Error releasing connection:', err.message);
+                    }
+                };
+                
+                return client;
+            } catch (error) {
+                lastError = error;
+                retries--;
+                
+                if (retries === 0) {
+                    throw new Error(`Failed to get healthy database connection after ${maxRetries} attempts: ${error.message}`);
+                }
+                
+                const delay = (maxRetries - retries) * 2000; // Exponential backoff: 2s, 4s, 6s
+                console.log(`   ⚠️ Connection test failed (${error.message}), retrying in ${delay}ms... (${retries} attempts left)`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+        
+        throw lastError || new Error('Failed to get database connection');
+    }
+    
+    /**
+     * Execute a query with automatic retry on connection errors
+     * Note: If connection test fails, throws immediately so caller can get new client
+     */
+    async executeWithRetry(client, queryText, params = [], maxRetries = 2) {
+        let retries = maxRetries;
+        
+        while (retries >= 0) {
+            try {
+                // Test connection is still alive before query (with short timeout)
+                try {
+                    await Promise.race([
+                        client.query('SELECT 1'),
+                        new Promise((_, reject) => 
+                            setTimeout(() => reject(new Error('Connection test timeout')), 5000)
+                        )
+                    ]);
+                } catch (testError) {
+                    // Connection is dead, throw immediately so caller can get new client
+                    throw new Error(`Connection lost: ${testError.message}`);
+                }
+                
+                // Execute the actual query
+                return await client.query(queryText, params);
+            } catch (error) {
+                // Check if it's a connection error that might be recoverable
+                const isConnectionError = error.message.includes('Connection terminated') || 
+                    error.message.includes('connection') ||
+                    error.message.includes('ECONNRESET') ||
+                    error.message.includes('socket') ||
+                    error.message.includes('Connection lost');
+                
+                if (isConnectionError && retries > 0) {
+                    console.log(`   ⚠️ Connection error during query, retrying... (${retries} attempts left)`);
+                    retries--;
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    continue;
+                }
+                
+                // For non-connection errors or out of retries, throw immediately
+                throw error;
+            }
+        }
+        
+        throw new Error('Query execution failed after retries');
+    }
+
+    /**
      * Execute the batch extraction query to get fresh batch data
      */
     async executeBatchExtractionQuery() {
-        const client = await this.pool.connect();
-        try {
-            console.log('🔄 Executing batch extraction query...');
-            const result = await client.query(this.batchExtractionQuery);
-            console.log(`✅ Batch extraction completed: ${result.rows.length} batches found`);
-            return result.rows;
-        } catch (error) {
-            console.error('❌ Batch extraction query failed:', error.message);
-            throw error;
-        } finally {
-            client.release();
+        let client;
+        let retries = 3;
+        
+        while (retries > 0) {
+            try {
+                client = await this.getHealthyClient();
+                console.log('🔄 Executing batch extraction query...');
+                
+                // Use executeWithRetry for the long-running query
+                const result = await this.executeWithRetry(client, this.batchExtractionQuery, [], 2);
+                
+                console.log(`✅ Batch extraction completed: ${result.rows.length} batches found`);
+                return result.rows;
+            } catch (error) {
+                retries--;
+                
+                if (error.message.includes('Connection terminated') || 
+                    error.message.includes('connection') ||
+                    error.message.includes('ECONNRESET')) {
+                    
+                    if (retries > 0) {
+                        console.log(`   ⚠️ Connection lost during batch extraction, retrying... (${retries} attempts left)`);
+                        if (client) {
+                            try {
+                                client.release();
+                            } catch (e) {
+                                // Ignore release errors
+                            }
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        continue;
+                    }
+                }
+                
+                console.error('❌ Batch extraction query failed:', error.message);
+                throw error;
+            } finally {
+                if (client) {
+                    try {
+                        client.release();
+                    } catch (releaseError) {
+                        console.error(`   ⚠️ Failed to release connection: ${releaseError.message}`);
+                    }
+                }
+            }
         }
+        
+        throw new Error('Failed to execute batch extraction query after retries');
     }
 
     /**
      * Load existing batches from the database
      */
     async loadExistingBatches() {
-        const client = await this.pool.connect();
+        const client = await this.getHealthyClient();
         try {
             const query = `
                 SELECT 
@@ -89,9 +250,16 @@ class BatchSyncService {
             return result.rows;
         } catch (error) {
             console.error('❌ Failed to load existing batches:', error.message);
+            if (error.message.includes('Connection terminated') || error.message.includes('connection')) {
+                throw new Error(`Database connection lost while loading batches: ${error.message}`);
+            }
             throw error;
         } finally {
-            client.release();
+            try {
+                client.release();
+            } catch (releaseError) {
+                console.error(`   ⚠️ Failed to release connection: ${releaseError.message}`);
+            }
         }
     }
 
@@ -223,21 +391,73 @@ class BatchSyncService {
 
     /**
      * Apply changes with full history tracking
+     * Optimized: Processes in chunks with batch operations
      */
     async applyChangesWithHistory(changes) {
-        const client = await this.pool.connect();
+        const CHUNK_SIZE = 50; // Process 50 batches per transaction for better performance
+        
+        // Process NEW batches in chunks
+        if (changes.new.length > 0) {
+            console.log(`📝 Processing ${changes.new.length} new batches in chunks of ${CHUNK_SIZE}...`);
+            for (let i = 0; i < changes.new.length; i += CHUNK_SIZE) {
+                const chunk = changes.new.slice(i, i + CHUNK_SIZE);
+                await this.processNewBatchesChunk(chunk, i + 1, changes.new.length);
+            }
+        }
+        
+        // Process UPDATES in chunks (optimized with bulk operations)
+        if (changes.updated.length > 0) {
+            console.log(`📝 Processing ${changes.updated.length} updated batches in chunks of ${CHUNK_SIZE}...`);
+            for (let i = 0; i < changes.updated.length; i += CHUNK_SIZE) {
+                const chunk = changes.updated.slice(i, i + CHUNK_SIZE);
+                await this.processUpdatedBatchesChunk(chunk, i + 1, changes.updated.length);
+            }
+        }
+        
+        // Process REMOVED PACKAGES in chunks
+        if (changes.packageChanges.length > 0) {
+            console.log(`📝 Processing ${changes.packageChanges.length} package changes in chunks of ${CHUNK_SIZE}...`);
+            for (let i = 0; i < changes.packageChanges.length; i += CHUNK_SIZE) {
+                const chunk = changes.packageChanges.slice(i, i + CHUNK_SIZE);
+                await this.processPackageChangesChunk(chunk, i + 1, changes.packageChanges.length);
+            }
+        }
+        
+        console.log('✅ All batch changes applied successfully');
+    }
+
+    /**
+     * Process a chunk of new batches
+     */
+    async processNewBatchesChunk(batches, startIndex, total) {
+        let client;
+        let retries = 3;
+        
+        while (retries > 0) {
+            try {
+                client = await this.getHealthyClient();
+                break;
+            } catch (connectError) {
+                retries--;
+                if (retries === 0) {
+                    throw new Error(`Failed to connect to database after 3 attempts: ${connectError.message}`);
+                }
+                console.log(`   ⚠️ Connection failed, retrying... (${retries} attempts left)`);
+                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+            }
+        }
         
         try {
+            // Statement timeout already set in getHealthyClient, but ensure it's set
+            await client.query('SET statement_timeout = 360000'); // 6 minutes
             await client.query('BEGIN');
             
-            // Process NEW batches
-            console.log(`📝 Processing ${changes.new.length} new batches...`);
-            let processedNew = 0;
-            for (const batch of changes.new) {
+            let processedCount = 0;
+            for (const batch of batches) {
                 try {
-                    processedNew++;
-                    if (processedNew % 10 === 0 || processedNew === changes.new.length) {
-                        console.log(`   ✓ Processed ${processedNew}/${changes.new.length} new batches`);
+                    processedCount++;
+                    if (processedCount % 10 === 0 || processedCount === batches.length) {
+                        console.log(`   ✓ Processed ${processedCount}/${batches.length} new batches in this chunk`);
                     }
                     
                     // Determine initial status
@@ -379,43 +599,173 @@ class BatchSyncService {
                     throw error; // Abort transaction
                 }
             }
+            
+            await client.query('COMMIT');
+            console.log(`   ✓ Processed ${startIndex + batches.length - 1}/${total} new batches`);
+            
+        } catch (error) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                console.error(`   ⚠️ Rollback failed (connection may be lost): ${rollbackError.message}`);
+            }
+            console.error(`   ❌ Failed to process new batches chunk: ${error.message}`);
+            if (error.message.includes('Connection terminated') || error.message.includes('connection')) {
+                console.error(`   ⚠️ Connection error detected - this may be due to timeout or network issue`);
+            }
+            throw error;
+        } finally {
+            try {
+                client.release();
+            } catch (releaseError) {
+                console.error(`   ⚠️ Failed to release connection: ${releaseError.message}`);
+            }
+        }
+    }
 
-            // Process UPDATES
-            console.log(`📝 Processing ${changes.updated.length} updated batches...`);
-            let processedUpdates = 0;
-            for (const change of changes.updated) {
-                try {
-                    processedUpdates++;
-                    if (processedUpdates % 10 === 0 || processedUpdates === changes.updated.length) {
-                        console.log(`   ✓ Processed ${processedUpdates}/${changes.updated.length} updates`);
-                    }
-                    const batchId = await this.getBatchIdByName(change.batch_name, client);
+    /**
+     * Process a chunk of updated batches (OPTIMIZED with bulk operations)
+     */
+    async processUpdatedBatchesChunk(changes, startIndex, total) {
+        let client;
+        let retries = 3;
+        
+        while (retries > 0) {
+            try {
+                client = await this.getHealthyClient();
+                break;
+            } catch (connectError) {
+                retries--;
+                if (retries === 0) {
+                    throw new Error(`Failed to connect to database after 3 attempts: ${connectError.message}`);
+                }
+                console.log(`   ⚠️ Connection failed, retrying... (${retries} attempts left)`);
+                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
+            }
+        }
+        
+        try {
+            // Statement timeout already set in getHealthyClient, but ensure it's set
+            await client.query('SET statement_timeout = 360000'); // 6 minutes
+            await client.query('BEGIN');
+            
+            // Step 1: Bulk fetch all batch IDs by name (single query)
+            const batchNames = changes.map(c => c.batch_name);
+            const batchIdMap = new Map();
+            
+            if (batchNames.length > 0) {
+                const batchIdsResult = await client.query(`
+                    SELECT id, batch_name, fk_master_product_id, metrc_item_name
+                    FROM "ORDERS-batches"
+                    WHERE batch_name = ANY($1)
+                `, [batchNames]);
+                
+                for (const row of batchIdsResult.rows) {
+                    batchIdMap.set(row.batch_name, {
+                        id: row.id,
+                        isLinked: row.fk_master_product_id !== null,
+                        metrcItemName: row.metrc_item_name
+                    });
+                }
+            }
+            
+            // Step 2: Bulk fetch product matches for unlinked batches (single query)
+            const unlinkedBatches = changes.filter(c => {
+                const batchInfo = batchIdMap.get(c.batch_name);
+                return batchInfo && !batchInfo.isLinked && batchInfo.metrcItemName;
+            });
+            
+            const productMatchMap = new Map();
+            if (unlinkedBatches.length > 0) {
+                const metrcItemNames = [...new Set(unlinkedBatches.map(c => batchIdMap.get(c.batch_name).metrcItemName))];
+                
+                // Get all products with their linked items
+                const productsResult = await client.query(`
+                    SELECT entry_id, name, metrc_linked_items
+                    FROM "ORDERS-products"
+                    WHERE metrc_linked_items IS NOT NULL
+                `);
+                
+                // Build a map of metrc_item_name -> product
+                for (const product of productsResult.rows) {
+                    const linkedItems = Array.isArray(product.metrc_linked_items) 
+                        ? product.metrc_linked_items 
+                        : (product.metrc_linked_items ? JSON.parse(product.metrc_linked_items) : []);
                     
-                    if (!batchId) {
-                        console.log(`   ⚠️ Batch not found for update: ${change.batch_name}`);
-                        continue;
-                    }
-
-                    // Check if batch is already linked to a product
-                    const currentBatch = await client.query(`
-                        SELECT fk_master_product_id, metrc_item_name
-                        FROM "ORDERS-batches"
-                        WHERE id = $1
-                    `, [batchId]);
-                    
-                    const isLinked = currentBatch.rows[0]?.fk_master_product_id !== null;
-                    const metrcItemName = currentBatch.rows[0]?.metrc_item_name;
-                    
-                    // AUTO-LINK: If batch is not linked, try to find matching product
-                    let productMatch = null;
-                    if (!isLinked && metrcItemName) {
-                        productMatch = await this.findProductForMetrcItem(metrcItemName, client);
-                        if (productMatch) {
-                            console.log(`   🔗 Auto-linking unlinked batch "${change.batch_name}" to product "${productMatch.product_name}" (ID: ${productMatch.product_id})`);
+                    for (const itemName of linkedItems) {
+                        if (metrcItemNames.includes(itemName)) {
+                            productMatchMap.set(itemName, {
+                                product_id: product.entry_id,
+                                product_name: product.name
+                            });
                         }
                     }
-
-                    // Update the batch (preserving the status, and auto-linking if needed)
+                }
+            }
+            
+            // Step 3: Prepare bulk update data
+            const updateData = [];
+            const historyInserts = [];
+            const linkingHistoryInserts = [];
+            
+            for (const change of changes) {
+                const batchInfo = batchIdMap.get(change.batch_name);
+                if (!batchInfo) {
+                    console.log(`   ⚠️ Batch not found for update: ${change.batch_name}`);
+                    continue;
+                }
+                
+                const batchId = batchInfo.id;
+                const productMatch = !batchInfo.isLinked && batchInfo.metrcItemName
+                    ? productMatchMap.get(batchInfo.metrcItemName)
+                    : null;
+                
+                if (productMatch) {
+                    console.log(`   🔗 Auto-linking unlinked batch "${change.batch_name}" to product "${productMatch.product_name}" (ID: ${productMatch.product_id})`);
+                }
+                
+                // Prepare update data
+                updateData.push({
+                    batchId,
+                    quantity: change.full_fresh_data.quantity,
+                    package_count: change.full_fresh_data.package_count,
+                    full_package_count: change.full_fresh_data.full_package_count,
+                    partial_package_count: change.full_fresh_data.partial_package_count,
+                    available_labels: JSON.stringify(change.full_fresh_data.available_labels),
+                    full_package_details: JSON.stringify(change.full_fresh_data.full_package_details),
+                    partial_package_details: JSON.stringify(change.full_fresh_data.partial_package_details),
+                    thc_percentage: change.full_fresh_data.thc_percentage,
+                    last_modified: change.full_fresh_data.last_modified,
+                    product_id: productMatch ? productMatch.product_id : null
+                });
+                
+                // Prepare history inserts
+                if (productMatch) {
+                    linkingHistoryInserts.push({
+                        batch_id: batchId,
+                        reason: `Auto-linked to product "${productMatch.product_name}" during batch sync update`
+                    });
+                }
+                
+                // Only log significant field changes (not every field)
+                if (change.updates && Object.keys(change.updates).length > 0) {
+                    // Log as a single summary entry instead of per-field
+                    const changedFields = Object.keys(change.updates).join(', ');
+                    historyInserts.push({
+                        batch_id: batchId,
+                        change_type: 'field_updated',
+                        field_name: 'multiple_fields',
+                        old_value: 'see_change_details',
+                        new_value: 'see_change_details',
+                        reason: `METRC sync: ${changedFields} updated`,
+                        change_details: JSON.stringify(change.updates)
+                    });
+                }
+            }
+            
+            // Step 4: Update batches (sequential but optimized with prepared statements)
+            if (updateData.length > 0) {
+                for (const d of updateData) {
                     await client.query(`
                         UPDATE "ORDERS-batches"
                         SET 
@@ -423,127 +773,167 @@ class BatchSyncService {
                             package_count = $2,
                             full_package_count = $3,
                             partial_package_count = $4,
-                            available_labels = $5,
-                            full_package_details = $6,
-                            partial_package_details = $7,
+                            available_labels = $5::jsonb,
+                            full_package_details = $6::jsonb,
+                            partial_package_details = $7::jsonb,
                             thc_percentage = $8,
                             last_modified = $9,
                             last_synced = NOW(),
                             fk_master_product_id = COALESCE($10, fk_master_product_id)
                         WHERE id = $11
                     `, [
-                        change.full_fresh_data.quantity,
-                        change.full_fresh_data.package_count,
-                        change.full_fresh_data.full_package_count,
-                        change.full_fresh_data.partial_package_count,
-                        JSON.stringify(change.full_fresh_data.available_labels),
-                        JSON.stringify(change.full_fresh_data.full_package_details),
-                        JSON.stringify(change.full_fresh_data.partial_package_details),
-                        change.full_fresh_data.thc_percentage,
-                        change.full_fresh_data.last_modified,
-                        productMatch ? productMatch.product_id : null,
-                        batchId
+                        d.quantity, d.package_count, d.full_package_count, d.partial_package_count,
+                        d.available_labels, d.full_package_details, d.partial_package_details,
+                        d.thc_percentage, d.last_modified, d.product_id, d.batchId
                     ]);
-                    
-                    // Log auto-linking if it happened
-                    if (productMatch) {
-                        await client.query(`
-                            INSERT INTO "ORDERS-batch-history" (
-                                batch_id, change_type, reason,
-                                changed_by_system
-                            ) VALUES ($1, 'master_product_linked', 
-                                      'Auto-linked to product "${productMatch.product_name}" during batch sync update', true)
-                        `, [batchId]);
-                    }
-
-                    // Log each field change
-                    for (const [field, values] of Object.entries(change.updates || {})) {
-                        try {
-                            await client.query(`
-                                INSERT INTO "ORDERS-batch-history" (
-                                    batch_id, change_type, field_name,
-                                    old_value, new_value, reason,
-                                    changed_by_system
-                                ) VALUES ($1, 'field_updated', $2, $3, $4, 'METRC sync detected change', true)
-                            `, [batchId, field, values.old?.toString() || 'null', values.new?.toString() || 'null']);
-                        } catch (historyError) {
-                            console.log(`   ⚠️ Failed to log history for batch ${batchId}: ${historyError.message}`);
-                        }
-                    }
-                } catch (error) {
-                    console.error(`   ❌ CRITICAL: Failed to update batch "${change.batch_name}": ${error.message}`);
-                    console.error(`   ❌ Error stack: ${error.stack}`);
-                    // Abort immediately - transaction is already aborted
-                    throw new Error(`Transaction aborted due to batch update failure: ${error.message}`);
                 }
             }
-
-            // Process REMOVED PACKAGES
-            console.log(`📝 Processing ${changes.packageChanges.length} package changes...`);
-            let processedPkgChanges = 0;
-            for (const packageChange of changes.packageChanges) {
-                processedPkgChanges++;
-                if (processedPkgChanges % 10 === 0 || processedPkgChanges === changes.packageChanges.length) {
-                    console.log(`   ✓ Processed ${processedPkgChanges}/${changes.packageChanges.length} package changes`);
+            
+            // Step 5: Insert history records (using individual inserts but still fast in chunks)
+            if (linkingHistoryInserts.length > 0) {
+                for (const h of linkingHistoryInserts) {
+                    await client.query(`
+                        INSERT INTO "ORDERS-batch-history" (batch_id, change_type, reason, changed_by_system)
+                        VALUES ($1, 'master_product_linked', $2, true)
+                    `, [h.batch_id, h.reason]);
                 }
+            }
+            
+            if (historyInserts.length > 0) {
+                for (const h of historyInserts) {
+                    await client.query(`
+                        INSERT INTO "ORDERS-batch-history" (
+                            batch_id, change_type, field_name, old_value, new_value, reason, changed_by_system, change_details
+                        )
+                        VALUES ($1, $2, $3, $4, $5, $6, true, $7::jsonb)
+                    `, [
+                        h.batch_id, h.change_type, h.field_name, h.old_value, h.new_value, h.reason, h.change_details
+                    ]);
+                }
+            }
+            
+            await client.query('COMMIT');
+            console.log(`   ✓ Processed ${startIndex + changes.length - 1}/${total} updates`);
+            
+        } catch (error) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                console.error(`   ⚠️ Rollback failed (connection may be lost): ${rollbackError.message}`);
+            }
+            console.error(`   ❌ Failed to process batch chunk: ${error.message}`);
+            if (error.message.includes('Connection terminated') || error.message.includes('connection')) {
+                console.error(`   ⚠️ Connection error detected - this may be due to timeout or network issue`);
+            }
+            throw error;
+        } finally {
+            try {
+                client.release();
+            } catch (releaseError) {
+                console.error(`   ⚠️ Failed to release connection: ${releaseError.message}`);
+            }
+        }
+    }
+
+    /**
+     * Process a chunk of package changes
+     */
+    async processPackageChangesChunk(packageChanges, startIndex, total) {
+        const client = await this.getHealthyClient();
+        
+        try {
+            // Statement timeout already set in getHealthyClient, but ensure it's set
+            await client.query('SET statement_timeout = 360000'); // 6 minutes
+            await client.query('BEGIN');
+            
+            // Bulk fetch batch IDs
+            const batchNames = packageChanges
+                .filter(pc => pc.batch_name && pc.removed_packages && pc.removed_packages.length > 0)
+                .map(pc => pc.batch_name);
+            
+            const batchIdMap = new Map();
+            if (batchNames.length > 0) {
+                const batchIdsResult = await client.query(`
+                    SELECT id, batch_name
+                    FROM "ORDERS-batches"
+                    WHERE batch_name = ANY($1)
+                `, [batchNames]);
                 
+                for (const row of batchIdsResult.rows) {
+                    batchIdMap.set(row.batch_name, row.id);
+                }
+            }
+            
+            // Prepare bulk history inserts
+            const historyInserts = [];
+            
+            for (const packageChange of packageChanges) {
                 if (!packageChange.batch_name || !packageChange.removed_packages || packageChange.removed_packages.length === 0) {
-                    console.log(`   ⚠️ Skipping invalid package change`);
                     continue;
                 }
                 
-                const batchId = await this.getBatchIdByName(packageChange.batch_name, client);
-                
+                const batchId = batchIdMap.get(packageChange.batch_name);
                 if (!batchId) {
                     console.log(`   ⚠️ Batch not found: ${packageChange.batch_name}`);
                     continue;
                 }
-
+                
                 for (const removedLabel of packageChange.removed_packages) {
-                    try {
-                        // Investigate WHY it was removed
-                        const investigation = await this.investigateRemovedPackage(
-                            removedLabel,
-                            packageChange.batch_name,
-                            client
-                        );
-
-                        // Ensure we have a valid reason
-                        if (!investigation.reason) {
-                            investigation.reason = 'unknown_removal';
-                        }
-
-                        // Log detailed history
-                        await client.query(`
-                            INSERT INTO "ORDERS-batch-history" (
-                                batch_id, change_type, reason,
-                                related_package_label, related_invoice_id,
-                                change_details, changed_by_system
-                            ) VALUES ($1, 'package_removed', $2, $3, $4, $5, true)
-                        `, [
-                            batchId,
-                            investigation.reason,
-                            investigation.package_label,
-                            investigation.related_invoice,
-                            JSON.stringify(investigation)
-                        ]);
-                    } catch (error) {
-                        console.log(`   ⚠️ Failed to investigate package ${removedLabel}: ${error.message}`);
-                        // Continue with next package
+                    const investigation = await this.investigateRemovedPackage(
+                        removedLabel,
+                        packageChange.batch_name,
+                        client
+                    );
+                    
+                    if (!investigation.reason) {
+                        investigation.reason = 'unknown_removal';
                     }
+                    
+                    historyInserts.push({
+                        batch_id: batchId,
+                        reason: investigation.reason,
+                        package_label: investigation.package_label,
+                        related_invoice: investigation.related_invoice,
+                        change_details: JSON.stringify(investigation)
+                    });
                 }
             }
-
-            console.log('💾 Committing all changes to database...');
+            
+            // Insert history records
+            if (historyInserts.length > 0) {
+                for (const h of historyInserts) {
+                    await client.query(`
+                        INSERT INTO "ORDERS-batch-history" (
+                            batch_id, change_type, reason, related_package_label, 
+                            related_invoice_id, change_details, changed_by_system
+                        )
+                        VALUES ($1, 'package_removed', $2, $3, $4, $5::jsonb, true)
+                    `, [
+                        h.batch_id, h.reason, h.package_label, h.related_invoice, h.change_details
+                    ]);
+                }
+            }
+            
             await client.query('COMMIT');
-            console.log('✅ All batch changes applied successfully');
-
+            console.log(`   ✓ Processed ${startIndex + packageChanges.length - 1}/${total} package changes`);
+            
         } catch (error) {
-            await client.query('ROLLBACK');
-            console.error('❌ Failed to apply batch changes:', error.message);
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                console.error(`   ⚠️ Rollback failed (connection may be lost): ${rollbackError.message}`);
+            }
+            console.error(`   ❌ Failed to process package changes chunk: ${error.message}`);
+            if (error.message.includes('Connection terminated') || error.message.includes('connection')) {
+                console.error(`   ⚠️ Connection error detected - this may be due to timeout or network issue`);
+            }
             throw error;
         } finally {
-            client.release();
+            try {
+                client.release();
+            } catch (releaseError) {
+                console.error(`   ⚠️ Failed to release connection: ${releaseError.message}`);
+            }
         }
     }
 
@@ -582,7 +972,7 @@ class BatchSyncService {
      * Check for auto-promotion triggers
      */
     async checkAutoPromotion() {
-        const client = await this.pool.connect();
+        const client = await this.getHealthyClient();
         try {
             // Find all Master Products that might need promotion
             const candidates = await client.query(`

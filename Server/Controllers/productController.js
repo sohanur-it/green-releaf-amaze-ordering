@@ -21,15 +21,19 @@ const pool = new Pool({
  * Show all products page
  */
 exports.getAllProducts = async (req, res) => {
+    const client = await pool.connect();
     try {
+        // Set query timeout to prevent hanging
+        await client.query('SET statement_timeout = 30000'); // 30 seconds
+        
         // Check if user wants to see archived products
         const showArchived = req.query.show_archived === 'true';
         
-        const result = await pool.query(`
+        const result = await client.query(`
             SELECT 
                 p.*,
                 COUNT(b.id) as batch_count,
-                SUM(CASE WHEN b.status = 'Sellable' THEN b.quantity - b.allocated_quantity ELSE 0 END) as available_quantity,
+                GREATEST(0, SUM(CASE WHEN b.status = 'Sellable' THEN b.quantity - b.allocated_quantity ELSE 0 END)) as available_quantity,
                 (
                     SELECT file_path 
                     FROM "ORDERS-product-images" pi
@@ -61,7 +65,9 @@ exports.getAllProducts = async (req, res) => {
         });
     } catch (error) {
         console.error('Error fetching products:', error);
-        res.status(500).send('Error loading products');
+        res.status(500).send('Error loading products: ' + error.message);
+    } finally {
+        client.release();
     }
 };
 
