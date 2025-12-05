@@ -356,13 +356,90 @@ router.post('/products/master/:id/link-items/confirm', async (req, res) => {
             WHERE entry_id = $2
         `, [JSON.stringify(metrc_item_names), productId]);
 
-        // Update all affected batches to link to this Master Product
-        const result = await client.query(`
-            UPDATE "ORDERS-batches"
-            SET fk_master_product_id = $1
-            WHERE metrc_item_name = ANY($2)
-            RETURNING id, metrc_item_name
-        `, [productId, metrc_item_names]);
+        // Validate batches before linking - check if source packages exist
+        const batchesToLink = await client.query(`
+            SELECT 
+                b.id,
+                b.batch_name,
+                b.metrc_item_name,
+                b.first_sourcepackage_label,
+                b.sourcepackagelabels,
+                b.status,
+                -- Check if source package exists
+                EXISTS (
+                    SELECT 1 FROM activepackages 
+                    WHERE label = b.first_sourcepackage_label
+                    AND isarchived = false
+                    AND isfinished = false
+                ) as source_package_exists,
+                -- Check if any packages from sourcepackagelabels exist
+                (
+                    SELECT COUNT(*) 
+                    FROM activepackages 
+                    WHERE label = ANY(string_to_array(b.sourcepackagelabels, ','))
+                    AND isarchived = false
+                    AND isfinished = false
+                ) as existing_package_count
+            FROM "ORDERS-batches" b
+            WHERE b.metrc_item_name = ANY($1)
+        `, [metrc_item_names]);
+        
+        // Separate valid and invalid batches
+        const validBatches = [];
+        const invalidBatches = [];
+        
+        for (const batch of batchesToLink.rows) {
+            if (batch.source_package_exists && batch.existing_package_count > 0) {
+                validBatches.push(batch.id);
+            } else {
+                invalidBatches.push({
+                    id: batch.id,
+                    batch_name: batch.batch_name,
+                    metrc_item_name: batch.metrc_item_name,
+                    first_sourcepackage_label: batch.first_sourcepackage_label,
+                    reason: batch.source_package_exists 
+                        ? `No active packages found (source package exists but no packages available)`
+                        : `Source package "${batch.first_sourcepackage_label}" does not exist in activepackages`
+                });
+            }
+        }
+        
+        // Warn about invalid batches but don't fail - allow linking valid ones
+        if (invalidBatches.length > 0) {
+            console.warn(`⚠️  WARNING: ${invalidBatches.length} batch(es) have invalid/missing source packages:`);
+            invalidBatches.forEach(b => {
+                console.warn(`   - Batch ${b.id} (${b.batch_name}): ${b.reason}`);
+            });
+            
+            // Log invalid batches to audit log
+            await auditLogger.logAction({
+                userId: userId,
+                action: 'batch_validation_warning',
+                resourceType: 'Master Product',
+                resourceId: productId.toString(),
+                details: {
+                    message: `${invalidBatches.length} batch(es) have invalid/missing source packages and were NOT linked`,
+                    invalid_batches: invalidBatches,
+                    product_name: productName
+                },
+                status: 'warning',
+                sourceIp: req.ip
+            });
+        }
+        
+        // Only link batches with valid source packages
+        let result;
+        if (validBatches.length > 0) {
+            result = await client.query(`
+                UPDATE "ORDERS-batches"
+                SET fk_master_product_id = $1
+                WHERE id = ANY($2)
+                RETURNING id, batch_name, metrc_item_name
+            `, [productId, validBatches]);
+        } else {
+            // No valid batches to link
+            result = { rows: [], rowCount: 0 };
+        }
 
         // Log this action for each affected batch
         for (const row of result.rows) {
@@ -394,10 +471,22 @@ router.post('/products/master/:id/link-items/confirm', async (req, res) => {
 
         await client.query('COMMIT');
 
+        // Build response message
+        let message = `Successfully linked ${metrc_item_names.length} METRC items to ${productName}`;
+        if (validBatches.length > 0) {
+            message += ` (${validBatches.length} valid batch(es) linked)`;
+        }
+        if (invalidBatches.length > 0) {
+            message += `. WARNING: ${invalidBatches.length} batch(es) were NOT linked due to missing source packages.`;
+        }
+        
         res.json({
             success: true,
             batches_updated: result.rowCount,
-            message: `Successfully linked ${metrc_item_names.length} METRC items to ${productName}`
+            batches_valid: validBatches.length,
+            batches_invalid: invalidBatches.length,
+            invalid_batches: invalidBatches.length > 0 ? invalidBatches : undefined,
+            message: message
         });
 
     } catch (error) {

@@ -295,13 +295,35 @@ class InvoiceStateMachineService {
             
             // Fulfillment_Issue → Approved (Sales fixed the issue)
             if (from === 'Fulfillment_Issue' && to === 'Approved') {
+                // Check if fulfillment_issue_modification column exists
+                const columnCheck = await client.query(`
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_schema = 'public'
+                    AND table_name = 'ORDERS-invoice-line-items' 
+                    AND column_name = 'fulfillment_issue_modification'
+                `);
+                const hasFulfillmentIssueModColumn = columnCheck.rows.length > 0;
+                
                 // Validate that changes were made to line items before allowing kick back
-                const modifiedLineItems = await client.query(`
-                    SELECT COUNT(*) as count
-                    FROM "ORDERS-invoice-line-items"
-                    WHERE fk_invoice_id = $1 
-                    AND (was_modified = true OR fulfillment_issue_modification = true)
-                `, [invoiceId]);
+                // Use fulfillment_issue_modification if column exists, otherwise just check was_modified
+                let modifiedLineItems;
+                if (hasFulfillmentIssueModColumn) {
+                    modifiedLineItems = await client.query(`
+                        SELECT COUNT(*) as count
+                        FROM "ORDERS-invoice-line-items"
+                        WHERE fk_invoice_id = $1 
+                        AND (was_modified = true OR fulfillment_issue_modification = true)
+                    `, [invoiceId]);
+                } else {
+                    // Column doesn't exist, just check was_modified
+                    modifiedLineItems = await client.query(`
+                        SELECT COUNT(*) as count
+                        FROM "ORDERS-invoice-line-items"
+                        WHERE fk_invoice_id = $1 
+                        AND was_modified = true
+                    `, [invoiceId]);
+                }
                 
                 const hasModifications = parseInt(modifiedLineItems.rows[0]?.count || 0) > 0;
                 

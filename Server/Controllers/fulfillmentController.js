@@ -232,16 +232,351 @@ class FulfillmentController {
     }
 
     /**
-     * Get available transporters
+     * Get available transporters from METRC T3 API
      * GET /api/v1/fulfillment/transporters
      */
     async getTransporters(req, res) {
         try {
-            const result = await transportationDetailsService.getAvailableTransporters();
-            res.json(result);
+            console.log('[Fulfillment] Fetching transporters from METRC T3 API...');
+            
+            // Ensure environment variables are loaded
+            const path = require('path');
+            if (process.env.NODE_ENV === 'production') {
+                require('dotenv').config({ path: path.join(__dirname, '../../config/production.env') });
+            } else {
+                require('dotenv').config({ path: path.join(__dirname, '../../config/local.env') });
+            }
+            
+            const metrcAuth = require('../Services/metrcAuth');
+            const apiBaseUrl = metrcAuth.apiBaseUrl || process.env.T3_API_BASE_URL || 'https://api.trackandtrace.tools/v2';
+            const licenseNumber = req.query.licenseNumber || process.env.T3_LICENSE_NUMBER;
+            
+            if (!licenseNumber) {
+                return res.status(400).json({ error: 'licenseNumber is required' });
+            }
+
+            // Try multiple endpoints to get transporters
+            // Since /transfers/transporters might not exist, we'll try:
+            // 1. /transfers/create/transporters (returns available transporters for transfers)
+            // 2. /facilities (returns all facilities, filter for transporters)
+            let response = null;
+            let endpointUsed = null;
+            let error = null;
+
+            // Method 1: Try /transfers/create/transporters
+            try {
+                endpointUsed = `${apiBaseUrl}/transfers/create/transporters`;
+                console.log(`[Fulfillment] Attempting endpoint: GET ${endpointUsed}?licenseNumber=${licenseNumber}`);
+                
+                response = await metrcAuth.makeAuthenticatedRequest({
+                    method: 'GET',
+                    url: endpointUsed,
+                    params: {
+                        licenseNumber: licenseNumber
+                    },
+                    timeout: 15000
+                });
+                
+                console.log(`[Fulfillment] ✅ Successfully called ${endpointUsed}`);
+            } catch (firstError) {
+                console.warn(`[Fulfillment] Endpoint ${endpointUsed} failed:`, firstError.message);
+                if (firstError.response) {
+                    console.warn(`[Fulfillment] Response status:`, firstError.response.status);
+                    console.warn(`[Fulfillment] Response data:`, JSON.stringify(firstError.response.data).substring(0, 500));
+                }
+                error = firstError;
+                
+                // Method 2: Try /facilities endpoint (fallback)
+                try {
+                    endpointUsed = `${apiBaseUrl}/facilities`;
+                    console.log(`[Fulfillment] Trying alternative endpoint: GET ${endpointUsed}?licenseNumber=${licenseNumber}`);
+                    
+                    response = await metrcAuth.makeAuthenticatedRequest({
+                        method: 'GET',
+                        url: endpointUsed,
+                        params: {
+                            licenseNumber: licenseNumber
+                        },
+                        timeout: 15000
+                    });
+                    
+                    console.log(`[Fulfillment] ✅ Successfully called ${endpointUsed}`);
+                    error = null;
+                } catch (secondError) {
+                    console.error(`[Fulfillment] ❌ Both endpoints failed. Last error:`, secondError.message);
+                    if (secondError.response) {
+                        console.error(`[Fulfillment] Response status:`, secondError.response.status);
+                        console.error(`[Fulfillment] Response data:`, JSON.stringify(secondError.response.data).substring(0, 500));
+                    }
+                    error = secondError;
+                }
+            }
+
+            if (!response) {
+                throw new Error(
+                    `Failed to fetch transporters from METRC API. ` +
+                    `Tried endpoints: ${apiBaseUrl}/transfers/create/transporters and ${apiBaseUrl}/facilities. ` +
+                    `Error: ${error?.message || 'Unknown error'}. ` +
+                    `Please check the METRC T3 API documentation at https://api.trackandtrace.tools/v2/docs/#/ to verify the correct endpoint.`
+                );
+            }
+
+            console.log(`[Fulfillment] ✅ METRC API response received from ${endpointUsed}`);
+            console.log(`[Fulfillment] Response data type:`, typeof response.data);
+            console.log(`[Fulfillment] Response data (first 1000 chars):`, JSON.stringify(response.data, null, 2).substring(0, 1000));
+
+            // Parse the response
+            let transporters = [];
+            if (Array.isArray(response.data)) {
+                transporters = response.data;
+                console.log(`[Fulfillment] Response is direct array with ${transporters.length} items`);
+            } else if (response.data?.data && Array.isArray(response.data.data)) {
+                transporters = response.data.data;
+                console.log(`[Fulfillment] Response has data property with ${transporters.length} items`);
+            } else if (response.data?.transporters && Array.isArray(response.data.transporters)) {
+                transporters = response.data.transporters;
+                console.log(`[Fulfillment] Response has transporters property with ${transporters.length} items`);
+            } else if (response.data?.facilities && Array.isArray(response.data.facilities)) {
+                transporters = response.data.facilities;
+                console.log(`[Fulfillment] Response has facilities property with ${transporters.length} items`);
+            } else {
+                console.warn(`[Fulfillment] Unexpected response format. Full response structure:`, Object.keys(response.data || {}));
+                console.warn(`[Fulfillment] Response data:`, JSON.stringify(response.data).substring(0, 1000));
+                transporters = [];
+            }
+
+            console.log(`[Fulfillment] Found ${transporters.length} transporter(s) from METRC API`);
+
+            // Format transporters for dropdown
+            const formattedTransporters = transporters.map(transporter => {
+                // Extract transporter ID and license number from various possible field names
+                const transporterId = transporter.id || 
+                                     transporter.transporterId || 
+                                     transporter.facilityId ||
+                                     transporter.FacilityId ||
+                                     (transporter.facility && transporter.facility.id);
+                
+                const licenseNumber = transporter.licenseNumber || 
+                                     transporter.license || 
+                                     transporter.LicenseNumber ||
+                                     transporter.License ||
+                                     (transporter.facility && (transporter.facility.licenseNumber || transporter.facility.license));
+                
+                const name = transporter.name || 
+                            transporter.facilityName || 
+                            transporter.FacilityName ||
+                            transporter.transporterName ||
+                            (transporter.facility && transporter.facility.name);
+
+                return {
+                    id: transporterId ? parseInt(transporterId, 10) : null,
+                    licenseNumber: licenseNumber || 'N/A',
+                    name: name || licenseNumber || 'Unknown Transporter',
+                    displayName: name ? `${name} (${licenseNumber || 'N/A'})` : (licenseNumber || 'Unknown Transporter')
+                };
+            }).filter(t => t.id !== null && t.id > 0); // Only include transporters with valid IDs
+
+            console.log(`[Fulfillment] Formatted ${formattedTransporters.length} valid transporter(s) for dropdown`);
+
+            res.json({
+                success: true,
+                transporters: formattedTransporters,
+                count: formattedTransporters.length
+            });
         } catch (error) {
-            console.error('[Fulfillment] Error getting transporters:', error);
-            res.status(500).json({ error: error.message });
+            console.error('[Fulfillment] ❌ Error getting transporters:', error.message);
+            if (error.response) {
+                console.error('[Fulfillment] Response status:', error.response.status);
+                console.error('[Fulfillment] Response data:', JSON.stringify(error.response.data).substring(0, 500));
+            }
+            res.status(500).json({ 
+                error: error.message,
+                details: error.response?.data || null
+            });
+        }
+    }
+
+    /**
+     * Get available recipients from METRC T3 API
+     * GET /api/v1/fulfillment/recipients
+     */
+    async getRecipients(req, res) {
+        try {
+            console.log('[Fulfillment] Fetching recipients from METRC T3 API...');
+            
+            // Ensure environment variables are loaded
+            const path = require('path');
+            if (process.env.NODE_ENV === 'production') {
+                require('dotenv').config({ path: path.join(__dirname, '../../config/production.env') });
+            } else {
+                require('dotenv').config({ path: path.join(__dirname, '../../config/local.env') });
+            }
+            
+            const metrcAuth = require('../Services/metrcAuth');
+            const apiBaseUrl = metrcAuth.apiBaseUrl || process.env.T3_API_BASE_URL || 'https://api.trackandtrace.tools/v2';
+            const licenseNumber = req.query.licenseNumber || process.env.T3_LICENSE_NUMBER;
+            
+            if (!licenseNumber) {
+                return res.status(400).json({ error: 'licenseNumber is required' });
+            }
+
+                // Try multiple endpoints to get recipients
+            // Since /transfers/recipients doesn't exist, we'll try:
+            // 1. /transfers/create/destinations (returns available destination facilities)
+            // 2. /facilities (returns all facilities)
+            let response = null;
+            let endpointUsed = null;
+            let error = null;
+
+            // Method 1: Try /transfers/create/destinations (most likely to work)
+            try {
+                endpointUsed = `${apiBaseUrl}/transfers/create/destinations`;
+                console.log(`[Fulfillment] Attempting endpoint: GET ${endpointUsed}?licenseNumber=${licenseNumber}`);
+                
+                response = await metrcAuth.makeAuthenticatedRequest({
+                    method: 'GET',
+                    url: endpointUsed,
+                    params: {
+                        licenseNumber: licenseNumber
+                    },
+                    timeout: 15000
+                });
+                
+                console.log(`[Fulfillment] ✅ Successfully called ${endpointUsed}`);
+            } catch (firstError) {
+                console.warn(`[Fulfillment] Endpoint ${endpointUsed} failed:`, firstError.message);
+                if (firstError.response) {
+                    console.warn(`[Fulfillment] Response status:`, firstError.response.status);
+                    console.warn(`[Fulfillment] Response data:`, JSON.stringify(firstError.response.data).substring(0, 500));
+                }
+                error = firstError;
+                
+                // Method 2: Try /facilities endpoint
+                try {
+                    endpointUsed = `${apiBaseUrl}/facilities`;
+                    console.log(`[Fulfillment] Trying alternative endpoint: GET ${endpointUsed}?licenseNumber=${licenseNumber}`);
+                    
+                    response = await metrcAuth.makeAuthenticatedRequest({
+                        method: 'GET',
+                        url: endpointUsed,
+                        params: {
+                            licenseNumber: licenseNumber
+                        },
+                        timeout: 15000
+                    });
+                    
+                    console.log(`[Fulfillment] ✅ Successfully called ${endpointUsed}`);
+                    error = null; // Clear error since this worked
+                } catch (secondError) {
+                    console.error(`[Fulfillment] ❌ Both endpoints failed. Last error:`, secondError.message);
+                    if (secondError.response) {
+                        console.error(`[Fulfillment] Response status:`, secondError.response.status);
+                        console.error(`[Fulfillment] Response data:`, JSON.stringify(secondError.response.data).substring(0, 500));
+                    }
+                    error = secondError;
+                }
+            }
+
+            if (!response) {
+                // Check if it's a METRC server issue
+                const isServerError = error?.response?.status === 500 || 
+                                     error?.message?.includes('500') ||
+                                     error?.message?.includes('Internal Server Error');
+                
+                if (isServerError) {
+                    throw new Error(
+                        `METRC API is currently experiencing server issues. ` +
+                        `This is a temporary problem on METRC's side, not with your code or credentials. ` +
+                        `Please try again in a few minutes. ` +
+                        `If the issue persists, contact METRC support. ` +
+                        `(Error: ${error?.message || '500 Internal Server Error'})`
+                    );
+                }
+                
+                throw new Error(
+                    `Failed to fetch recipients from METRC API. ` +
+                    `Tried endpoints: ${apiBaseUrl}/transfers/create/destinations and ${apiBaseUrl}/facilities. ` +
+                    `Error: ${error?.message || 'Unknown error'}. ` +
+                    `Please check the METRC T3 API documentation at https://api.trackandtrace.tools/v2/docs/#/ to verify the correct endpoint.`
+                );
+            }
+
+            console.log(`[Fulfillment] ✅ METRC API response received from ${endpointUsed}`);
+            console.log(`[Fulfillment] Response data type:`, typeof response.data);
+            console.log(`[Fulfillment] Response data (first 1000 chars):`, JSON.stringify(response.data, null, 2).substring(0, 1000));
+
+            // Parse the response - could be array or object with data property
+            // For /transfers/create/destinations, it returns destination facilities
+            // For /facilities, it returns all facilities
+            let recipients = [];
+            if (Array.isArray(response.data)) {
+                recipients = response.data;
+                console.log(`[Fulfillment] Response is direct array with ${recipients.length} items`);
+            } else if (response.data?.data && Array.isArray(response.data.data)) {
+                recipients = response.data.data;
+                console.log(`[Fulfillment] Response has data property with ${recipients.length} items`);
+            } else if (response.data?.recipients && Array.isArray(response.data.recipients)) {
+                recipients = response.data.recipients;
+                console.log(`[Fulfillment] Response has recipients property with ${recipients.length} items`);
+            } else if (response.data?.destinations && Array.isArray(response.data.destinations)) {
+                recipients = response.data.destinations;
+                console.log(`[Fulfillment] Response has destinations property with ${recipients.length} items`);
+            } else if (response.data?.facilities && Array.isArray(response.data.facilities)) {
+                recipients = response.data.facilities;
+                console.log(`[Fulfillment] Response has facilities property with ${recipients.length} items`);
+            } else {
+                console.warn(`[Fulfillment] Unexpected response format. Full response structure:`, Object.keys(response.data || {}));
+                console.warn(`[Fulfillment] Response data:`, JSON.stringify(response.data).substring(0, 1000));
+                recipients = [];
+            }
+
+            console.log(`[Fulfillment] Found ${recipients.length} recipient(s) from METRC API`);
+
+            // Format recipients for dropdown
+            const formattedRecipients = recipients.map(recipient => {
+                // Extract recipient ID and license number from various possible field names
+                const recipientId = recipient.id || 
+                                   recipient.recipientId || 
+                                   recipient.facilityId ||
+                                   recipient.FacilityId ||
+                                   (recipient.facility && recipient.facility.id);
+                
+                const licenseNumber = recipient.licenseNumber || 
+                                     recipient.license || 
+                                     recipient.LicenseNumber ||
+                                     recipient.License ||
+                                     (recipient.facility && (recipient.facility.licenseNumber || recipient.facility.license));
+                
+                const name = recipient.name || 
+                            recipient.facilityName || 
+                            recipient.FacilityName ||
+                            (recipient.facility && recipient.facility.name);
+
+                return {
+                    id: recipientId ? parseInt(recipientId, 10) : null,
+                    licenseNumber: licenseNumber || 'N/A',
+                    name: name || licenseNumber || 'Unknown Facility',
+                    displayName: name ? `${name} (${licenseNumber || 'N/A'})` : (licenseNumber || 'Unknown Facility')
+                };
+            }).filter(r => r.id !== null && r.id > 0); // Only include recipients with valid IDs
+
+            console.log(`[Fulfillment] Formatted ${formattedRecipients.length} valid recipient(s) for dropdown`);
+
+            res.json({
+                success: true,
+                recipients: formattedRecipients,
+                count: formattedRecipients.length
+            });
+        } catch (error) {
+            console.error('[Fulfillment] ❌ Error getting recipients:', error.message);
+            if (error.response) {
+                console.error('[Fulfillment] Response status:', error.response.status);
+                console.error('[Fulfillment] Response data:', JSON.stringify(error.response.data).substring(0, 500));
+            }
+            res.status(500).json({ 
+                error: error.message,
+                details: error.response?.data || null
+            });
         }
     }
 

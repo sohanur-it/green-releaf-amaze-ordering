@@ -189,18 +189,42 @@
             </div>
         </div>
 
+        <!-- Recipient Information -->
+        <div class="form-section">
+            <h2>Recipient Facility</h2>
+            <div class="form-grid">
+                <div class="form-group full-width">
+                    <label>Recipient Facility <span class="required">*</span></label>
+                    <select id="recipient-facility" name="recipientFacility" required>
+                        <option value="">Loading recipients...</option>
+                    </select>
+                    <div id="recipient-loading" class="loading-transporters">
+                        <i class="fas fa-spinner fa-spin"></i> Loading available recipients from METRC...
+                    </div>
+                    <input type="hidden" id="recipient-id" name="recipientId">
+                    <small style="color: var(--text-light); margin-top: 0.25rem; display: block;">
+                        Select the recipient facility from METRC. The recipient ID will be automatically retrieved.
+                    </small>
+                </div>
+            </div>
+        </div>
+
         <!-- Transporter Information -->
         <div class="form-section">
             <h2>Transporter Information</h2>
             <div class="form-grid">
                 <div class="form-group full-width">
-                    <label>Transporter Name <span class="required">*</span></label>
+                    <label>Transporter Facility <span class="required">*</span></label>
                     <select id="transporter-name" name="transporterName" required>
                         <option value="">Loading transporters...</option>
                     </select>
                     <div id="transporter-loading" class="loading-transporters">
-                        <i class="fas fa-spinner fa-spin"></i> Loading available transporters...
+                        <i class="fas fa-spinner fa-spin"></i> Loading available transporters from METRC...
                     </div>
+                    <input type="hidden" id="transporter-id" name="transporterId">
+                    <small style="color: var(--text-light); margin-top: 0.25rem; display: block;">
+                        Select the transporter facility from METRC. The transporter ID will be automatically retrieved.
+                    </small>
                 </div>
                 <div class="form-group">
                     <label>Phone Number for Questions</label>

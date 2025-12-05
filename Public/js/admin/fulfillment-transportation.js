@@ -3,7 +3,8 @@
 
 document.addEventListener('DOMContentLoaded', () => {
     initializeForm();
-    loadTransporters();
+    loadRecipients();
+    loadTransporters(); // Re-enabled - transporter is required by METRC
     setupFormValidation();
     setupDeliveryWindowValidation();
 });
@@ -41,61 +42,148 @@ function formatDateTimeLocal(date) {
 }
 
 /**
- * Load available transporters
+ * Load available recipients from METRC T3 API
+ */
+async function loadRecipients() {
+    const recipientSelect = document.getElementById('recipient-facility');
+    const recipientIdInput = document.getElementById('recipient-id');
+    const loadingEl = document.getElementById('recipient-loading');
+
+    if (!recipientSelect || !recipientIdInput) {
+        console.error('Recipient elements not found');
+        return;
+    }
+
+    try {
+        console.log('[Recipients] Fetching recipients from API...');
+        const response = await fetch('/api/v1/fulfillment/recipients');
+        const data = await response.json();
+
+        console.log('[Recipients] API response:', data);
+
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to load recipients');
+        }
+
+        loadingEl.style.display = 'none';
+        recipientSelect.innerHTML = '<option value="">Select Recipient Facility</option>';
+
+        if (data.recipients && data.recipients.length > 0) {
+            console.log(`[Recipients] ✅ Loaded ${data.recipients.length} recipient(s) from METRC API`);
+            
+            data.recipients.forEach(recipient => {
+                const option = document.createElement('option');
+                option.value = recipient.id; // Store the numeric ID as value
+                option.textContent = recipient.displayName || `${recipient.name} (${recipient.licenseNumber})`;
+                option.setAttribute('data-license', recipient.licenseNumber);
+                option.setAttribute('data-name', recipient.name);
+                recipientSelect.appendChild(option);
+            });
+
+            // Handle recipient selection - log when selected
+            recipientSelect.addEventListener('change', (e) => {
+                const selectedOption = e.target.options[e.target.selectedIndex];
+                const recipientId = e.target.value;
+                const licenseNumber = selectedOption.getAttribute('data-license');
+                const name = selectedOption.getAttribute('data-name');
+                
+                if (recipientId) {
+                    recipientIdInput.value = recipientId;
+                    console.log(`[Recipients] ✅ Recipient selected:`, {
+                        id: recipientId,
+                        licenseNumber: licenseNumber,
+                        name: name,
+                        displayName: selectedOption.textContent
+                    });
+                    console.log(`[Recipients] ✅ Valid recipient ID retrieved from T3 API: ${recipientId}`);
+                } else {
+                    recipientIdInput.value = '';
+                    console.log(`[Recipients] ⚠️ No recipient selected`);
+                }
+            });
+        } else {
+            console.warn('[Recipients] ⚠️ No recipients found in API response');
+            recipientSelect.innerHTML = '<option value="">No recipients available</option>';
+            loadingEl.innerHTML = `<span style="color: #ef4444;">No recipients found. Please ensure you have valid recipient facilities in METRC.</span>`;
+        }
+
+    } catch (error) {
+        console.error('[Recipients] ❌ Error loading recipients:', error);
+        loadingEl.innerHTML = `<span style="color: #ef4444;">Error loading recipients: ${error.message}</span>`;
+        recipientSelect.innerHTML = '<option value="">Error loading recipients</option>';
+    }
+}
+
+/**
+ * Load available transporters from METRC T3 API
  */
 async function loadTransporters() {
     const transporterSelect = document.getElementById('transporter-name');
+    const transporterIdInput = document.getElementById('transporter-id');
     const loadingEl = document.getElementById('transporter-loading');
 
+    if (!transporterSelect || !transporterIdInput) {
+        console.error('Transporter elements not found');
+        return;
+    }
+
     try {
+        console.log('[Transporters] Fetching transporters from API...');
         const response = await fetch('/api/v1/fulfillment/transporters');
         const data = await response.json();
+
+        console.log('[Transporters] API response:', data);
 
         if (!response.ok) {
             throw new Error(data.error || 'Failed to load transporters');
         }
 
         loadingEl.style.display = 'none';
-        transporterSelect.innerHTML = '<option value="">Select Transporter</option>';
+        transporterSelect.innerHTML = '<option value="">Select Transporter Facility</option>';
 
         if (data.transporters && data.transporters.length > 0) {
+            console.log(`[Transporters] ✅ Loaded ${data.transporters.length} transporter(s) from METRC API`);
+            
             data.transporters.forEach(transporter => {
                 const option = document.createElement('option');
-                option.value = transporter.name;
-                option.textContent = `${transporter.name} (${transporter.licenseNumber || 'N/A'})`;
+                option.value = transporter.id; // Store the numeric ID as value
+                option.textContent = transporter.displayName || `${transporter.name} (${transporter.licenseNumber})`;
+                option.setAttribute('data-license', transporter.licenseNumber);
+                option.setAttribute('data-name', transporter.name);
                 transporterSelect.appendChild(option);
             });
+
+            // Handle transporter selection - log when selected
+            transporterSelect.addEventListener('change', (e) => {
+                const selectedOption = e.target.options[e.target.selectedIndex];
+                const transporterId = e.target.value;
+                const licenseNumber = selectedOption.getAttribute('data-license');
+                const name = selectedOption.getAttribute('data-name');
+                
+                if (transporterId) {
+                    transporterIdInput.value = transporterId;
+                    console.log(`[Transporters] ✅ Transporter selected:`, {
+                        id: transporterId,
+                        licenseNumber: licenseNumber,
+                        name: name,
+                        displayName: selectedOption.textContent
+                    });
+                    console.log(`[Transporters] ✅ Valid transporter ID retrieved from T3 API: ${transporterId}`);
+                } else {
+                    transporterIdInput.value = '';
+                    console.log(`[Transporters] ⚠️ No transporter selected`);
+                }
+            });
         } else {
-            // If no transporters from API, allow manual entry
-            transporterSelect.innerHTML = '<option value="">Enter Transporter Name</option>';
-            transporterSelect.style.display = 'none';
-            transporterSelect.removeAttribute('required'); // Remove required when hidden
-            const manualInput = document.createElement('input');
-            manualInput.type = 'text';
-            manualInput.id = 'transporter-name-manual';
-            manualInput.name = 'transporterName';
-            manualInput.required = true;
-            manualInput.placeholder = 'Enter Transporter Name';
-            manualInput.className = 'form-group input';
-            transporterSelect.parentElement.appendChild(manualInput);
+            console.warn('[Transporters] ⚠️ No transporters found in API response');
+            transporterSelect.innerHTML = '<option value="">No transporters available</option>';
+            loadingEl.innerHTML = `<span style="color: #ef4444;">No transporters found. Please ensure you have valid transporter facilities in METRC.</span>`;
         }
 
     } catch (error) {
-        console.error('Error loading transporters:', error);
+        console.error('[Transporters] ❌ Error loading transporters:', error);
         loadingEl.innerHTML = `<span style="color: #ef4444;">Error loading transporters: ${error.message}</span>`;
-        
-        // Allow manual entry
-        transporterSelect.style.display = 'none';
-        transporterSelect.removeAttribute('required'); // Remove required when hidden
-        const manualInput = document.createElement('input');
-        manualInput.type = 'text';
-        manualInput.id = 'transporter-name-manual';
-        manualInput.name = 'transporterName';
-        manualInput.required = true;
-        manualInput.placeholder = 'Enter Transporter Name';
-        manualInput.className = 'form-group input';
-        manualInput.style.cssText = 'padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 8px; font-size: 1rem; width: 100%;';
-        transporterSelect.parentElement.appendChild(manualInput);
+        transporterSelect.innerHTML = '<option value="">Error loading transporters</option>';
     }
 }
 
@@ -193,17 +281,34 @@ async function submitTransportationDetails() {
     try {
         const formData = new FormData(form);
         
-        // Get transporter name - check both select and manual input
-        let transporterName = formData.get('transporterName');
-        if (!transporterName) {
-            const manualInput = document.getElementById('transporter-name-manual');
-            transporterName = manualInput ? manualInput.value : '';
-        }
+        // Get recipient ID from hidden input (REQUIRED)
+        const recipientId = document.getElementById('recipient-id')?.value;
+        const recipientSelect = document.getElementById('recipient-facility');
+        const selectedRecipient = recipientSelect?.options[recipientSelect.selectedIndex];
         
-        if (!transporterName) {
-            throw new Error('Transporter name is required');
+        if (!recipientId) {
+            throw new Error('Please select a recipient facility');
         }
+
+        console.log('[Transportation] Submitting with recipient ID:', recipientId);
+        console.log('[Transportation] Selected recipient:', selectedRecipient?.textContent);
+
+        // Get transporter ID from hidden input (REQUIRED - from dropdown selection)
+        const transporterIdInput = document.getElementById('transporter-id');
+        const transporterId = transporterIdInput?.value || null;
+        const transporterSelect = document.getElementById('transporter-name');
+        const selectedTransporter = transporterSelect?.options[transporterSelect.selectedIndex];
         
+        if (!transporterId) {
+            throw new Error('Please select a transporter facility');
+        }
+
+        // Get transporter name from selected option
+        const transporterName = selectedTransporter?.textContent || formData.get('transporterName') || 'Unknown';
+        
+        console.log('[Transportation] Submitting with transporter ID:', transporterId);
+        console.log('[Transportation] Selected transporter:', selectedTransporter?.textContent);
+
         const data = {
             invoice_id: window.invoiceId,
             driverName: formData.get('driverName'),
@@ -215,7 +320,9 @@ async function submitTransportationDetails() {
             estimatedDeparture: new Date(formData.get('estimatedDeparture')).toISOString(),
             estimatedArrival: new Date(formData.get('estimatedArrival')).toISOString(),
             transporterName: transporterName,
-            phoneNumber: formData.get('phoneNumber') || ''
+            transporterId: transporterId, // Required - from dropdown selection
+            phoneNumber: formData.get('phoneNumber') || '',
+            recipientId: recipientId // Required - recipient ID from dropdown
         };
         
         console.log('Submitting data:', data);

@@ -6,6 +6,7 @@
  */
 
 const manifestService = require('../Services/manifestService');
+const manifestStatusService = require('../Services/manifestStatusService');
 
 class ManifestController {
     /**
@@ -298,6 +299,95 @@ class ManifestController {
             
         } catch (error) {
             console.error('❌ Manifest status error:', error.message);
+            res.status(500).json({
+                success: false,
+                error: 'Internal server error',
+                message: error.message
+            });
+        }
+    }
+
+    /**
+     * Get manifest statuses for an invoice
+     * GET /api/v1/manifests/invoice/:invoiceId/statuses
+     */
+    async getInvoiceManifestStatuses(req, res) {
+        try {
+            const { invoiceId } = req.params;
+            
+            if (!invoiceId) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Invoice ID is required'
+                });
+            }
+
+            const result = await manifestStatusService.getInvoiceManifestStatuses(invoiceId);
+            
+            if (result.success) {
+                res.json({
+                    success: true,
+                    manifests: result.manifests
+                });
+            } else {
+                res.status(400).json({
+                    success: false,
+                    error: result.error || 'Failed to get manifest statuses'
+                });
+            }
+            
+        } catch (error) {
+            console.error('❌ Error getting invoice manifest statuses:', error.message);
+            res.status(500).json({
+                success: false,
+                error: 'Internal server error',
+                message: error.message
+            });
+        }
+    }
+
+    /**
+     * Get manifest PDF
+     * GET /api/v1/manifests/:manifestNumber/pdf
+     */
+    async getManifestPDF(req, res) {
+        try {
+            const { manifestNumber } = req.params;
+            const { license, invoiceId } = req.query;
+            
+            if (!manifestNumber) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Manifest number is required'
+                });
+            }
+
+            // Parse invoiceId if provided
+            const parsedInvoiceId = invoiceId ? parseInt(invoiceId, 10) : null;
+
+            const result = await manifestStatusService.getManifestPDF(
+                manifestNumber, 
+                license || null,
+                parsedInvoiceId || null
+            );
+            
+            if (result.success && result.pdfBuffer) {
+                // Set appropriate headers for PDF
+                res.setHeader('Content-Type', result.contentType || 'application/pdf');
+                res.setHeader('Content-Disposition', `inline; filename="manifest-${manifestNumber}.pdf"`);
+                res.setHeader('Content-Length', result.pdfBuffer.length);
+                
+                // Send PDF buffer
+                res.send(result.pdfBuffer);
+            } else {
+                res.status(404).json({
+                    success: false,
+                    error: result.error || 'Failed to fetch manifest PDF'
+                });
+            }
+            
+        } catch (error) {
+            console.error('❌ Error getting manifest PDF:', error.message);
             res.status(500).json({
                 success: false,
                 error: 'Internal server error',

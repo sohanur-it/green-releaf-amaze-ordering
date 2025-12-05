@@ -5,6 +5,7 @@
 const { query, pool } = require('../config/database');
 const axios = require('axios');
 const scanningSessionService = require('./scanningSessionService');
+const metrcAuth = require('./metrcAuth');
 
 // METRC API Configuration
 const T3_API_BASE_URL = process.env.T3_API_BASE_URL || 'https://api.t3.com';
@@ -26,6 +27,10 @@ async function axiosWithTimeout(config, timeoutMs = METRC_API_TIMEOUT) {
 }
 
 class ManifestCreationService {
+    constructor() {
+        this.apiBaseUrl = metrcAuth.apiBaseUrl || process.env.T3_API_BASE_URL || 'https://api.trackandtrace.tools/v2';
+    }
+
     /**
      * Get the correct license column name for activepackages table
      */
@@ -46,7 +51,9 @@ class ManifestCreationService {
      * Phase 2 will extend this for multi-license
      */
     async createManifest(invoiceId, userId) {
+        console.log(`[Manifest] ========================================`);
         console.log(`[Manifest] Starting manifest creation for invoice ${invoiceId} by user ${userId}`);
+        console.log(`[Manifest] ========================================`);
         
         // Check scanning progress BEFORE starting transaction to avoid deadlocks
         console.log(`[Manifest] Checking scanning progress (pre-transaction)...`);
@@ -261,6 +268,10 @@ class ManifestCreationService {
             const transportationDetails = typeof inv.transportation_details === 'string'
                 ? JSON.parse(inv.transportation_details)
                 : inv.transportation_details;
+            
+            console.log(`[Manifest] Transportation details:`, JSON.stringify(transportationDetails, null, 2).substring(0, 1000));
+            console.log(`[Manifest] recipientId in transportation details:`, transportationDetails?.recipientId);
+            console.log(`[Manifest] transporterId in transportation details:`, transportationDetails?.transporterId);
 
             const createdManifests = [];
             const failedManifests = [];
@@ -295,13 +306,122 @@ class ManifestCreationService {
 
                     console.log(`[Manifest] ✓ Dry run passed for ${license}`);
 
-                    // PHASE 2: ACTUAL SUBMISSION
+                    // PHASE 2: ACTUAL SUBMISSION TO METRC
                     console.log(`[Manifest] Submitting to METRC for ${license}...`);
-                    // TODO: Implement actual METRC API submission
-                    const manifestNumber = `M${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 100)}`; // Placeholder
-                    const manifestMetrcId = Math.floor(Math.random() * 100000); // Placeholder
-
-                    console.log(`[Manifest] ✓ Manifest created for ${license}: ${manifestNumber}`);
+                    
+                    // Create manifest in METRC using the payload
+                    let manifestNumber, manifestMetrcId;
+                    
+                    try {
+                        const metrcResponse = await this.createManifestInMetrc(payload, license);
+                        
+                        if (!metrcResponse.success) {
+                            // Extract error message properly - handle both strings and objects
+                            let errorMsg = 'Unknown error';
+                            if (typeof metrcResponse.error === 'string') {
+                                errorMsg = metrcResponse.error;
+                            } else if (metrcResponse.error && typeof metrcResponse.error === 'object') {
+                                errorMsg = JSON.stringify(metrcResponse.error);
+                            }
+                            
+                            // Include details if available
+                            if (metrcResponse.details) {
+                                errorMsg += ` | Details: ${JSON.stringify(metrcResponse.details)}`;
+                            }
+                            
+                            throw new Error(`Failed to create manifest in METRC: ${errorMsg}`);
+                        }
+                        
+                        // Extract manifest number and METRC ID from response
+                        const metrcData = metrcResponse.data;
+                        manifestNumber = metrcData.manifestNumber || 
+                                       metrcData.manifest_number || 
+                                       metrcData.ManifestNumber ||
+                                       metrcData.number ||
+                                       metrcData.Number ||
+                                       metrcData.transferNumber ||
+                                       metrcData.transfer_number ||
+                                       metrcData.TransferNumber;
+                        manifestMetrcId = metrcData.id || 
+                                        metrcData.Id || 
+                                        metrcData.ID ||
+                                        metrcData.metrcId ||
+                                        metrcData.metrc_id ||
+                                        metrcData.MetrcId;
+                        
+                        // Also check fullResponse if manifestNumber not found in data
+                        if (!manifestNumber && metrcData.fullResponse) {
+                            const fullResp = metrcData.fullResponse;
+                            manifestNumber = fullResp.manifestNumber || 
+                                           fullResp.manifest_number || 
+                                           fullResp.ManifestNumber ||
+                                           fullResp.number ||
+                                           fullResp.Number ||
+                                           fullResp.transferNumber ||
+                                           fullResp.transfer_number ||
+                                           (fullResp.destinations && Array.isArray(fullResp.destinations) && fullResp.destinations[0]?.manifestNumber) ||
+                                           (fullResp.destinations && Array.isArray(fullResp.destinations) && fullResp.destinations[0]?.number);
+                            
+                            manifestMetrcId = manifestMetrcId || 
+                                             fullResp.id || 
+                                             fullResp.Id ||
+                                             fullResp.metrcId ||
+                                             (fullResp.destinations && Array.isArray(fullResp.destinations) && fullResp.destinations[0]?.id);
+                        }
+                        
+                        // Check if this is sandbox mode
+                        const isSandbox = metrcData.isSandbox || manifestNumber?.startsWith('SANDBOX-');
+                        
+                        if (!manifestNumber) {
+                            // If no manifest number in response, check if API call succeeded (sandbox mode)
+                            console.warn(`[Manifest] ⚠️  No manifest number found in response - checking if sandbox mode...`);
+                            console.warn(`[Manifest] Full metrcData:`, JSON.stringify(metrcData, null, 2));
+                            
+                            // If the API call succeeded but no manifest number, treat as sandbox mode
+                            if (metrcResponse.success && metrcData.fullResponse) {
+                                console.warn(`[Manifest] ⚠️  API call succeeded but no manifest number - treating as SANDBOX mode`);
+                                manifestNumber = `SANDBOX-${Date.now().toString().slice(-8)}`;
+                                manifestMetrcId = null;
+                                console.log(`[Manifest] Generated sandbox manifest number: ${manifestNumber}`);
+                            } else {
+                                // Only throw error if API call actually failed
+                                console.error(`[Manifest] ❌ No manifest number found and API call may have failed`);
+                                throw new Error('Manifest created in METRC but no manifest number returned in response. Please check METRC API response structure. Full response logged to server console.');
+                            }
+                        }
+                        
+                        // In sandbox mode, METRC ID is optional
+                        if (!manifestMetrcId && !isSandbox) {
+                            console.warn(`[Manifest] No METRC ID in standard fields, checking full response:`, JSON.stringify(metrcData).substring(0, 500));
+                            // Don't throw error in sandbox mode - METRC ID is optional
+                            if (!manifestNumber?.startsWith('SANDBOX-')) {
+                                throw new Error('Manifest created in METRC but no METRC ID returned in response. Please check METRC API response structure.');
+                            }
+                        }
+                        
+                        if (isSandbox) {
+                            console.log(`[Manifest] ✓ Manifest created in SANDBOX/TEST mode for ${license}: ${manifestNumber} (No METRC ID in sandbox mode)`);
+                        } else {
+                            console.log(`[Manifest] ✓ Manifest created in METRC for ${license}: ${manifestNumber} (METRC ID: ${manifestMetrcId})`);
+                        }
+                    } catch (metrcError) {
+                        console.error(`[Manifest] ❌ METRC API error:`, metrcError);
+                        console.error(`[Manifest] Error message:`, metrcError.message);
+                        console.error(`[Manifest] Error stack:`, metrcError.stack);
+                        
+                        // Extract error message properly
+                        let errorMsg = metrcError.message || 'Unknown error';
+                        if (typeof errorMsg === 'object') {
+                            errorMsg = JSON.stringify(errorMsg);
+                        }
+                        
+                        // Don't double-wrap the error message
+                        if (!errorMsg.includes('Failed to create manifest in METRC:')) {
+                            throw new Error(`Failed to create manifest in METRC: ${errorMsg}`);
+                        } else {
+                            throw metrcError; // Already wrapped, just re-throw
+                        }
+                    }
 
                     // Record manifest packages immediately (using main transaction client)
                     console.log(`[Manifest] About to record manifest packages for ${license}...`);
@@ -314,20 +434,49 @@ class ManifestCreationService {
                     );
                     console.log(`[Manifest] Finished recording manifest packages for ${license}`);
 
+                    // Check if this manifest was created in sandbox mode
+                    const isSandboxManifest = manifestNumber?.startsWith('SANDBOX-') || !manifestMetrcId;
+
                     createdManifests.push({
                         license,
                         manifest_number: manifestNumber,
                         metrc_id: manifestMetrcId,
-                        package_count: licenseData.packages.length
+                        package_count: licenseData.packages.length,
+                        is_sandbox: isSandboxManifest
                     });
 
                 } catch (licenseError) {
-                    console.error(`[Manifest] ❌ Failed for ${license}:`, licenseError.message);
-                    console.error(`[Manifest] Stack trace:`, licenseError.stack);
+                    console.error(`[Manifest] ❌ Failed for ${license}:`, licenseError);
+                    console.error(`[Manifest] Error type:`, typeof licenseError);
+                    console.error(`[Manifest] Error constructor:`, licenseError?.constructor?.name);
+                    
+                    // Extract error message properly - handle various error types
+                    let errorMsg = 'Unknown error';
+                    
+                    if (licenseError instanceof Error) {
+                        errorMsg = licenseError.message || 'Error occurred';
+                    } else if (typeof licenseError === 'string') {
+                        errorMsg = licenseError;
+                    } else if (typeof licenseError === 'object' && licenseError !== null) {
+                        // Try to extract meaningful error message from object
+                        errorMsg = licenseError.message || 
+                                  licenseError.error || 
+                                  licenseError.msg ||
+                                  JSON.stringify(licenseError);
+                    }
+                    
+                    // Ensure error message is a string and not too long
+                    if (typeof errorMsg !== 'string') {
+                        errorMsg = JSON.stringify(errorMsg);
+                    }
+                    errorMsg = errorMsg.substring(0, 1000);
+                    
+                    console.error(`[Manifest] Extracted error message:`, errorMsg);
+                    
                     failedManifests.push({
                         license,
-                        error: licenseError.message,
-                        stack: licenseError.stack
+                        error: errorMsg,
+                        stack: licenseError.stack || 'No stack trace available'
                     });
                     partialFailure = true;
                 }
@@ -353,7 +502,13 @@ class ManifestCreationService {
                 ]);
 
                 await client.query('COMMIT');
-                throw new Error('Manifest creation failed for all licenses');
+                
+                // Create detailed error message with all failure reasons
+                const errorDetails = failedManifests.map(f => 
+                    `${f.license}: ${f.error || 'Unknown error'}`
+                ).join('; ');
+                
+                throw new Error(`Manifest creation failed for all licenses. Errors: ${errorDetails}`);
             }
 
             // Update invoice with created manifests
@@ -408,24 +563,39 @@ class ManifestCreationService {
                 WHERE fk_invoice_id = $1 AND session_status = 'active'
             `, [invoiceId]);
 
-            // Log manifest creation
+            // Check if any manifests were created in sandbox mode
+            const hasSandboxManifests = createdManifests.some(m => m.is_sandbox);
+            const sandboxMessage = hasSandboxManifests 
+                ? ' (Created in SANDBOX/TEST environment - manifest numbers are placeholders)' 
+                : '';
+            
+            // Build status change message
+            let statusChangeMessage = `Manifest created successfully${sandboxMessage}`;
+            if (partialFailure) {
+                statusChangeMessage = `Partial manifest creation${sandboxMessage} - Some licenses succeeded, some failed`;
+            }
+            
+            // Log manifest creation with appropriate message
             await client.query(`
                 INSERT INTO "ORDERS-invoice-history" (
                     fk_invoice_id,
                     modification_type,
                     field_name,
                     new_value,
+                    reason,
                     changed_by_user_id,
                     change_details
-                ) VALUES ($1, 'manifests_created', 'metrc_manifest_numbers', $2, $3, $4)
+                ) VALUES ($1, 'manifests_created', 'metrc_manifest_numbers', $2, $3, $4, $5)
             `, [
                 invoiceId,
                 JSON.stringify(manifestNumbers),
+                statusChangeMessage,
                 userId,
                 JSON.stringify({
                     created: createdManifests,
                     failed: failedManifests,
-                    partial_failure: partialFailure
+                    partial_failure: partialFailure,
+                    sandbox_mode: hasSandboxManifests
                 })
             ]);
 
@@ -600,30 +770,137 @@ class ManifestCreationService {
                 // Calculate price per package (only for packages in this license)
                 const pricePerPackage = parseFloat(li.line_total) / licenseLabels.length;
 
+                // Validate that metrcid is a valid number
+                const packageMetrcId = parseInt(pkg.metrcid, 10);
+                if (!packageMetrcId || isNaN(packageMetrcId)) {
+                    throw new Error(`Package ${label} has invalid METRC ID: ${pkg.metrcid}`);
+                }
+                
+                // Ensure all numeric fields are valid numbers
+                const validatedWholesalePrice = parseFloat(pricePerPackage.toFixed(2));
+                const validatedGrossWeight = parseFloat(grossWeight.toFixed(2));
+                
+                if (isNaN(validatedWholesalePrice) || validatedWholesalePrice < 0) {
+                    throw new Error(`Package ${label} has invalid wholesale price: ${pricePerPackage}`);
+                }
+                
+                if (isNaN(validatedGrossWeight) || validatedGrossWeight <= 0) {
+                    throw new Error(`Package ${label} has invalid gross weight: ${grossWeight}`);
+                }
+
                 packages.push({
-                    id: pkg.metrcid,
-                    wholesalePrice: parseFloat(pricePerPackage.toFixed(2)),
-                    grossWeight: parseFloat(grossWeight.toFixed(2)),
+                    id: packageMetrcId,
+                    wholesalePrice: validatedWholesalePrice,
+                    grossWeight: validatedGrossWeight,
                     grossUnitOfWeightId: 1 // TODO: Look up actual unit ID
                 });
             }
         }
 
+        // Validate totalGrossWeight is a valid number
+        const validatedTotalGrossWeight = parseFloat(totalGrossWeight.toFixed(2));
+        if (isNaN(validatedTotalGrossWeight) || validatedTotalGrossWeight <= 0) {
+            throw new Error(`Invalid total gross weight: ${totalGrossWeight}`);
+        }
+
         // Build payload structure
-        // Note: recipientId and transporterId may be null if METRC API not available
-        // This is OK for now - they can be filled in during actual METRC submission
-        const payload = [{
-            destinations: [{
-                recipientId: transportDetails.recipientId || null, // May be null if METRC API not available
+        // Only include numeric fields if they have valid values (don't send null for numbers)
+        const destinationPayload = {
                 plannedRoute: `Delivery to ${destinationLicense}`,
                 transferTypeId: 1, // TODO: Look up actual transfer type ID
                 invoiceNumber: invoiceNumber,
                 estimatedDepartureDateTime: transportDetails.estimatedDeparture,
                 estimatedArrivalDateTime: transportDetails.estimatedArrival,
-                grossWeight: parseFloat(totalGrossWeight.toFixed(2)),
+            grossWeight: validatedTotalGrossWeight,
                 grossUnitOfWeightId: 1, // TODO: Look up actual unit ID
-                transporters: [{
-                    transporterId: transportDetails.transporterId || null, // May be null if METRC API not available
+            packages: packages
+        };
+        
+        // recipientId is REQUIRED by METRC - must be a valid number
+        // Try to get it from transportDetails first (from dropdown selection), otherwise look it up or throw error
+        let recipientId = null;
+        
+        if (transportDetails.recipientId) {
+            recipientId = parseInt(transportDetails.recipientId, 10);
+            if (!isNaN(recipientId) && recipientId > 0) {
+                console.log(`[Manifest] ✅ Using recipientId from transportation details (from dropdown): ${recipientId}`);
+            } else {
+                recipientId = null; // Invalid value, try lookup
+                console.warn(`[Manifest] Invalid recipientId in transportDetails: ${transportDetails.recipientId}`);
+            }
+        } else {
+            console.log(`[Manifest] recipientId not found in transportDetails`);
+        }
+        
+        // If recipientId is not available, try to look it up from METRC API
+        if (!recipientId) {
+            console.log(`[Manifest] recipientId not found in transportDetails, attempting lookup for destination license: ${destinationLicense}`);
+            
+            // First, try to get recipient ID from database (buyer location might have it stored)
+            // Use SAVEPOINT to prevent transaction abort if column doesn't exist
+            try {
+                // Create a savepoint so we can rollback just this query if it fails
+                await client.query('SAVEPOINT recipient_id_lookup');
+                
+                try {
+                    const locationQuery = await client.query(`
+                        SELECT metrc_recipient_facility_id, state_license
+                        FROM "ORDERS-buyer_locations"
+                        WHERE entry_id = $1
+                    `, [locationId]);
+                    
+                    if (locationQuery.rows.length > 0 && locationQuery.rows[0].metrc_recipient_facility_id) {
+                        recipientId = parseInt(locationQuery.rows[0].metrc_recipient_facility_id, 10);
+                        if (!isNaN(recipientId) && recipientId > 0) {
+                            console.log(`[Manifest] Found recipientId in database: ${recipientId}`);
+                        } else {
+                            recipientId = null;
+                        }
+                    }
+                    
+                    // Release savepoint if query succeeded
+                    await client.query('RELEASE SAVEPOINT recipient_id_lookup');
+                } catch (columnError) {
+                    // Column doesn't exist or query failed - rollback to savepoint
+                    await client.query('ROLLBACK TO SAVEPOINT recipient_id_lookup');
+                    console.log(`[Manifest] metrc_recipient_facility_id column may not exist, skipping database lookup`);
+                }
+            } catch (dbError) {
+                // If savepoint creation fails, just log and continue
+                console.warn(`[Manifest] Failed to query database for recipient ID:`, dbError.message);
+                // Don't rethrow - allow transaction to continue
+            }
+            
+            // If still not found, try METRC API lookup
+            if (!recipientId) {
+                try {
+                    recipientId = await this.lookupRecipientIdByLicense(destinationLicense, license);
+                    console.log(`[Manifest] Looked up recipientId from METRC: ${recipientId}`);
+                } catch (error) {
+                    console.error(`[Manifest] Failed to lookup recipientId from METRC:`, error.message);
+                    // Continue - will throw error below if still null
+                }
+            }
+        }
+        
+        // recipientId is REQUIRED - throw error if we still don't have it
+        if (!recipientId || isNaN(recipientId) || recipientId <= 0) {
+            throw new Error(
+                `recipientId is required but not found. Destination license: ${destinationLicense}. ` +
+                `Please ensure the recipient facility ID is configured. You can: ` +
+                `1) Add it to the buyer location's metrc_recipient_facility_id field in the database, ` +
+                `2) Ensure the facility exists in METRC and is accessible from source license ${license}, ` +
+                `3) Contact support to configure the recipient facility ID for this location.`
+            );
+        }
+        
+        destinationPayload.recipientId = recipientId;
+        // Note: METRC API only accepts recipientId (numeric ID), not recipientFacilityLicenseNumber
+        // The license number is not needed in the payload - recipientId is sufficient
+        
+        console.log(`[Manifest] ✅ Using recipientId ${recipientId} for manifest creation (selected from dropdown)`);
+        
+        const transporterPayload = {
                     phoneNumberForQuestions: transportDetails.phoneNumber || '0000000000',
                     transporterDetails: [{
                         driverName: transportDetails.driverName,
@@ -634,12 +911,640 @@ class ManifestCreationService {
                         vehicleModel: transportDetails.vehicleModel,
                         vehicleLicensePlateNumber: transportDetails.vehiclePlate
                     }]
-                }],
-                packages: packages
+        };
+        
+        // transporterId is REQUIRED by METRC - must be a valid number
+        // Try to get it from transportDetails first (from dropdown selection if available)
+        let transporterId = null;
+        
+        if (transportDetails.transporterId) {
+            transporterId = parseInt(transportDetails.transporterId, 10);
+            if (!isNaN(transporterId) && transporterId > 0) {
+                console.log(`[Manifest] ✅ Using transporterId from transportation details (from dropdown): ${transporterId}`);
+            } else {
+                transporterId = null;
+                console.warn(`[Manifest] Invalid transporterId in transportDetails: ${transportDetails.transporterId}`);
+            }
+        } else {
+            console.log(`[Manifest] transporterId not found in transportDetails`);
+        }
+        
+        // If transporterId is not available, try to look it up from METRC API
+        if (!transporterId && transportDetails.transporterName) {
+            console.log(`[Manifest] transporterId not found, attempting lookup by name...`);
+            try {
+                // Try to look up transporter ID by name
+                const transportationDetailsService = require('./transportationDetailsService');
+                transporterId = await transportationDetailsService.getTransporterIdByName(transportDetails.transporterName);
+                if (transporterId) {
+                    console.log(`[Manifest] ✅ Looked up transporterId from METRC: ${transporterId}`);
+                }
+            } catch (error) {
+                console.error(`[Manifest] Failed to lookup transporterId from METRC:`, error.message);
+                // Continue - will throw error below if still null
+            }
+        }
+        
+        // transporterId is REQUIRED by METRC - throw error if we still don't have it
+        if (!transporterId || isNaN(transporterId) || transporterId <= 0) {
+            throw new Error(
+                `transporterId is required but not found. ` +
+                `Please go back to the transportation details page and select a transporter facility from the dropdown. ` +
+                `The transporter ID must be retrieved from METRC T3 API.`
+            );
+        }
+        
+        transporterPayload.transporterId = transporterId;
+        
+        const payload = [{
+            destinations: [{
+                ...destinationPayload,
+                transporters: [transporterPayload]
             }]
         }];
 
         return payload;
+    }
+
+    /**
+     * Look up recipient facility ID from METRC using destination license number
+     * @param {string} destinationLicense - The destination facility license number
+     * @param {string} sourceLicense - The source/shipper license number
+     * @returns {Promise<number|null>} - The recipient facility ID or null if not found
+     */
+    async lookupRecipientIdByLicense(destinationLicense, sourceLicense) {
+        try {
+            console.log(`[Manifest] Looking up recipient ID for destination license: ${destinationLicense} (source: ${sourceLicense})`);
+            
+            // Method 1: Try to get available destinations from METRC API
+            // Endpoint: GET /transfers/create/destinations?licenseNumber={sourceLicense}
+            try {
+                const destinationsResponse = await metrcAuth.makeAuthenticatedRequest({
+                    method: 'GET',
+                    url: `${this.apiBaseUrl}/transfers/create/destinations`,
+                    params: {
+                        licenseNumber: sourceLicense
+                    },
+                    timeout: 15000
+                });
+                
+                console.log(`[Manifest] Received destinations from METRC API`);
+                console.log(`[Manifest] Full API response:`, JSON.stringify(destinationsResponse.data, null, 2).substring(0, 1000));
+                
+                // The response should contain a list of available destination facilities
+                const destinations = destinationsResponse.data?.data || destinationsResponse.data || [];
+                
+                if (Array.isArray(destinations) && destinations.length > 0) {
+                    console.log(`[Manifest] Found ${destinations.length} destination(s) from METRC API`);
+                    
+                    // Find destination facility matching the license number
+                    const matchingDestination = destinations.find(dest => {
+                        const destLicense = dest.licenseNumber || 
+                                           dest.license || 
+                                           dest.LicenseNumber ||
+                                           dest.License ||
+                                           (dest.facility && (dest.facility.licenseNumber || dest.facility.license));
+                        
+                        return destLicense === destinationLicense;
+                    });
+                    
+                    if (matchingDestination) {
+                        console.log(`[Manifest] Found matching destination:`, JSON.stringify(matchingDestination).substring(0, 500));
+                        
+                        const recipientId = matchingDestination.id || 
+                                           matchingDestination.facilityId || 
+                                           matchingDestination.FacilityId ||
+                                           matchingDestination.facility?.id ||
+                                           matchingDestination.facility?.Id;
+                        
+                        if (recipientId) {
+                            const parsedId = parseInt(recipientId, 10);
+                            if (!isNaN(parsedId) && parsedId > 0) {
+                                console.log(`[Manifest] ✅ Found recipient ID: ${parsedId} for license: ${destinationLicense}`);
+                                return parsedId;
+                            }
+                        }
+                    }
+                    
+                    console.warn(`[Manifest] No matching destination in results. Available destinations:`, destinations.map(d => ({
+                        license: d.licenseNumber || d.license || d.LicenseNumber,
+                        id: d.id || d.facilityId
+                    })).slice(0, 5));
+                }
+            } catch (destError) {
+                console.warn(`[Manifest] Failed to fetch destinations endpoint (will try facilities endpoint):`, destError.message);
+                if (destError.response) {
+                    console.warn(`[Manifest] Destinations endpoint status:`, destError.response.status);
+                    console.warn(`[Manifest] Destinations endpoint response:`, JSON.stringify(destError.response.data).substring(0, 500));
+                }
+            }
+            
+            // Method 2: Fallback - Query facilities endpoint and filter by license number
+            console.log(`[Manifest] Attempting fallback: Querying facilities endpoint...`);
+            try {
+                const facilitiesResponse = await metrcAuth.makeAuthenticatedRequest({
+                    method: 'GET',
+                    url: `${this.apiBaseUrl}/facilities`,
+                    params: {
+                        licenseNumber: sourceLicense
+                    },
+                    timeout: 15000
+                });
+                
+                console.log(`[Manifest] Received facilities from METRC API`);
+                console.log(`[Manifest] Facilities response:`, JSON.stringify(facilitiesResponse.data, null, 2).substring(0, 1500));
+                
+                const facilities = facilitiesResponse.data?.data || facilitiesResponse.data || [];
+                
+                if (Array.isArray(facilities) && facilities.length > 0) {
+                    console.log(`[Manifest] Found ${facilities.length} facility/facilities from METRC API`);
+                    console.log(`[Manifest] Sample facility structure:`, JSON.stringify(facilities[0], null, 2).substring(0, 500));
+                    
+                    // Find facility matching the destination license number
+                    const matchingFacility = facilities.find(fac => {
+                        const facLicense = fac.licenseNumber || 
+                                          fac.license || 
+                                          fac.LicenseNumber ||
+                                          fac.License ||
+                                          (fac.facility && (fac.facility.licenseNumber || fac.facility.license));
+                        
+                        return facLicense === destinationLicense;
+                    });
+                    
+                    if (matchingFacility) {
+                        console.log(`[Manifest] Found matching facility:`, JSON.stringify(matchingFacility, null, 2).substring(0, 500));
+                        
+                        const recipientId = matchingFacility.id || 
+                                           matchingFacility.facilityId || 
+                                           matchingFacility.FacilityId ||
+                                           (matchingFacility.facility && matchingFacility.facility.id);
+                        
+                        if (recipientId) {
+                            const parsedId = parseInt(recipientId, 10);
+                            if (!isNaN(parsedId) && parsedId > 0) {
+                                console.log(`[Manifest] ✅ Found recipient ID from facilities: ${parsedId} for license: ${destinationLicense}`);
+                                return parsedId;
+                            }
+                        }
+                    }
+                    
+                    console.warn(`[Manifest] Available facilities (first 5):`, facilities.slice(0, 5).map(f => ({
+                        id: f.id || f.facilityId,
+                        license: f.licenseNumber || f.license || f.LicenseNumber,
+                        name: f.name || f.facilityName
+                    })));
+                }
+            } catch (facError) {
+                console.warn(`[Manifest] Facilities endpoint also failed:`, facError.message);
+                if (facError.response) {
+                    console.warn(`[Manifest] Facilities endpoint status:`, facError.response.status);
+                    console.warn(`[Manifest] Facilities endpoint response:`, JSON.stringify(facError.response.data).substring(0, 500));
+                }
+            }
+            
+            console.warn(`[Manifest] ❌ No matching recipient facility found for license: ${destinationLicense}`);
+            console.warn(`[Manifest] Please check server logs above to see what METRC API returned.`);
+            console.warn(`[Manifest] You may need to manually configure the recipient facility ID for this location.`);
+            return null;
+            
+        } catch (error) {
+            console.error(`[Manifest] Error looking up recipient ID:`, error.message);
+            if (error.response) {
+                console.error(`[Manifest] Response status:`, error.response.status);
+                console.error(`[Manifest] Response data:`, JSON.stringify(error.response.data).substring(0, 500));
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Validate payload to ensure no null values in numeric fields
+     * @param {Array} payload - The manifest payload array
+     */
+    validatePayloadForNumericFields(payload) {
+        if (!Array.isArray(payload) || payload.length === 0) {
+            throw new Error('Payload must be a non-empty array');
+        }
+        
+        const firstPayload = payload[0];
+        if (!firstPayload.destinations || !Array.isArray(firstPayload.destinations) || firstPayload.destinations.length === 0) {
+            throw new Error('Payload must contain at least one destination');
+        }
+        
+        const destination = firstPayload.destinations[0];
+        
+        // Check numeric fields in destination - these must NOT be null
+        const requiredNumericFields = ['transferTypeId', 'grossWeight', 'grossUnitOfWeightId'];
+        for (const field of requiredNumericFields) {
+            if (destination[field] === null || destination[field] === undefined || isNaN(destination[field])) {
+                throw new Error(`Invalid or missing required numeric field '${field}': ${destination[field]}`);
+            }
+        }
+        
+        // recipientId is REQUIRED by METRC - must be present and valid
+        if (destination.recipientId === null || destination.recipientId === undefined || isNaN(parseInt(destination.recipientId, 10))) {
+            throw new Error(`recipientId is required and must be a valid number. Current value: ${destination.recipientId}`);
+        }
+        
+        // Check transporters
+        if (destination.transporters && Array.isArray(destination.transporters)) {
+            for (const transporter of destination.transporters) {
+                if (transporter.transporterId !== undefined) {
+                    if (transporter.transporterId === null || isNaN(parseInt(transporter.transporterId, 10))) {
+                        throw new Error(`Invalid transporterId: ${transporter.transporterId}. Must be a valid number or omitted entirely.`);
+                    }
+                }
+            }
+        }
+        
+        // Check packages
+        if (!destination.packages || !Array.isArray(destination.packages) || destination.packages.length === 0) {
+            throw new Error('Payload must contain at least one package');
+        }
+        
+        for (let i = 0; i < destination.packages.length; i++) {
+            const pkg = destination.packages[i];
+            const packageNumFields = ['id', 'wholesalePrice', 'grossWeight', 'grossUnitOfWeightId'];
+            
+            for (const field of packageNumFields) {
+                if (pkg[field] === null || pkg[field] === undefined || isNaN(pkg[field])) {
+                    throw new Error(`Package ${i + 1} has invalid or missing numeric field '${field}': ${pkg[field]}`);
+                }
+            }
+        }
+        
+        console.log(`[Manifest] ✓ Payload validation passed - all numeric fields are valid`);
+    }
+
+    /**
+     * Create manifest in METRC using T3 API
+     * @param {Array} payload - The manifest payload array
+     * @param {string} license - The license number
+     * @returns {Promise<Object>} - Response with success status and data
+     */
+    async createManifestInMetrc(payload, license) {
+        try {
+            console.log(`[Manifest] Creating manifest in METRC for license ${license}...`);
+            
+            // Validate payload structure - ensure no null values in numeric fields
+            this.validatePayloadForNumericFields(payload);
+            
+            console.log(`[Manifest] Payload validated. Full payload:`, JSON.stringify(payload, null, 2).substring(0, 1000));
+            
+            // Call METRC T3 API to create transfer/manifest
+            // Use submit=true parameter to actually create the manifest (not just dry run)
+            const response = await metrcAuth.makeAuthenticatedRequest({
+                method: 'POST',
+                url: `${this.apiBaseUrl}/transfers/create`,
+                data: payload,
+                params: {
+                    licenseNumber: license,
+                    submit: true  // Actually create the manifest, not just validate
+                },
+                timeout: 60000  // 60 seconds for manifest creation
+            });
+            
+            console.log(`[Manifest] ✅ METRC API response received`);
+            console.log(`[Manifest] Response status:`, response.status);
+            console.log(`[Manifest] Response status text:`, response.statusText);
+            console.log(`[Manifest] Full response data:`, JSON.stringify(response.data, null, 2));
+            console.log(`[Manifest] Response data type:`, typeof response.data);
+            console.log(`[Manifest] Is response.data an array?`, Array.isArray(response.data));
+            
+            // Extract manifest information from response
+            // METRC typically returns the created transfer in response.data
+            // The structure may vary, so we'll check multiple possible formats
+            let manifestNumber = null;
+            let manifestMetrcId = null;
+            
+            // Helper function to extract manifest number from various possible field names
+            const extractManifestNumber = (obj) => {
+                if (!obj) return null;
+                return obj.manifestNumber || 
+                       obj.manifest_number || 
+                       obj.ManifestNumber ||
+                       obj.number ||
+                       obj.Number ||
+                       obj.transferNumber ||
+                       obj.transfer_number ||
+                       obj.TransferNumber ||
+                       obj.transferNumber ||
+                       (obj.destinations && Array.isArray(obj.destinations) && obj.destinations[0]?.manifestNumber) ||
+                       (obj.destinations && Array.isArray(obj.destinations) && obj.destinations[0]?.number) ||
+                       null;
+            };
+            
+            // Helper function to extract METRC ID from various possible field names
+            const extractMetrcId = (obj) => {
+                if (!obj) return null;
+                return obj.id || 
+                       obj.Id || 
+                       obj.ID ||
+                       obj.metrcId ||
+                       obj.metrc_id ||
+                       obj.MetrcId ||
+                       (obj.destinations && Array.isArray(obj.destinations) && obj.destinations[0]?.id) ||
+                       null;
+            };
+            
+            if (Array.isArray(response.data) && response.data.length > 0) {
+                // Response is an array of created transfers
+                const transferData = response.data[0];
+                manifestNumber = extractManifestNumber(transferData);
+                manifestMetrcId = extractMetrcId(transferData);
+                
+                // Also check if it's nested in a data property
+                if (!manifestNumber && transferData.data) {
+                    manifestNumber = extractManifestNumber(transferData.data);
+                    manifestMetrcId = extractMetrcId(transferData.data);
+                }
+            } else if (response.data) {
+                // Response is a single object
+                manifestNumber = extractManifestNumber(response.data);
+                manifestMetrcId = extractMetrcId(response.data);
+                
+                // Check if response.data has a data property (nested structure)
+                if (!manifestNumber && response.data.data) {
+                    if (Array.isArray(response.data.data) && response.data.data.length > 0) {
+                        manifestNumber = extractManifestNumber(response.data.data[0]);
+                        manifestMetrcId = extractMetrcId(response.data.data[0]);
+                    } else {
+                        manifestNumber = extractManifestNumber(response.data.data);
+                        manifestMetrcId = extractMetrcId(response.data.data);
+                    }
+                }
+            }
+            
+            console.log(`[Manifest] Extracted manifestNumber: ${manifestNumber}`);
+            console.log(`[Manifest] Extracted manifestMetrcId: ${manifestMetrcId}`);
+            
+            // Check response message to determine if manifest was created
+            const responseMessage = response.data && typeof response.data === 'object' ? response.data.message : null;
+            const isDryRun = responseMessage === 'Dry run';
+            const isSuccess = responseMessage === 'Success';
+            const isSandboxMode = isDryRun || (isSuccess && !manifestNumber); // Sandbox mode if dry run or success without manifest number
+            
+            // If API returned "Success" or "Dry run", the manifest was likely created
+            // but we need to query active transfers to get the manifest number
+            if (isSuccess || isDryRun || (response.status === 200 && !manifestNumber)) {
+                if (isDryRun) {
+                    console.warn(`[Manifest] ⚠️  METRC API returned dry run response - SANDBOX/TEST MODE detected`);
+                } else if (isSuccess) {
+                    console.log(`[Manifest] ✅ METRC API returned success - manifest was created`);
+                } else {
+                    console.warn(`[Manifest] ⚠️  API call succeeded (200 OK) but no manifest number in response`);
+                }
+                
+                console.log(`[Manifest] Querying active transfers to find the created manifest...`);
+                
+                // Try to find the manifest by querying active transfers
+                // The manifest was created but the response doesn't include the manifest number
+                const invoiceNumber = payload[0]?.destinations?.[0]?.invoiceNumber;
+                const creationTime = new Date(); // Record when we created it
+                
+                // Retry logic: Try multiple times with increasing delays
+                // METRC may need a moment to process and index the new manifest
+                let foundManifest = false;
+                const maxRetries = 3;
+                const retryDelays = [2000, 3000, 5000]; // 2s, 3s, 5s delays
+                
+                for (let attempt = 0; attempt < maxRetries && !foundManifest; attempt++) {
+                    try {
+                        if (attempt > 0) {
+                            console.log(`[Manifest] Retry attempt ${attempt + 1}/${maxRetries} after ${retryDelays[attempt]}ms...`);
+                            await new Promise(resolve => setTimeout(resolve, retryDelays[attempt]));
+                        } else {
+                            await new Promise(resolve => setTimeout(resolve, retryDelays[0]));
+                        }
+                        
+                        // Try multiple endpoints to find the manifest
+                        const endpoints = [
+                            {
+                                name: 'outgoing/active',
+                                url: `${this.apiBaseUrl}/transfers/outgoing/active`,
+                                params: {
+                                    licenseNumber: license,
+                                    pageSize: 50,
+                                    page: 1
+                                }
+                            },
+                            {
+                                name: 'v2/external/outgoing',
+                                url: `${this.apiBaseUrl}/transfers/v2/external/outgoing`,
+                                params: {
+                                    licenseNumber: license,
+                                    pageSize: 50
+                                }
+                            }
+                        ];
+                        
+                        for (const endpoint of endpoints) {
+                            try {
+                                console.log(`[Manifest] Trying endpoint: ${endpoint.name}...`);
+                                const activeTransfersResponse = await metrcAuth.makeAuthenticatedRequest({
+                                    method: 'GET',
+                                    url: endpoint.url,
+                                    params: endpoint.params,
+                                    timeout: 15000
+                                });
+                                
+                                // Handle different response structures
+                                let transfers = [];
+                                if (Array.isArray(activeTransfersResponse.data)) {
+                                    transfers = activeTransfersResponse.data;
+                                } else if (activeTransfersResponse.data?.data && Array.isArray(activeTransfersResponse.data.data)) {
+                                    transfers = activeTransfersResponse.data.data;
+                                } else if (activeTransfersResponse.data?.transfers && Array.isArray(activeTransfersResponse.data.transfers)) {
+                                    transfers = activeTransfersResponse.data.transfers;
+                                }
+                                
+                                if (transfers.length > 0) {
+                                    console.log(`[Manifest] Found ${transfers.length} transfers in ${endpoint.name}`);
+                                    
+                                    // Method 1: Find by invoice number (most reliable)
+                                    const matchingTransfer = transfers.find(t => {
+                                        const transferInvoiceNumber = t.invoiceNumber || 
+                                                                      (t.destinations && Array.isArray(t.destinations) && t.destinations[0]?.invoiceNumber) ||
+                                                                      (t.destination && t.destination.invoiceNumber) ||
+                                                                      (t.destinations && !Array.isArray(t.destinations) && t.destinations.invoiceNumber);
+                                        return transferInvoiceNumber === invoiceNumber;
+                                    });
+                                    
+                                    if (matchingTransfer) {
+                                        manifestNumber = extractManifestNumber(matchingTransfer);
+                                        manifestMetrcId = extractMetrcId(matchingTransfer);
+                                        console.log(`[Manifest] ✅ Found manifest by invoice number: ${manifestNumber} (ID: ${manifestMetrcId})`);
+                                        foundManifest = true;
+                                        break;
+                                    }
+                                    
+                                    // Method 2: Find by creation time (within last 2 minutes)
+                                    const recentTransfers = transfers.filter(t => {
+                                        const transferDate = t.createdDateTime || t.createdDate || t.dateCreated || t.lastModified;
+                                        if (!transferDate) return false;
+                                        const transferTime = new Date(transferDate);
+                                        const timeDiff = creationTime - transferTime;
+                                        return timeDiff >= 0 && timeDiff < 2 * 60 * 1000; // Created within last 2 minutes
+                                    });
+                                    
+                                    if (recentTransfers.length > 0) {
+                                        // Sort by creation time (most recent first)
+                                        recentTransfers.sort((a, b) => {
+                                            const timeA = new Date(a.createdDateTime || a.createdDate || a.dateCreated || 0);
+                                            const timeB = new Date(b.createdDateTime || b.createdDate || b.dateCreated || 0);
+                                            return timeB - timeA;
+                                        });
+                                        
+                                        const mostRecent = recentTransfers[0];
+                                        manifestNumber = extractManifestNumber(mostRecent);
+                                        manifestMetrcId = extractMetrcId(mostRecent);
+                                        console.log(`[Manifest] ✅ Found manifest by creation time: ${manifestNumber} (ID: ${manifestMetrcId})`);
+                                        foundManifest = true;
+                                        break;
+                                    }
+                                    
+                                    // Method 3: Use most recent transfer if no better match (last resort)
+                                    if (!foundManifest && transfers.length > 0) {
+                                        const mostRecent = transfers[0]; // Assuming API returns most recent first
+                                        manifestNumber = extractManifestNumber(mostRecent);
+                                        manifestMetrcId = extractMetrcId(mostRecent);
+                                        console.log(`[Manifest] ⚠️  Using most recent transfer as fallback: ${manifestNumber} (ID: ${manifestMetrcId})`);
+                                        foundManifest = true;
+                                        break;
+                                    }
+                                }
+                            } catch (endpointError) {
+                                console.warn(`[Manifest] Endpoint ${endpoint.name} failed:`, endpointError.message);
+                            }
+                        }
+                        
+                        if (foundManifest) {
+                            break; // Found it, exit retry loop
+                        }
+                        
+                    } catch (queryError) {
+                        console.warn(`[Manifest] Retry ${attempt + 1} failed:`, queryError.message);
+                        if (attempt === maxRetries - 1) {
+                            console.error(`[Manifest] All ${maxRetries} retry attempts failed`);
+                        }
+                    }
+                }
+                
+                // If we still don't have a manifest number after querying
+                if (!manifestNumber) {
+                    if (isDryRun) {
+                        // In dry run mode, generate placeholder
+                        console.warn(`[Manifest] ⚠️  No manifest number found - generating placeholder for SANDBOX mode`);
+                        manifestNumber = `SANDBOX-${Date.now().toString().slice(-8)}`;
+                        manifestMetrcId = null;
+                        console.log(`[Manifest] Generated sandbox manifest number: ${manifestNumber}`);
+                    } else {
+                        // In success mode, this is unexpected - log error but don't fail
+                        console.error(`[Manifest] ❌ Manifest created (Success response) but could not find manifest number in active transfers`);
+                        console.error(`[Manifest] This may indicate the manifest was created but is not yet visible in active transfers`);
+                        console.error(`[Manifest] Please check METRC directly for invoice: ${payload[0]?.destinations?.[0]?.invoiceNumber}`);
+                        // Still generate a placeholder so the process can continue
+                        manifestNumber = `PENDING-${Date.now().toString().slice(-8)}`;
+                        manifestMetrcId = null;
+                    }
+                }
+            } else if (!manifestNumber) {
+                // Only throw error if API call failed or returned unexpected response
+                console.error(`[Manifest] ❌ Manifest number not found in METRC API response`);
+                console.error(`[Manifest] Response structure:`, JSON.stringify(response.data, null, 2));
+                throw new Error('Manifest created in METRC but no manifest number returned in response. Please check METRC API response structure. Full response logged to server console.');
+            }
+            
+            return {
+                success: true,
+                data: {
+                    id: manifestMetrcId,
+                    manifestNumber: manifestNumber,
+                    fullResponse: response.data,
+                    isSandbox: isSandboxMode || (!manifestMetrcId && manifestNumber?.startsWith('SANDBOX-'))
+                }
+            };
+            
+        } catch (error) {
+            console.error(`[Manifest] ❌ METRC API error caught:`, error);
+            console.error(`[Manifest] Error message:`, error.message);
+            
+            if (error.response) {
+                console.error(`[Manifest] Response status:`, error.response.status);
+                console.error(`[Manifest] Response headers:`, error.response.headers);
+                console.error(`[Manifest] Full response data:`, JSON.stringify(error.response.data, null, 2));
+                
+                // Extract detailed error message from METRC API response
+                let errorMessage = `METRC API returned ${error.response.status}`;
+                
+                if (error.response.data) {
+                    const errorData = error.response.data;
+                    
+                    // Try multiple possible error message formats
+                    if (typeof errorData === 'string') {
+                        errorMessage = errorData;
+                    } else if (typeof errorData === 'object') {
+                        // Try common error message fields
+                        errorMessage = errorData.message || 
+                                      errorData.error || 
+                                      errorData.Message ||
+                                      errorData.Error ||
+                                      errorData.title ||
+                                      errorData.detail ||
+                                      errorMessage;
+                        
+                        // Include validation errors if present
+                        if (errorData.errors) {
+                            let validationErrors = '';
+                            if (Array.isArray(errorData.errors)) {
+                                validationErrors = errorData.errors.map(e => 
+                                    typeof e === 'string' ? e : JSON.stringify(e)
+                                ).join('; ');
+                            } else if (typeof errorData.errors === 'object') {
+                                validationErrors = JSON.stringify(errorData.errors);
+                            }
+                            
+                            if (validationErrors) {
+                                errorMessage += ` | Validation errors: ${validationErrors}`;
+                            }
+                        }
+                        
+                        // If we still have the generic message, include the full error data
+                        if (errorMessage === `METRC API returned ${error.response.status}`) {
+                            errorMessage += ` | Response: ${JSON.stringify(errorData).substring(0, 500)}`;
+                        }
+                    }
+                }
+                
+                // Ensure error message is always a string
+                const finalErrorMessage = typeof errorMessage === 'string' 
+                    ? errorMessage 
+                    : JSON.stringify(errorMessage);
+                
+                return {
+                    success: false,
+                    error: finalErrorMessage,
+                    details: error.response.data,
+                    statusCode: error.response.status
+                };
+            }
+            
+            // Handle network errors or other non-HTTP errors
+            let errorMessage = error.message || 'Failed to create manifest in METRC';
+            if (error.code) {
+                errorMessage += ` (Code: ${error.code})`;
+            }
+            
+            // Ensure error message is always a string
+            const finalErrorMessage = typeof errorMessage === 'string' 
+                ? errorMessage 
+                : JSON.stringify(errorMessage);
+            
+            return {
+                success: false,
+                error: finalErrorMessage
+            };
+        }
     }
 
     /**

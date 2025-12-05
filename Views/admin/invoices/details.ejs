@@ -106,6 +106,127 @@
 .dark-theme .fulfillment-issue-alert p {
     color: #fcd34d;
 }
+
+/* Manifest Status Styles */
+.manifest-number-badge {
+    transition: all 0.3s ease;
+}
+
+.manifest-number-badge:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.manifest-status-indicator {
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.5;
+    }
+}
+
+.manifest-status-indicator.loaded {
+    animation: none;
+}
+
+.btn-view-pdf:hover {
+    background: rgba(25, 118, 210, 0.1);
+    transform: scale(1.1);
+}
+
+.btn-view-pdf:active {
+    transform: scale(0.95);
+}
+
+/* History Modal Styles */
+.rejection-alert-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 10000;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+}
+
+.rejection-alert-modal.show {
+    display: flex;
+}
+
+.rejection-alert-content {
+    background: var(--card-bg, white);
+    border-radius: 12px;
+    padding: 2rem;
+    max-width: 900px;
+    width: 90%;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+    position: relative;
+    animation: modalSlideIn 0.3s ease-out;
+}
+
+@keyframes modalSlideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.dark-theme .rejection-alert-content {
+    background: var(--card-bg, #1f2937);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+.rejection-alert-content h3 {
+    margin: 0 0 1.5rem 0;
+    color: var(--text-color);
+    font-size: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.rejection-alert-content .close-btn {
+    position: absolute;
+    top: 1rem;
+    right: 1rem;
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    color: var(--text-light);
+    padding: 0.5rem;
+    border-radius: 4px;
+    transition: all 0.2s;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.rejection-alert-content .close-btn:hover {
+    background: var(--bg-color, #f3f4f6);
+    color: var(--text-color);
+}
+
+.dark-theme .rejection-alert-content .close-btn:hover {
+    background: var(--hover-bg, #374151);
+}
 </style>
 
 <div class="page-header">
@@ -341,6 +462,31 @@
             </div>
         </div>
     </div>
+    <% if (invoice.metrc_manifest_numbers && (Array.isArray(invoice.metrc_manifest_numbers) ? invoice.metrc_manifest_numbers.length > 0 : JSON.parse(invoice.metrc_manifest_numbers || '[]').length > 0)) { %>
+    <div class="detail-row">
+        <div class="detail-label">Manifest Numbers:</div>
+        <div class="detail-value">
+            <div id="manifest-numbers-display">
+                <div style="display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+                    <% 
+                    const manifestNumbers = Array.isArray(invoice.metrc_manifest_numbers) 
+                        ? invoice.metrc_manifest_numbers 
+                        : JSON.parse(invoice.metrc_manifest_numbers || '[]');
+                    manifestNumbers.forEach((manifestNum, idx) => { %>
+                        <div class="manifest-number-badge" data-manifest-number="<%= manifestNum %>" style="padding: 0.5rem 1rem; background: #e3f2fd; border-radius: 6px; display: inline-flex; align-items: center; gap: 0.5rem;">
+                            <span style="font-weight: 600; color: #1976d2;"><%= manifestNum %></span>
+                            <span class="manifest-status-indicator" style="display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: #9e9e9e;" title="Checking status..."></span>
+                            <button onclick="viewManifestPDF('<%= manifestNum %>', <%= invoice.id %>)" class="btn-view-pdf" title="View Manifest PDF" style="background: none; border: none; color: #1976d2; cursor: pointer; padding: 0.25rem; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s;">
+                                <i class="fas fa-file-pdf" style="font-size: 1rem;"></i>
+                            </button>
+                        </div>
+                    <% }); %>
+                </div>
+                <div id="manifest-status-details" style="margin-top: 0.75rem; font-size: 0.875rem; color: var(--text-light);"></div>
+            </div>
+        </div>
+    </div>
+    <% } %>
 </div>
 
 <!-- Line Items -->
@@ -540,18 +686,38 @@
 <% } %>
 
 <!-- View All History Modal -->
-<div id="history-modal" class="rejection-alert-modal" style="display: none;">
-    <div class="rejection-alert-content" style="max-width: 800px; max-height: 80vh; overflow-y: auto;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-            <h3 style="margin: 0; color: var(--text-color);">
-                <i class="fas fa-history"></i> Full Change History
+<div id="history-modal" class="rejection-alert-modal">
+    <div class="rejection-alert-content">
+        <h3>
+            <i class="fas fa-history"></i> Full Change History
+        </h3>
+        <button onclick="closeHistoryModal()" class="close-btn" aria-label="Close">
+            <i class="fas fa-times"></i>
+        </button>
+        <div id="full-history-content" class="history-timeline">
+            <p style="text-align: center; color: var(--text-light);">Loading history...</p>
+        </div>
+    </div>
+</div>
+
+<!-- Manifest PDF Modal -->
+<div id="manifest-pdf-modal" class="rejection-alert-modal">
+    <div class="rejection-alert-content" style="max-width: 95vw; width: 95vw; max-height: 90vh; padding: 0;">
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 1.5rem; border-bottom: 1px solid var(--border-color, #dee2e6);">
+            <h3 style="margin: 0; color: var(--text-color); display: flex; align-items: center; gap: 0.5rem;">
+                <i class="fas fa-file-pdf"></i> <span id="pdf-modal-title">Manifest PDF</span>
             </h3>
-            <button onclick="closeHistoryModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: var(--text-light);">
+            <button onclick="closeManifestPDFModal()" class="close-btn" aria-label="Close">
                 <i class="fas fa-times"></i>
             </button>
         </div>
-        <div id="full-history-content" class="history-timeline">
-            <p style="text-align: center; color: var(--text-light);">Loading history...</p>
+        <div id="manifest-pdf-content" style="height: calc(90vh - 80px); overflow: auto; position: relative; background: #f8f9fa; min-height: 500px;">
+            <div style="display: flex; align-items: center; justify-content: center; height: 100%; padding: 2rem;">
+                <div style="text-align: center;">
+                    <i class="fas fa-spinner fa-spin" style="font-size: 2rem; color: var(--text-light); margin-bottom: 1rem;"></i>
+                    <p style="color: var(--text-light);">Loading PDF...</p>
+                </div>
+            </div>
         </div>
     </div>
 </div>
@@ -599,7 +765,88 @@ document.addEventListener('DOMContentLoaded', () => {
             kickBackBtn.style.display = 'inline-block';
         }
     }
+    
+    // Load manifest statuses if manifest numbers exist
+    loadManifestStatuses();
 });
+
+/**
+ * Load manifest statuses from API and update UI
+ */
+async function loadManifestStatuses() {
+    const manifestNumbersDisplay = document.getElementById('manifest-numbers-display');
+    if (!manifestNumbersDisplay) return;
+    
+    try {
+        const response = await fetch(`/api/v1/manifests/invoice/${invoiceId}/statuses`);
+        const data = await response.json();
+        
+        if (data.success && data.manifests && data.manifests.length > 0) {
+            updateManifestStatusDisplay(data.manifests);
+        } else {
+            console.warn('No manifest statuses found or error:', data.error);
+        }
+    } catch (error) {
+        console.error('Error loading manifest statuses:', error);
+    }
+}
+
+/**
+ * Update manifest status display in UI
+ */
+function updateManifestStatusDisplay(manifests) {
+    const statusDetails = document.getElementById('manifest-status-details');
+    const statusMessages = [];
+    
+    manifests.forEach(manifest => {
+        const badge = document.querySelector(`[data-manifest-number="${manifest.manifestNumber}"]`);
+        if (!badge) return;
+        
+        const indicator = badge.querySelector('.manifest-status-indicator');
+        if (!indicator) return;
+        
+        let statusColor = '#9e9e9e'; // default gray
+        let statusText = manifest.message || 'Unknown';
+        let statusLabel = manifest.status;
+        
+        switch (manifest.status) {
+            case 'active':
+                statusColor = '#4caf50'; // green
+                statusText = 'Active - Has not shipped yet';
+                statusLabel = 'Active';
+                break;
+            case 'voided':
+                statusColor = '#f44336'; // red
+                statusText = 'Voided';
+                statusLabel = 'Voided';
+                break;
+            case 'accepted':
+                statusColor = '#2196f3'; // blue
+                statusText = 'Accepted by dispensary';
+                statusLabel = 'Accepted';
+                break;
+            case 'not_found':
+                statusColor = '#ff9800'; // orange
+                statusText = 'Not found in METRC';
+                statusLabel = 'Not Found';
+                break;
+            case 'error':
+                statusColor = '#9e9e9e'; // gray
+                statusText = `Error: ${manifest.error || 'Unknown error'}`;
+                statusLabel = 'Error';
+                break;
+        }
+        
+        indicator.style.background = statusColor;
+        indicator.title = statusText;
+        
+        statusMessages.push(`${manifest.manifestNumber}: ${statusText}`);
+    });
+    
+    if (statusDetails && statusMessages.length > 0) {
+        statusDetails.innerHTML = '<strong>Status Details:</strong> ' + statusMessages.join(' • ');
+    }
+}
 
 async function cloneInvoice() {
     if (!confirm('Create a duplicate of this invoice? This will copy all products and amounts.')) {
@@ -1444,7 +1691,10 @@ async function showAllHistory() {
     const modal = document.getElementById('history-modal');
     const content = document.getElementById('full-history-content');
     
-    modal.style.display = 'flex';
+    // Show modal
+    modal.classList.add('show');
+    document.body.style.overflow = 'hidden'; // Prevent background scrolling
+    
     content.innerHTML = '<p style="text-align: center; color: var(--text-light);">Loading history...</p>';
     
     try {
@@ -1492,7 +1742,9 @@ async function showAllHistory() {
  * Close history modal
  */
 function closeHistoryModal() {
-    document.getElementById('history-modal').style.display = 'none';
+    const modal = document.getElementById('history-modal');
+    modal.classList.remove('show');
+    document.body.style.overflow = ''; // Restore background scrolling
 }
 
 // Close modal when clicking outside
@@ -1502,6 +1754,272 @@ document.addEventListener('click', (e) => {
         closeHistoryModal();
     }
 });
+
+// Close modal with Escape key
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const historyModal = document.getElementById('history-modal');
+        const pdfModal = document.getElementById('manifest-pdf-modal');
+        
+        if (historyModal && historyModal.classList.contains('show')) {
+            closeHistoryModal();
+        } else if (pdfModal && pdfModal.classList.contains('show')) {
+            closeManifestPDFModal();
+        }
+    }
+});
+
+/**
+ * View manifest PDF in modal
+ */
+async function viewManifestPDF(manifestNumber, invoiceId = null) {
+    console.log('Opening PDF modal for manifest:', manifestNumber);
+    
+    const modal = document.getElementById('manifest-pdf-modal');
+    const content = document.getElementById('manifest-pdf-content');
+    const title = document.getElementById('pdf-modal-title');
+    
+    if (!modal || !content || !title) {
+        console.error('Modal elements not found', { modal: !!modal, content: !!content, title: !!title });
+        alert('Error: Could not find PDF modal elements. Please refresh the page.');
+        return;
+    }
+    
+    // Show modal with explicit display
+    modal.style.display = 'flex';
+    modal.classList.add('show');
+    document.body.style.overflow = 'hidden';
+    
+    console.log('Modal displayed, setting title and loading state');
+    title.textContent = `Manifest ${manifestNumber}`;
+    
+    // Clear and show loading state
+    content.style.background = '#f8f9fa';
+    content.style.minHeight = '500px';
+    content.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: center; height: 100%; min-height: 500px; padding: 2rem;">
+            <div style="text-align: center;">
+                <i class="fas fa-spinner fa-spin" style="font-size: 2rem; color: #1976d2; margin-bottom: 1rem;"></i>
+                <p style="color: var(--text-color); font-weight: 500; margin: 0;">Loading PDF...</p>
+                <p style="color: var(--text-light); font-size: 0.875rem; margin-top: 0.5rem;">Manifest: ${manifestNumber}</p>
+            </div>
+        </div>
+    `;
+    
+    try {
+        // Get the PDF URL from our API endpoint
+        let pdfUrl = `/api/v1/manifests/${encodeURIComponent(manifestNumber)}/pdf`;
+        if (invoiceId) {
+            pdfUrl += `?invoiceId=${encodeURIComponent(invoiceId)}`;
+        }
+        console.log('Fetching PDF from:', pdfUrl);
+        
+        // Fetch the PDF with explicit error handling
+        let response;
+        try {
+            response = await fetch(pdfUrl);
+            console.log('PDF endpoint response status:', response.status);
+            console.log('PDF endpoint response headers:', response.headers.get('content-type'));
+        } catch (fetchError) {
+            console.error('Fetch error:', fetchError);
+            throw new Error(`Network error: ${fetchError.message}`);
+        }
+        
+        const contentType = response.headers.get('content-type') || '';
+        const isPDF = contentType.includes('application/pdf') || contentType.includes('pdf');
+        
+        if (!response.ok) {
+            // It's an error response, try to get error message
+            let errorMessage = `Server returned status ${response.status}`;
+            try {
+                const errorText = await response.text();
+                console.log('Error response text:', errorText);
+                try {
+                    const errorData = JSON.parse(errorText);
+                    errorMessage = errorData.error || errorData.message || errorMessage;
+                } catch (e) {
+                    errorMessage = errorText || errorMessage;
+                }
+            } catch (e) {
+                // Not JSON, use status message
+                errorMessage = `${response.status}: ${response.statusText}`;
+            }
+            throw new Error(errorMessage);
+        }
+        
+        // Check if response is actually a PDF
+        if (!isPDF) {
+            // Might be JSON error disguised as success
+            const responseText = await response.text();
+            console.log('Response is not PDF, content:', responseText.substring(0, 200));
+            try {
+                const errorData = JSON.parse(responseText);
+                throw new Error(errorData.error || errorData.message || 'The response is not a PDF file');
+            } catch (e) {
+                if (e.message && !e.message.includes('Unexpected token') && !e.message.includes('JSON')) {
+                    throw e;
+                }
+                throw new Error(`The server response is not a PDF file. Content-Type: ${contentType}. Response: ${responseText.substring(0, 100)}`);
+            }
+        }
+        
+        // Re-fetch as blob (since we already consumed the response)
+        const blobResponse = await fetch(pdfUrl);
+        const blob = await blobResponse.blob();
+        console.log('Created blob from response, size:', blob.size, 'bytes, type:', blob.type);
+        
+        if (blob.size === 0) {
+            throw new Error('PDF file is empty (0 bytes)');
+        }
+        
+        // Verify it's actually a PDF by checking first bytes
+        const firstBytes = await blob.slice(0, 4).arrayBuffer();
+        const pdfSignature = new Uint8Array(firstBytes);
+        const isPDFFile = pdfSignature[0] === 0x25 && pdfSignature[1] === 0x50 && pdfSignature[2] === 0x44 && pdfSignature[3] === 0x46; // %PDF
+        
+        if (!isPDFFile) {
+            const text = await blob.text();
+            console.error('Not a valid PDF file, content:', text.substring(0, 200));
+            throw new Error('The downloaded file is not a valid PDF. It may be an error message.');
+        }
+        
+        const blobUrl = URL.createObjectURL(blob);
+        console.log('Created blob URL for PDF:', blobUrl);
+        
+        // Create iframe to display PDF inline
+        console.log('Creating iframe for PDF');
+        content.style.background = 'white';
+        
+        // Simple iframe approach
+        content.innerHTML = `
+            <iframe 
+                id="pdf-iframe"
+                src="${blobUrl}" 
+                style="width: 100%; height: 100%; border: none; min-height: 600px; display: block; background: white;"
+                title="Manifest PDF Viewer"
+                type="application/pdf"
+                allowfullscreen
+            ></iframe>
+        `;
+        
+        // Handle iframe load events
+        const iframe = document.getElementById('pdf-iframe');
+        
+        if (!iframe) {
+            throw new Error('Failed to create PDF iframe');
+        }
+        
+        // Show fallback if iframe doesn't load
+        setTimeout(() => {
+            // Check if iframe has loaded anything
+            try {
+                // If we can't detect load, show a fallback link
+                const fallbackDiv = document.createElement('div');
+                fallbackDiv.style.cssText = 'position: absolute; bottom: 1rem; right: 1rem; padding: 0.75rem 1rem; background: rgba(255,255,255,0.95); border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); z-index: 10001;';
+                fallbackDiv.innerHTML = `
+                    <a href="${blobUrl}" target="_blank" style="color: #3b82f6; text-decoration: none; font-size: 0.875rem; display: inline-flex; align-items: center; gap: 0.5rem;">
+                        <i class="fas fa-external-link-alt"></i> Open PDF in new tab
+                    </a>
+                `;
+                content.appendChild(fallbackDiv);
+                
+                // Remove after 5 seconds if PDF loaded
+                setTimeout(() => {
+                    if (fallbackDiv.parentNode) {
+                        fallbackDiv.style.opacity = '0';
+                        fallbackDiv.style.transition = 'opacity 0.3s';
+                        setTimeout(() => fallbackDiv.remove(), 300);
+                    }
+                }, 5000);
+            } catch (e) {
+                console.error('Error creating fallback:', e);
+            }
+        }, 3000);
+        
+        // Clean up blob URL when modal is closed
+        const cleanupBlob = () => {
+            console.log('Cleaning up blob URL');
+            URL.revokeObjectURL(blobUrl);
+        };
+        
+        // Store cleanup function on modal for later
+        modal._cleanupBlob = cleanupBlob;
+        
+    } catch (error) {
+        console.error('Error loading manifest PDF:', error);
+        console.error('Error stack:', error.stack);
+        showPDFError(content, `/api/v1/manifests/${encodeURIComponent(manifestNumber)}/pdf`, error.message || 'An error occurred while loading the manifest PDF.');
+    }
+}
+
+/**
+ * Show PDF error message
+ */
+function showPDFError(content, pdfUrl, errorMessage) {
+    if (!content) return;
+    
+    content.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: center; height: 100%; padding: 2rem;">
+            <div style="text-align: center; max-width: 500px;">
+                <i class="fas fa-exclamation-triangle" style="font-size: 3rem; color: #ef4444; margin-bottom: 1rem;"></i>
+                <h4 style="color: var(--text-color); margin-bottom: 0.5rem;">Failed to Load PDF</h4>
+                <p style="color: var(--text-light); margin-bottom: 1rem; font-size: 0.9rem;">
+                    ${errorMessage || 'The manifest PDF could not be loaded. It may not be available yet or there was an error fetching it from METRC.'}
+                </p>
+                <div style="display: flex; gap: 0.5rem; justify-content: center; flex-wrap: wrap;">
+                    <button onclick="window.open('${pdfUrl}', '_blank')" class="btn btn-primary" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer; background: #3b82f6; color: white;">
+                        <i class="fas fa-external-link-alt"></i> Open in New Tab
+                    </button>
+                    <button onclick="closeManifestPDFModal()" class="btn btn-secondary" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer; background: #6c757d; color: white;">
+                        Close
+                    </button>
+                </div>
+                <div style="margin-top: 1rem; padding: 1rem; background: var(--bg-color, #f8f9fa); border-radius: 8px; text-align: left; font-size: 0.875rem; color: var(--text-light);">
+                    <strong>Debug Info:</strong><br>
+                    URL: <code style="font-size: 0.8rem; word-break: break-all;">${pdfUrl}</code>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+/**
+ * Close manifest PDF modal
+ */
+function closeManifestPDFModal() {
+    const modal = document.getElementById('manifest-pdf-modal');
+    const content = document.getElementById('manifest-pdf-content');
+    
+    if (!modal || !content) return;
+    
+    // Cleanup blob URL if stored
+    if (modal._cleanupBlob && typeof modal._cleanupBlob === 'function') {
+        modal._cleanupBlob();
+        delete modal._cleanupBlob;
+    }
+    
+    // Cleanup any blob URLs from iframes
+    const iframe = content.querySelector('#pdf-iframe');
+    if (iframe && iframe.src && iframe.src.startsWith('blob:')) {
+        URL.revokeObjectURL(iframe.src);
+    }
+    
+    // Hide modal
+    modal.style.display = 'none';
+    modal.classList.remove('show');
+    document.body.style.overflow = '';
+    
+    // Reset content
+    content.style.background = '#f8f9fa';
+    content.innerHTML = `
+        <div style="display: flex; align-items: center; justify-content: center; height: 100%; min-height: 500px; padding: 2rem;">
+            <div style="text-align: center;">
+                <i class="fas fa-spinner fa-spin" style="font-size: 2rem; color: var(--text-light); margin-bottom: 1rem;"></i>
+                <p style="color: var(--text-light);">Loading PDF...</p>
+            </div>
+        </div>
+    `;
+}
 </script>
 
 <!-- Include notification system -->

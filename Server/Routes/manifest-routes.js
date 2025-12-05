@@ -334,6 +334,16 @@ router.post('/',
  *                   error: "Internal server error"
  *                   message: "Failed to retrieve manifest status from METRC"
  */
+router.get('/invoice/:invoiceId/statuses', 
+    requirePermission('fulfillment.manifest_read'),
+    manifestController.getInvoiceManifestStatuses
+);
+
+router.get('/:manifestNumber/pdf', 
+    requirePermission('fulfillment.manifest_read'),
+    manifestController.getManifestPDF
+);
+
 router.get('/:manifestNumber/status', 
     requirePermission('fulfillment.manifest_read'),
     manifestController.getManifestStatus

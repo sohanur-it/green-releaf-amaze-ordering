@@ -27,11 +27,27 @@ function decodeJWT(token) {
 
 class MetrcAuthService {
     constructor() {
+        // Ensure environment variables are loaded if not already
+        if (!process.env.T3_USERNAME || !process.env.T3_PASSWORD) {
+            const path = require('path');
+            if (process.env.NODE_ENV === 'production') {
+                require('dotenv').config({ path: path.join(__dirname, '../../config/production.env') });
+            } else {
+                require('dotenv').config({ path: path.join(__dirname, '../../config/local.env') });
+            }
+        }
+        
         this.apiBaseUrl = process.env.T3_API_BASE_URL || 'https://api.trackandtrace.tools/v2';
         this.username = process.env.T3_USERNAME;
         this.password = process.env.T3_PASSWORD;
         this.hostname = process.env.T3_HOSTNAME || 'mo.metrc.com';
         this.licenseNumber = process.env.T3_LICENSE_NUMBER || 'CUL000063';
+        
+        // Validate that required credentials are present
+        if (!this.username || !this.password) {
+            console.error('❌ METRC credentials not configured. Please set T3_USERNAME and T3_PASSWORD in environment variables.');
+            console.error(`   Current values: username=${this.username ? '***' : 'undefined'}, password=${this.password ? '***' : 'undefined'}`);
+        }
         
         // Token cache file path
         this.tokenCacheFile = path.join(__dirname, '../../cache/metrc-tokens.json');
@@ -58,16 +74,28 @@ class MetrcAuthService {
             const tokens = JSON.parse(tokenData);
             
             // Check if tokens are still valid
-            if (tokens.accessToken && tokens.tokenExpiry && new Date() < new Date(tokens.tokenExpiry)) {
+            const tokenExpiry = tokens.tokenExpiry ? new Date(tokens.tokenExpiry) : null;
+            const now = new Date();
+            
+            if (tokens.accessToken && tokenExpiry && now < tokenExpiry) {
                 this.accessToken = tokens.accessToken;
                 this.refreshToken = tokens.refreshToken;
-                this.tokenExpiry = new Date(tokens.tokenExpiry);
+                this.tokenExpiry = tokenExpiry;
                 this.refreshTokenExpiry = tokens.refreshTokenExpiry ? new Date(tokens.refreshTokenExpiry) : null;
                 
-                console.log('🔐 Loaded cached METRC tokens');
+                console.log(`🔐 Loaded cached METRC tokens (expires: ${tokenExpiry.toISOString()})`);
                 return true;
             } else {
-                console.log('🔐 Cached METRC tokens expired, will re-authenticate');
+                if (tokenExpiry && now >= tokenExpiry) {
+                    console.log(`🔐 Cached METRC tokens expired at ${tokenExpiry.toISOString()}, will re-authenticate`);
+                } else {
+                    console.log('🔐 Cached METRC tokens invalid or missing, will re-authenticate');
+                }
+                // Clear expired tokens from memory
+                this.accessToken = null;
+                this.refreshToken = null;
+                this.tokenExpiry = null;
+                this.refreshTokenExpiry = null;
                 return false;
             }
         } catch (error) {
@@ -104,6 +132,11 @@ class MetrcAuthService {
      */
     async authenticateWithCredentials() {
         try {
+            // Validate credentials are present
+            if (!this.username || !this.password) {
+                throw new Error('METRC credentials not configured. Please set T3_USERNAME and T3_PASSWORD in environment variables.');
+            }
+            
             console.log('🔐 Authenticating with METRC T3 API using credentials...');
             console.log(`🔐 Using hostname: ${this.hostname}, username: ${this.username}`);
             
@@ -162,11 +195,34 @@ class MetrcAuthService {
                 throw new Error('Invalid authentication response - no access token received');
             }
         } catch (error) {
-            console.error('❌ METRC authentication failed:', error.message);
+            console.error('❌ METRC authentication failed after all retries:', error.message);
             if (error.response) {
-                console.error('Response status:', error.response.status);
-                console.error('Response data:', error.response.data);
+                console.error('   Response status:', error.response.status);
+                console.error('   Response status text:', error.response.statusText);
+                console.error('   Response data:', JSON.stringify(error.response.data).substring(0, 1000));
+                
+                // Provide helpful message for 500 errors
+                if (error.response.status === 500) {
+                    const errorMsg = error.response.data?.error?.message || '';
+                    if (errorMsg.includes('too many 500 error responses') || errorMsg.includes('HTTPSConnectionPool')) {
+                        console.error('');
+                        console.error('⚠️  METRC API Server Issue Detected:');
+                        console.error('   The METRC API is experiencing server-side issues.');
+                        console.error('   This is not a problem with your code or credentials.');
+                        console.error('   Please try again in a few minutes.');
+                        console.error('   If the issue persists, contact METRC support.');
+                        console.error('');
+                    }
+                }
+            } else if (error.request) {
+                console.error('   No response received from METRC API');
+                console.error('   Request URL:', `${this.apiBaseUrl}/auth/credentials`);
+                console.error('   Error:', error.message);
+                console.error('   This may indicate a network connectivity issue or METRC API is down.');
+            } else {
+                console.error('   Error setting up request:', error.message);
             }
+            console.error('   Stack:', error.stack?.substring(0, 500));
             return false;
         }
     }
@@ -247,20 +303,36 @@ class MetrcAuthService {
      */
     async ensureValidToken() {
         if (this.isAccessTokenValid()) {
+            console.log('🔐 Access token is valid');
             return true;
         }
 
         console.log('🔐 Access token expired or invalid, attempting refresh...');
+        console.log(`   Current time: ${new Date().toISOString()}`);
+        console.log(`   Token expiry: ${this.tokenExpiry ? this.tokenExpiry.toISOString() : 'null'}`);
         
         if (this.isRefreshTokenValid()) {
+            console.log('🔐 Refresh token is valid, attempting refresh...');
             const refreshSuccess = await this.refreshAccessToken();
             if (refreshSuccess) {
+                console.log('🔐 Token refresh successful');
                 return true;
+            } else {
+                console.log('🔐 Token refresh failed');
             }
+        } else {
+            console.log('🔐 Refresh token expired or missing');
+            console.log(`   Refresh token expiry: ${this.refreshTokenExpiry ? this.refreshTokenExpiry.toISOString() : 'null'}`);
         }
 
-        console.log('🔐 Refresh token expired or refresh failed, re-authenticating with credentials...');
-        return await this.authenticateWithCredentials();
+        console.log('🔐 Re-authenticating with credentials...');
+        const authResult = await this.authenticateWithCredentials();
+        if (authResult) {
+            console.log('🔐 Re-authentication successful');
+        } else {
+            console.error('🔐 Re-authentication failed');
+        }
+        return authResult;
     }
 
     /**

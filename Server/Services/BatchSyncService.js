@@ -363,6 +363,78 @@ class BatchSyncService {
     }
 
     /**
+     * Detect orphaned batches - batches whose source packages no longer exist
+     * This is a critical validation to prevent linking products to invalid batches
+     */
+    async detectOrphanedBatches(existingBatches) {
+        const client = await this.getHealthyClient();
+        try {
+            // Check which batches have missing source packages
+            const orphanedQuery = `
+                SELECT 
+                    b.id,
+                    b.batch_name,
+                    b.metrc_item_name,
+                    b.first_sourcepackage_label,
+                    b.sourcepackagelabels,
+                    b.status,
+                    b.fk_master_product_id,
+                    -- Check if source package exists
+                    EXISTS (
+                        SELECT 1 FROM activepackages 
+                        WHERE label = b.first_sourcepackage_label
+                        AND isarchived = false
+                        AND isfinished = false
+                    ) as source_package_exists,
+                    -- Check if any packages from sourcepackagelabels exist
+                    (
+                        SELECT COUNT(*) 
+                        FROM activepackages 
+                        WHERE label = ANY(string_to_array(b.sourcepackagelabels, ','))
+                        AND isarchived = false
+                        AND isfinished = false
+                    ) as existing_package_count
+                FROM "ORDERS-batches" b
+                WHERE b.first_sourcepackage_label IS NOT NULL
+                  AND b.first_sourcepackage_label != ''
+            `;
+            
+            const result = await client.query(orphanedQuery);
+            const orphaned = result.rows.filter(b => 
+                !b.source_package_exists || b.existing_package_count === 0
+            );
+            
+            if (orphaned.length > 0) {
+                console.log(`⚠️  Found ${orphaned.length} orphaned batch(es):`);
+                orphaned.forEach(b => {
+                    console.log(`   - Batch ${b.id} (${b.batch_name}): Source package "${b.first_sourcepackage_label}" missing`);
+                });
+            }
+            
+            return orphaned.map(b => ({
+                id: b.id,
+                batch_name: b.batch_name,
+                metrc_item_name: b.metrc_item_name,
+                first_sourcepackage_label: b.first_sourcepackage_label,
+                status: b.status,
+                fk_master_product_id: b.fk_master_product_id,
+                reason: 'Source package missing from activepackages'
+            }));
+            
+        } catch (error) {
+            console.error('❌ Error detecting orphaned batches:', error.message);
+            // Don't fail the sync if orphan detection fails
+            return [];
+        } finally {
+            try {
+                client.release();
+            } catch (e) {
+                // Ignore release errors
+            }
+        }
+    }
+
+    /**
      * Find product ID that has this metrc_item_name in its metrc_linked_items
      * Returns null if no product matches
      */
@@ -394,7 +466,8 @@ class BatchSyncService {
      * Optimized: Processes in chunks with batch operations
      */
     async applyChangesWithHistory(changes) {
-        const CHUNK_SIZE = 50; // Process 50 batches per transaction for better performance
+        // Reduced chunk size to prevent deadlocks with large batch updates
+        const CHUNK_SIZE = 25; // Process 25 batches per transaction to reduce lock contention
         
         // Process NEW batches in chunks
         if (changes.new.length > 0) {
@@ -411,6 +484,15 @@ class BatchSyncService {
             for (let i = 0; i < changes.updated.length; i += CHUNK_SIZE) {
                 const chunk = changes.updated.slice(i, i + CHUNK_SIZE);
                 await this.processUpdatedBatchesChunk(chunk, i + 1, changes.updated.length);
+            }
+        }
+        
+        // Process REMOVED/ORPHANED batches in chunks
+        if (changes.removed.length > 0) {
+            console.log(`📝 Processing ${changes.removed.length} removed/orphaned batches in chunks of ${CHUNK_SIZE}...`);
+            for (let i = 0; i < changes.removed.length; i += CHUNK_SIZE) {
+                const chunk = changes.removed.slice(i, i + CHUNK_SIZE);
+                await this.processRemovedBatchesChunk(chunk, i + 1, changes.removed.length);
             }
         }
         
@@ -625,29 +707,36 @@ class BatchSyncService {
 
     /**
      * Process a chunk of updated batches (OPTIMIZED with bulk operations)
+     * Includes deadlock retry logic
      */
     async processUpdatedBatchesChunk(changes, startIndex, total) {
-        let client;
-        let retries = 3;
+        const maxDeadlockRetries = 5;
+        const baseDelay = 100; // Base delay in ms
+        let deadlockRetries = 0;
         
-        while (retries > 0) {
-            try {
-                client = await this.getHealthyClient();
-                break;
-            } catch (connectError) {
-                retries--;
-                if (retries === 0) {
-                    throw new Error(`Failed to connect to database after 3 attempts: ${connectError.message}`);
+        while (deadlockRetries < maxDeadlockRetries) {
+            let client;
+            let connectionRetries = 3;
+            
+            // Get connection
+            while (connectionRetries > 0) {
+                try {
+                    client = await this.getHealthyClient();
+                    break;
+                } catch (connectError) {
+                    connectionRetries--;
+                    if (connectionRetries === 0) {
+                        throw new Error(`Failed to connect to database after 3 attempts: ${connectError.message}`);
+                    }
+                    console.log(`   ⚠️ Connection failed, retrying... (${connectionRetries} attempts left)`);
+                    await new Promise(resolve => setTimeout(resolve, 2000));
                 }
-                console.log(`   ⚠️ Connection failed, retrying... (${retries} attempts left)`);
-                await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds before retry
             }
-        }
-        
-        try {
-            // Statement timeout already set in getHealthyClient, but ensure it's set
-            await client.query('SET statement_timeout = 360000'); // 6 minutes
-            await client.query('BEGIN');
+            
+            try {
+                // Statement timeout already set in getHealthyClient, but ensure it's set
+                await client.query('SET statement_timeout = 360000'); // 6 minutes
+                await client.query('BEGIN');
             
             // Step 1: Bulk fetch all batch IDs by name (single query)
             const batchNames = changes.map(c => c.batch_name);
@@ -764,7 +853,10 @@ class BatchSyncService {
             }
             
             // Step 4: Update batches (sequential but optimized with prepared statements)
+            // IMPORTANT: Sort by batchId to ensure consistent lock ordering and prevent deadlocks
             if (updateData.length > 0) {
+                updateData.sort((a, b) => a.batchId - b.batchId);
+                
                 for (const d of updateData) {
                     await client.query(`
                         UPDATE "ORDERS-batches"
@@ -812,27 +904,57 @@ class BatchSyncService {
                 }
             }
             
-            await client.query('COMMIT');
-            console.log(`   ✓ Processed ${startIndex + changes.length - 1}/${total} updates`);
-            
-        } catch (error) {
-            try {
-                await client.query('ROLLBACK');
-            } catch (rollbackError) {
-                console.error(`   ⚠️ Rollback failed (connection may be lost): ${rollbackError.message}`);
-            }
-            console.error(`   ❌ Failed to process batch chunk: ${error.message}`);
-            if (error.message.includes('Connection terminated') || error.message.includes('connection')) {
-                console.error(`   ⚠️ Connection error detected - this may be due to timeout or network issue`);
-            }
-            throw error;
-        } finally {
-            try {
-                client.release();
-            } catch (releaseError) {
-                console.error(`   ⚠️ Failed to release connection: ${releaseError.message}`);
+                await client.query('COMMIT');
+                console.log(`   ✓ Processed ${startIndex + changes.length - 1}/${total} updated batches`);
+                
+                // Success - break out of retry loop
+                return;
+                
+            } catch (error) {
+                try {
+                    await client.query('ROLLBACK');
+                } catch (rollbackError) {
+                    // Ignore rollback errors
+                }
+                
+                // Check if it's a deadlock
+                const isDeadlock = error.code === '40P01' || 
+                                  error.message.includes('deadlock') || 
+                                  error.message.includes('Deadlock');
+                
+                if (isDeadlock && deadlockRetries < maxDeadlockRetries - 1) {
+                    deadlockRetries++;
+                    // Exponential backoff with jitter
+                    const delay = baseDelay * Math.pow(2, deadlockRetries) + Math.random() * 100;
+                    console.log(`   ⚠️ Deadlock detected (attempt ${deadlockRetries}/${maxDeadlockRetries}), retrying after ${Math.round(delay)}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    
+                    // Release connection before retry
+                    try {
+                        client.release();
+                    } catch (e) {
+                        // Ignore
+                    }
+                    continue; // Retry
+                }
+                
+                // Not a deadlock, or max retries reached
+                try {
+                    client.release();
+                } catch (releaseError) {
+                    // Ignore
+                }
+                
+                console.error(`   ❌ Failed to process batch chunk: ${error.message}`);
+                if (error.message.includes('Connection terminated') || error.message.includes('connection')) {
+                    console.error(`   ⚠️ Connection error detected - this may be due to timeout or network issue`);
+                }
+                throw error;
             }
         }
+        
+        // If we get here, all retries exhausted
+        throw new Error(`Failed to process batch chunk after ${maxDeadlockRetries} deadlock retries`);
     }
 
     /**
@@ -927,6 +1049,120 @@ class BatchSyncService {
             if (error.message.includes('Connection terminated') || error.message.includes('connection')) {
                 console.error(`   ⚠️ Connection error detected - this may be due to timeout or network issue`);
             }
+            throw error;
+        } finally {
+            try {
+                client.release();
+            } catch (releaseError) {
+                console.error(`   ⚠️ Failed to release connection: ${releaseError.message}`);
+            }
+        }
+    }
+
+    /**
+     * Process a chunk of removed/orphaned batches
+     * Orphaned batches are batches whose source packages no longer exist in activepackages
+     */
+    async processRemovedBatchesChunk(batches, startIndex, total) {
+        const client = await this.getHealthyClient();
+        try {
+            await client.query('BEGIN');
+            
+            for (const batch of batches) {
+                const batchId = batch.id || await this.getBatchIdByName(batch.batch_name, client);
+                if (!batchId) {
+                    console.log(`   ⚠️ Batch not found: ${batch.batch_name || batch.id}`);
+                    continue;
+                }
+                
+                // Check if batch is orphaned (missing source packages)
+                const isOrphaned = batch.reason && batch.reason.includes('Source package missing');
+                
+                if (isOrphaned) {
+                    // Get old status and product info BEFORE update
+                    const oldBatchInfo = await client.query(`
+                        SELECT status, fk_master_product_id 
+                        FROM "ORDERS-batches" 
+                        WHERE id = $1
+                    `, [batchId]);
+                    const oldStatus = oldBatchInfo.rows[0]?.status || 'Unknown';
+                    const oldProductId = oldBatchInfo.rows[0]?.fk_master_product_id;
+                    
+                    // Mark orphaned batch as "On Hold" and set quantity to 0
+                    // Also unlink from product since it's invalid
+                    // Don't delete it - keep for audit trail
+                    await client.query(`
+                        UPDATE "ORDERS-batches"
+                        SET 
+                            status = 'On Hold',
+                            quantity = 0,
+                            allocated_quantity = 0,
+                            fk_master_product_id = NULL,
+                            last_synced = NOW()
+                        WHERE id = $1
+                    `, [batchId]);
+                    
+                    // Log to batch history
+                    await client.query(`
+                        INSERT INTO "ORDERS-batch-history" (
+                            batch_id, change_type, field_name, old_value, new_value,
+                            reason, change_details, changed_by_system
+                        ) VALUES ($1, 'status_changed', 'status', $2, 'On Hold',
+                                  'Batch marked as orphaned - source package missing from activepackages. Product unlinked.',
+                                  $3::jsonb, true)
+                    `, [batchId, oldStatus, JSON.stringify({
+                        reason: batch.reason,
+                        first_sourcepackage_label: batch.first_sourcepackage_label,
+                        metrc_item_name: batch.metrc_item_name,
+                        action: 'marked_orphaned',
+                        product_unlinked: oldProductId ? true : false,
+                        old_product_id: oldProductId
+                    })]);
+                    
+                    if (oldProductId) {
+                        console.log(`   ⚠️  Marked orphaned batch ${batchId} (${batch.batch_name}) as "On Hold" and unlinked from product ${oldProductId} - source package missing`);
+                    } else {
+                        console.log(`   ⚠️  Marked orphaned batch ${batchId} (${batch.batch_name}) as "On Hold" - source package missing`);
+                    }
+                } else {
+                    // Batch was removed from METRC (no longer in extraction query)
+                    // Mark as "On Hold" and set quantity to 0
+                    await client.query(`
+                        UPDATE "ORDERS-batches"
+                        SET 
+                            status = 'On Hold',
+                            quantity = 0,
+                            allocated_quantity = 0,
+                            last_synced = NOW()
+                        WHERE id = $1
+                    `, [batchId]);
+                    
+                    // Log to batch history
+                    await client.query(`
+                        INSERT INTO "ORDERS-batch-history" (
+                            batch_id, change_type, field_name, old_value, new_value,
+                            reason, changed_by_system
+                        ) VALUES ($1, 'status_changed', 'status', 
+                                  (SELECT status FROM "ORDERS-batches" WHERE id = $1),
+                                  'On Hold',
+                                  'Batch removed from METRC - no longer in batch extraction query',
+                                  true)
+                    `, [batchId]);
+                    
+                    console.log(`   ⚠️  Marked removed batch ${batchId} (${batch.batch_name}) as "On Hold" - no longer in METRC`);
+                }
+            }
+            
+            await client.query('COMMIT');
+            console.log(`   ✓ Processed ${startIndex + batches.length - 1}/${total} removed/orphaned batches`);
+            
+        } catch (error) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                console.error(`   ⚠️ Rollback failed: ${rollbackError.message}`);
+            }
+            console.error(`   ❌ Failed to process removed batches chunk: ${error.message}`);
             throw error;
         } finally {
             try {
@@ -1147,6 +1383,14 @@ class BatchSyncService {
 
             // 3. Compare and classify changes
             const changes = this.detectChanges(freshBatches, existingBatches);
+
+            // 3.5. Detect orphaned batches (batches with missing source packages)
+            const orphanedBatches = await this.detectOrphanedBatches(existingBatches);
+            if (orphanedBatches.length > 0) {
+                console.log(`⚠️  WARNING: ${orphanedBatches.length} orphaned batch(es) detected (missing source packages)`);
+                // Add orphaned batches to removed list for cleanup
+                changes.removed.push(...orphanedBatches);
+            }
 
             console.log(`📊 Sync plan: ${changes.new.length} new, ${changes.updated.length} updated, ${changes.removed.length} removed, ${changes.packageChanges.length} package changes`);
 

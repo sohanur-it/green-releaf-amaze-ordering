@@ -96,6 +96,13 @@ router.get('/transporters', requireAuth, requireRole('Fulfillment Team', 'fulfil
     fulfillmentController.getTransporters.bind(fulfillmentController));
 
 /**
+ * GET /api/v1/fulfillment/recipients
+ * Get available recipients from METRC T3 API
+ */
+router.get('/recipients', requireAuth, requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Administrator'), 
+    fulfillmentController.getRecipients.bind(fulfillmentController));
+
+/**
  * POST /api/v1/fulfillment/transportation
  * Enter transportation details
  */

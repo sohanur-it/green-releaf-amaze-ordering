@@ -96,22 +96,60 @@ class TransportationDetailsService {
                 }
             }
 
-            // Get recipientId from METRC API (optional - can be null if API not available)
+            // Get recipientId from form submission (from dropdown selection)
+            // If not provided, try to look it up from METRC API
             let recipientId = null;
-            try {
-                recipientId = await this.getRecipientIdByLicense(destinationLicense);
-            } catch (error) {
-                console.warn('[Transportation] Recipient lookup failed (optional):', error.message);
-                // Continue without recipientId - can be filled in later or during manifest creation
+            
+            if (transportationData.recipientId) {
+                recipientId = parseInt(transportationData.recipientId, 10);
+                if (!isNaN(recipientId) && recipientId > 0) {
+                    console.log(`[Transportation] ✅ Using recipientId from form submission: ${recipientId}`);
+                } else {
+                    recipientId = null;
+                    console.warn(`[Transportation] Invalid recipientId from form: ${transportationData.recipientId}`);
+                }
+            }
+            
+            // Fallback: Try to get recipientId from METRC API if not provided in form
+            if (!recipientId) {
+                console.log(`[Transportation] recipientId not provided in form, attempting lookup for destination license: ${destinationLicense}`);
+                try {
+                    recipientId = await this.getRecipientIdByLicense(destinationLicense);
+                    if (recipientId) {
+                        console.log(`[Transportation] ✅ Looked up recipientId from METRC API: ${recipientId}`);
+                    }
+                } catch (error) {
+                    console.warn('[Transportation] Recipient lookup failed (optional):', error.message);
+                    // Continue without recipientId - can be filled in later or during manifest creation
+                }
             }
 
-            // Get transporterId from METRC API (optional - can be null if API not available)
+            // Get transporterId from form submission (from dropdown selection)
+            // If not provided, try to look it up from METRC API
             let transporterId = null;
-            try {
-                transporterId = await this.getTransporterIdByName(transportationData.transporterName);
-            } catch (error) {
-                console.warn('[Transportation] Transporter lookup failed (optional):', error.message);
-                // Continue without transporterId - can be filled in later or during manifest creation
+            
+            if (transportationData.transporterId) {
+                transporterId = parseInt(transportationData.transporterId, 10);
+                if (!isNaN(transporterId) && transporterId > 0) {
+                    console.log(`[Transportation] ✅ Using transporterId from form submission: ${transporterId}`);
+                } else {
+                    transporterId = null;
+                    console.warn(`[Transportation] Invalid transporterId from form: ${transportationData.transporterId}`);
+                }
+            }
+            
+            // Fallback: Try to get transporterId from METRC API if not provided in form
+            if (!transporterId && transportationData.transporterName) {
+                console.log(`[Transportation] transporterId not provided in form, attempting lookup for transporter: ${transportationData.transporterName}`);
+                try {
+                    transporterId = await this.getTransporterIdByName(transportationData.transporterName);
+                    if (transporterId) {
+                        console.log(`[Transportation] ✅ Looked up transporterId from METRC API: ${transporterId}`);
+                    }
+                } catch (error) {
+                    console.warn('[Transportation] Transporter lookup failed (optional):', error.message);
+                    // Continue without transporterId - will be required during manifest creation
+                }
             }
 
             // Construct full transportation details object
