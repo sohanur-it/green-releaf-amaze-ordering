@@ -370,6 +370,17 @@ class BatchSyncService {
         const client = await this.getHealthyClient();
         try {
             // Check which batches have missing source packages
+            // CRITICAL FIX: Check which license column exists in activepackages
+            // Some environments use sync_license, others use synclicense
+            const licenseColumnCheck = await client.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'activepackages' 
+                AND column_name IN ('sync_license', 'synclicense')
+                LIMIT 1
+            `);
+            const activepackagesLicenseColumn = licenseColumnCheck.rows[0]?.column_name || 'sync_license';
+            
             const orphanedQuery = `
                 SELECT 
                     b.id,
@@ -379,24 +390,30 @@ class BatchSyncService {
                     b.sourcepackagelabels,
                     b.status,
                     b.fk_master_product_id,
-                    -- Check if source package exists
+                    b.synclicense,
+                    -- CRITICAL FIX: Check if source package exists FOR THE SAME LICENSE
+                    -- Batch has synclicense, activepackages has sync_license (or synclicense)
+                    -- Must match licenses to avoid false positives
                     EXISTS (
                         SELECT 1 FROM activepackages 
                         WHERE label = b.first_sourcepackage_label
+                        AND ${activepackagesLicenseColumn} = b.synclicense
                         AND isarchived = false
                         AND isfinished = false
                     ) as source_package_exists,
-                    -- Check if any packages from sourcepackagelabels exist
+                    -- Check if any packages from sourcepackagelabels exist FOR THE SAME LICENSE
                     (
                         SELECT COUNT(*) 
                         FROM activepackages 
                         WHERE label = ANY(string_to_array(b.sourcepackagelabels, ','))
+                        AND ${activepackagesLicenseColumn} = b.synclicense
                         AND isarchived = false
                         AND isfinished = false
                     ) as existing_package_count
                 FROM "ORDERS-batches" b
                 WHERE b.first_sourcepackage_label IS NOT NULL
                   AND b.first_sourcepackage_label != ''
+                  AND b.synclicense IS NOT NULL
             `;
             
             const result = await client.query(orphanedQuery);
@@ -407,7 +424,7 @@ class BatchSyncService {
             if (orphaned.length > 0) {
                 console.log(`⚠️  Found ${orphaned.length} orphaned batch(es):`);
                 orphaned.forEach(b => {
-                    console.log(`   - Batch ${b.id} (${b.batch_name}): Source package "${b.first_sourcepackage_label}" missing`);
+                    console.log(`   - Batch ${b.id} (${b.batch_name}): Source package "${b.first_sourcepackage_label}" missing for license ${b.synclicense}`);
                 });
             }
             

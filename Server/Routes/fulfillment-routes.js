@@ -117,6 +117,13 @@ router.get('/manifest/preview/:invoiceId', requireAuth, requireRole('Fulfillment
     fulfillmentController.getManifestPreview.bind(fulfillmentController));
 
 /**
+ * GET /api/v1/fulfillment/manifest/payload-preview/:invoiceId
+ * Get manifest payload preview (new endpoint for payload display)
+ */
+router.get('/manifest/payload-preview/:invoiceId', requireAuth, requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Administrator'), 
+    fulfillmentController.getManifestPayloadPreview.bind(fulfillmentController));
+
+/**
  * POST /api/v1/fulfillment/manifest/create
  * Create manifest
  */
@@ -129,6 +136,13 @@ router.post('/manifest/create', requireAuth, requireRole('Fulfillment Team', 'fu
  */
 router.post('/manifest/void', requireAuth, requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Administrator'), 
     fulfillmentController.voidManifest.bind(fulfillmentController));
+
+/**
+ * GET /api/v1/fulfillment/manifest/edit/:invoiceId
+ * Get manifest data for editing
+ */
+router.get('/manifest/edit/:invoiceId', requireAuth, requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Administrator'), 
+    fulfillmentController.getManifestForEdit.bind(fulfillmentController));
 
 /**
  * PATCH /api/v1/fulfillment/manifest/update

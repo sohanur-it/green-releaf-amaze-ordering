@@ -52,9 +52,16 @@
                     </div>
                     <div class="col-md-12" style="padding: 0; margin-bottom: 1.5rem;">
                         <div class="form-group" style="margin-bottom: 0;">
-                            <label for="locationLicense" style="display: block; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-color);">State License # (DIS Number) <span class="required">*</span></label>
-                            <input type="text" id="locationLicense" name="state_license" class="form-input-modern" required placeholder="Enter DIS number" style="width: 100%; box-sizing: border-box;">
-                            <small class="form-hint">State-issued license number. If this DIS number belongs to another buyer, you can move that location here.</small>
+                            <label for="locationLicense" style="display: block; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-color);">Store ID (State License / DIS Number) <span class="required">*</span></label>
+                            <input type="text" id="locationLicense" name="state_license" class="form-input-modern" required placeholder="e.g., DIS000085" style="width: 100%; box-sizing: border-box; color: #000000 !important;">
+                            <small class="form-hint">State-issued store identifier (e.g., DIS000085). Used for display and identification. Different from METRC license number.</small>
+                        </div>
+                    </div>
+                    <div class="col-md-12" style="padding: 0; margin-bottom: 1.5rem;">
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="locationMetrcLicense" style="display: block; font-weight: 600; margin-bottom: 0.5rem; color: var(--text-color);">METRC License Number</label>
+                            <input type="text" id="locationMetrcLicense" name="metrc_license_number" class="form-input-modern" placeholder="e.g., CUL000027" style="width: 100%; box-sizing: border-box; color: #000000 !important;">
+                            <small class="form-hint">METRC facility license number (e.g., CUL000027) used for API calls to find recipientId. Required for manifest creation. Different from Store ID (DIS000085).</small>
                         </div>
                     </div>
                     <div class="col-md-12" style="padding: 0; margin-bottom: 1.5rem;">

@@ -64,7 +64,9 @@ class ManifestStatusService {
             }
             
             if (inactiveStatus) {
-                if (inactiveStatus.isVoided) {
+                // Check isVoided from the full data if available
+                const isVoided = inactiveStatus.isVoided || inactiveStatus.fullData?.isVoided || false;
+                if (isVoided) {
                     return {
                         status: 'voided',
                         message: 'Manifest was voided',
@@ -150,12 +152,15 @@ class ManifestStatusService {
                 );
 
                 if (found) {
+                    // Return the full transfer object so we can check isVoided and other fields
                     return {
                         manifestNumber: found.manifestNumber || found.manifest_number,
                         metrcId: found.id || found.metrcId,
                         estimatedDeparture: found.estimatedDepartureDateTime || found.estimated_departure_date_time,
                         estimatedArrival: found.estimatedArrivalDateTime || found.estimated_arrival_date_time,
-                        packageCount: found.packageCount || found.package_count
+                        packageCount: found.packageCount || found.package_count,
+                        isVoided: found.isVoided || false,
+                        fullData: found  // Include full data for reference
                     };
                 }
 

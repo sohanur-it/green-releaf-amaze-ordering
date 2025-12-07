@@ -619,20 +619,40 @@ router.get('/fulfillment/transportation/:invoiceId', requireRole('Fulfillment Te
         const invoiceId = parseInt(req.params.invoiceId);
         const { query } = require('../config/database');
         
-        // Get location ID for delivery window validation
+        // Get invoice and location details for destination license display
         const invoiceResult = await query(`
-            SELECT fk_location_id 
-            FROM "ORDERS-invoices" 
-            WHERE id = $1
+            SELECT 
+                i.fk_location_id,
+                i.location_license_number,
+                bl.state_license,
+                bl.metrc_license_number,
+                bl.name as location_name
+            FROM "ORDERS-invoices" i
+            LEFT JOIN "ORDERS-buyer_locations" bl ON i.fk_location_id = bl.entry_id
+            WHERE i.id = $1
         `, [invoiceId]);
         
         const locationId = invoiceResult.rows[0]?.fk_location_id || null;
+        const storeId = invoiceResult.rows[0]?.state_license || 'N/A'; // Store ID (DIS000085)
+        // Priority: 1) metrc_license_number from location, 2) location_license_number from invoice (fallback)
+        const metrcLicense = invoiceResult.rows[0]?.metrc_license_number || invoiceResult.rows[0]?.location_license_number || null; // METRC License (CUL000027)
+        const locationName = invoiceResult.rows[0]?.location_name || 'Unknown Location';
+        
+        // Get source license (our license) for transporter auto-selection
+        // Transporters are typically our own license, but can be third-party
+        const sourceLicense = process.env.T3_LICENSE_NUMBER || null;
+        const transporterLicense = sourceLicense; // Use source license for auto-selection
         
         res.render('admin/fulfillment/transportation', {
             title: 'Transportation Details',
             layout: 'layouts/main',
             invoiceId: invoiceId,
-            locationId: locationId
+            locationId: locationId,
+            storeId: storeId, // Store ID (DIS000085) - for display
+            metrcLicense: metrcLicense, // METRC License (CUL000027) - for reference
+            destinationLicense: metrcLicense || storeId, // For display
+            transporterLicense: transporterLicense, // Source license for transporter auto-selection
+            locationName: locationName
         });
     } catch (error) {
         console.error('Error rendering transportation form:', error);

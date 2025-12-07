@@ -479,6 +479,30 @@
                             <button onclick="viewManifestPDF('<%= manifestNum %>', <%= invoice.id %>)" class="btn-view-pdf" title="View Manifest PDF" style="background: none; border: none; color: #1976d2; cursor: pointer; padding: 0.25rem; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s;">
                                 <i class="fas fa-file-pdf" style="font-size: 1rem;"></i>
                             </button>
+                            <% 
+                            // Show void/edit buttons only for sales/fulfillment team and if manifest is active (not shipped)
+                            var canVoidEdit = (typeof isSalesAdmin !== 'undefined' && isSalesAdmin) || 
+                                              (typeof isSalesRep !== 'undefined' && isSalesRep) || 
+                                              (typeof isFulfillmentUser !== 'undefined' && isFulfillmentUser) || 
+                                              (typeof isAdmin !== 'undefined' && isAdmin);
+                            canVoidEdit = canVoidEdit && (invoice.status === 'Manifested' || invoice.status === 'Partially_Manifested');
+                            %>
+                            <% if (canVoidEdit) { %>
+                                <button onclick="voidManifest('<%= manifestNum %>', <%= invoice.id %>)" 
+                                        class="btn-void-manifest" 
+                                        data-manifest-number="<%= manifestNum %>"
+                                        title="Void Manifest (only if not shipped)" 
+                                        style="background: none; border: none; color: #dc3545; cursor: pointer; padding: 0.25rem; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s; opacity: 0.7;">
+                                    <i class="fas fa-ban" style="font-size: 1rem;"></i>
+                                </button>
+                                <button onclick="editManifest('<%= manifestNum %>', <%= invoice.id %>)" 
+                                        class="btn-edit-manifest" 
+                                        data-manifest-number="<%= manifestNum %>"
+                                        title="Edit Manifest (only if not shipped)" 
+                                        style="background: none; border: none; color: #ffc107; cursor: pointer; padding: 0.25rem; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; transition: all 0.2s; opacity: 0.7;">
+                                    <i class="fas fa-edit" style="font-size: 1rem;"></i>
+                                </button>
+                            <% } %>
                         </div>
                     <% }); %>
                 </div>
@@ -724,6 +748,15 @@
 
 <script>
 const invoiceId = <%= invoice.id %>;
+// Make transportation details available to JavaScript
+<% 
+const transportationDetails = invoice.transportation_details 
+    ? (typeof invoice.transportation_details === 'string' 
+        ? JSON.parse(invoice.transportation_details) 
+        : invoice.transportation_details)
+    : {};
+%>
+window.invoiceTransportationDetails = <%- JSON.stringify(transportationDetails) %>;
 const invoiceStatus = '<%= invoice.status %>';
 let isEditMode = false;
 
@@ -1768,6 +1801,566 @@ document.addEventListener('keydown', (e) => {
         }
     }
 });
+
+/**
+ * Void a manifest (only if still active/not shipped)
+ */
+async function voidManifest(manifestNumber, invoiceId) {
+    // First check if manifest is still active (not shipped)
+    try {
+        const statusResponse = await fetch(`/api/v1/manifests/${encodeURIComponent(manifestNumber)}/status`);
+        const statusData = await statusResponse.json();
+        
+        // Check the response structure
+        // API should return: {success: true, status: 'active', data: {...}}
+        // But might also return: {success: true, data: {isVoided: false, ...}}
+        let manifestStatus = statusData.status;
+        
+        // If status is not at top level, check data object
+        if (!manifestStatus && statusData.data) {
+            // If data has isVoided, determine status from that
+            if (statusData.data.isVoided === true) {
+                manifestStatus = 'voided';
+            } else if (statusData.data.isVoided === false) {
+                // If in active transfers, status is 'active'
+                // If in inactive transfers, status is 'accepted'
+                // We can't tell from data alone, so assume 'active' if isVoided is false
+                manifestStatus = 'active';
+            }
+        }
+        
+        if (manifestStatus && manifestStatus !== 'active') {
+            alert(`Cannot void manifest: Manifest is ${manifestStatus}. Only active manifests (not yet shipped) can be voided.`);
+            return;
+        }
+        
+        // If status is still undefined, warn but allow proceeding (backend will validate)
+        if (!manifestStatus) {
+            console.warn('Could not determine manifest status from API response:', statusData);
+            if (!confirm('Could not verify manifest status. Do you want to proceed with voiding? (Only proceed if manifest has not shipped)')) {
+                return;
+            }
+        }
+    } catch (error) {
+        console.error('Error checking manifest status:', error);
+        if (!confirm('Could not verify manifest status. Do you want to proceed with voiding? (Only proceed if manifest has not shipped)')) {
+            return;
+        }
+    }
+    
+    // Get void reason from user
+    const reason = prompt('Please provide a reason for voiding this manifest (minimum 20 characters):');
+    if (!reason || reason.trim().length < 20) {
+        alert('Void reason is required and must be at least 20 characters.');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to void manifest ${manifestNumber}? This action cannot be undone.`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/v1/fulfillment/manifest/void', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                invoice_id: invoiceId,
+                reason: reason,
+                target_manifest_or_license: manifestNumber
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            // Check if it's a timeout/service error (503/504)
+            if (response.status === 503 || response.status === 504) {
+                const errorMsg = data.error || 'METRC API timeout. The server took too long to respond.';
+                const retryMsg = data.retryable ? '\n\nThis is a temporary issue. Please try again in a few moments.' : '';
+                throw new Error(`${errorMsg}${retryMsg}`);
+            }
+            throw new Error(data.error || 'Failed to void manifest');
+        }
+        
+        alert(`Manifest ${manifestNumber} voided successfully. ${data.message || ''}`);
+        // Reload page to show updated status
+        window.location.reload();
+    } catch (error) {
+        console.error('Error voiding manifest:', error);
+        alert(`Error: ${error.message}`);
+    }
+}
+
+/**
+ * Edit a manifest (only if still active/not shipped)
+ */
+async function editManifest(manifestNumber, invoiceId) {
+    // First check if manifest is still active (not shipped)
+    try {
+        const statusResponse = await fetch(`/api/v1/manifests/${encodeURIComponent(manifestNumber)}/status`);
+        const statusData = await statusResponse.json();
+        
+        // Check the response structure
+        // API should return: {success: true, status: 'active', data: {...}}
+        // But might also return: {success: true, data: {isVoided: false, ...}}
+        let manifestStatus = statusData.status;
+        
+        // If status is not at top level, check data object
+        if (!manifestStatus && statusData.data) {
+            // If data has isVoided, determine status from that
+            if (statusData.data.isVoided === true) {
+                manifestStatus = 'voided';
+            } else if (statusData.data.isVoided === false) {
+                // If in active transfers, status is 'active'
+                // If in inactive transfers, status is 'accepted'
+                // We can't tell from data alone, so assume 'active' if isVoided is false
+                manifestStatus = 'active';
+            }
+        }
+        
+        if (manifestStatus && manifestStatus !== 'active') {
+            alert(`Cannot edit manifest: Manifest is ${manifestStatus}. Only active manifests (not yet shipped) can be edited.`);
+            return;
+        }
+        
+        // If status is still undefined, warn but allow proceeding (backend will validate)
+        if (!manifestStatus) {
+            console.warn('Could not determine manifest status from API response:', statusData);
+            if (!confirm('Could not verify manifest status. Do you want to proceed with editing? (Only proceed if manifest has not shipped)')) {
+                return;
+            }
+        }
+    } catch (error) {
+        console.error('Error checking manifest status:', error);
+        if (!confirm('Could not verify manifest status. Do you want to proceed with editing? (Only proceed if manifest has not shipped)')) {
+            return;
+        }
+    }
+    
+    // Show edit manifest modal
+    showEditManifestModal(manifestNumber, invoiceId);
+}
+
+/**
+ * Show edit manifest modal with current manifest data from METRC
+ */
+async function showEditManifestModal(manifestNumber, invoiceId) {
+    try {
+        // Create or get modal
+        let modal = document.getElementById('edit-manifest-modal');
+        if (!modal) {
+            modal = createEditManifestModal();
+        }
+        
+        // Show loading state
+        const modalContent = modal.querySelector('.modal-content');
+        const originalContent = modalContent.innerHTML;
+        modalContent.innerHTML = `
+            <div style="padding: 2rem; text-align: center;">
+                <i class="fas fa-spinner fa-spin" style="font-size: 2rem; color: var(--text-light); margin-bottom: 1rem;"></i>
+                <p style="color: var(--text-light);">Loading manifest data...</p>
+            </div>
+        `;
+        modal.classList.add('active');
+        
+        // Fetch current manifest data from API
+        const response = await fetch(`/api/v1/fulfillment/manifest/edit/${invoiceId}`);
+        const result = await response.json();
+        
+        if (!response.ok || !result.success) {
+            throw new Error(result.error || 'Failed to load manifest data');
+        }
+        
+        const manifestData = result.data;
+        
+        // Restore modal content
+        modalContent.innerHTML = originalContent;
+        
+        // Re-attach event listener (since we replaced the HTML)
+        // Wait a moment for DOM to update
+        setTimeout(() => {
+            const form = modal.querySelector('#edit-manifest-form');
+            if (form) {
+                // Remove any existing listeners
+                const newForm = form.cloneNode(true);
+                form.parentNode.replaceChild(newForm, form);
+                // Attach new listener
+                document.getElementById('edit-manifest-form').addEventListener('submit', handleEditManifestSubmit);
+            }
+        }, 100);
+        
+        // Populate form with current manifest values from METRC
+        document.getElementById('edit-driver-name').value = manifestData.driverName || '';
+        document.getElementById('edit-driver-license').value = manifestData.driverLicense || '';
+        document.getElementById('edit-driver-occupational-license').value = manifestData.driverOccupationalLicense || '';
+        document.getElementById('edit-vehicle-make').value = manifestData.vehicleMake || '';
+        document.getElementById('edit-vehicle-model').value = manifestData.vehicleModel || '';
+        document.getElementById('edit-vehicle-plate').value = manifestData.vehiclePlate || '';
+        
+        // Set estimated times (convert ISO to datetime-local format)
+        if (manifestData.estimatedDeparture) {
+            const depDate = new Date(manifestData.estimatedDeparture);
+            document.getElementById('edit-departure').value = depDate.toISOString().slice(0, 16);
+        } else {
+            document.getElementById('edit-departure').value = '';
+        }
+        
+        if (manifestData.estimatedArrival) {
+            const arrDate = new Date(manifestData.estimatedArrival);
+            document.getElementById('edit-arrival').value = arrDate.toISOString().slice(0, 16);
+        } else {
+            document.getElementById('edit-arrival').value = '';
+        }
+        
+        // Store manifest number and invoice ID for form submission
+        modal.dataset.manifestNumber = manifestNumber;
+        modal.dataset.invoiceId = invoiceId;
+    } catch (error) {
+        console.error('Error loading edit manifest modal:', error);
+        alert(`Error loading manifest data: ${error.message}`);
+        
+        // Close modal on error
+        const modal = document.getElementById('edit-manifest-modal');
+        if (modal) {
+            modal.classList.remove('active');
+        }
+    }
+}
+
+/**
+ * Create edit manifest modal HTML
+ */
+function createEditManifestModal() {
+    const modal = document.createElement('div');
+    modal.id = 'edit-manifest-modal';
+    modal.className = 'modal-overlay';
+    modal.innerHTML = `
+        <style>
+            #edit-manifest-modal .modal-content {
+                max-width: 900px;
+                width: 90vw;
+                max-height: 95vh;
+                overflow-y: auto;
+                padding: 2rem;
+                background: var(--card-bg, white);
+                border-radius: 8px;
+                box-shadow: var(--card-shadow, 0 4px 6px rgba(0, 0, 0, 0.1));
+            }
+            
+            #edit-manifest-modal .modal-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 2rem;
+                padding-bottom: 1rem;
+                border-bottom: 2px solid var(--border-color, #e5e7eb);
+            }
+            
+            #edit-manifest-modal .modal-header h2 {
+                margin: 0;
+                font-size: 1.5rem;
+                font-weight: 600;
+                color: var(--text-color, #1f2937);
+            }
+            
+            #edit-manifest-modal .modal-header button {
+                background: none;
+                border: none;
+                font-size: 1.75rem;
+                cursor: pointer;
+                color: var(--text-light, #6b7280);
+                padding: 0.25rem 0.5rem;
+                line-height: 1;
+                transition: color 0.2s;
+            }
+            
+            #edit-manifest-modal .modal-header button:hover {
+                color: var(--text-color, #1f2937);
+            }
+            
+            #edit-manifest-modal .form-section {
+                margin-bottom: 2rem;
+                padding: 1.5rem;
+                background: var(--card-bg, white);
+                border-radius: 6px;
+                box-shadow: var(--card-shadow, 0 2px 4px rgba(0, 0, 0, 0.05));
+            }
+            
+            #edit-manifest-modal .form-section h3 {
+                margin: 0 0 1.25rem 0;
+                font-size: 1.15rem;
+                font-weight: 600;
+                color: var(--text-color, #374151);
+                border-bottom: 1px solid var(--border-color, #e5e7eb);
+                padding-bottom: 0.75rem;
+            }
+            
+            #edit-manifest-modal .form-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 1.25rem;
+            }
+            
+            #edit-manifest-modal .form-group {
+                display: flex;
+                flex-direction: column;
+            }
+            
+            #edit-manifest-modal .form-group[style*="grid-column: 1 / -1"] {
+                grid-column: 1 / -1;
+            }
+            
+            #edit-manifest-modal .form-group label {
+                display: block;
+                margin-bottom: 0.5rem;
+                font-weight: 500;
+                color: var(--text-color, #4b5563);
+                font-size: 0.9rem;
+            }
+            
+            #edit-manifest-modal .form-group input[type="text"],
+            #edit-manifest-modal .form-group input[type="datetime-local"] {
+                width: 100%;
+                padding: 0.75rem;
+                border: 1px solid var(--border-color, #d1d5db);
+                border-radius: 6px;
+                font-size: 1rem;
+                transition: border-color 0.2s, box-shadow 0.2s;
+                color: #000000 !important;
+                background: #ffffff !important;
+            }
+            
+            #edit-manifest-modal .form-group input:focus {
+                outline: none;
+                border-color: #3b82f6;
+                box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+            }
+            
+            #edit-manifest-modal .form-grid[style*="grid-template-columns: 1fr 1fr 1fr"] {
+                grid-template-columns: 1fr 1fr 1fr;
+            }
+            
+            #edit-manifest-modal .modal-actions {
+                display: flex;
+                justify-content: flex-end;
+                gap: 1rem;
+                margin-top: 2.5rem;
+                padding-top: 1.5rem;
+                border-top: 2px solid var(--border-color, #e5e7eb);
+            }
+            
+            #edit-manifest-modal .btn-secondary,
+            #edit-manifest-modal .btn-primary {
+                padding: 0.875rem 1.75rem;
+                border: none;
+                border-radius: 6px;
+                cursor: pointer;
+                font-size: 1rem;
+                font-weight: 500;
+                transition: background-color 0.2s;
+            }
+            
+            #edit-manifest-modal .btn-secondary {
+                background: #6c757d;
+                color: white;
+            }
+            
+            #edit-manifest-modal .btn-secondary:hover {
+                background: #5a6268;
+            }
+            
+            #edit-manifest-modal .btn-primary {
+                background: #3b82f6;
+                color: white;
+            }
+            
+            #edit-manifest-modal .btn-primary:hover {
+                background: #2563eb;
+            }
+        </style>
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Edit Manifest Transportation Details</h2>
+                <button onclick="closeEditManifestModal()">&times;</button>
+            </div>
+            <form id="edit-manifest-form">
+                <div class="form-section">
+                    <h3>Driver Information</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Driver Name</label>
+                            <input type="text" id="edit-driver-name" name="driverName" placeholder="John Doe">
+                        </div>
+                        <div class="form-group">
+                            <label>Driver License Number</label>
+                            <input type="text" id="edit-driver-license" name="driverLicense" placeholder="D1234567">
+                        </div>
+                        <div class="form-group" style="grid-column: 1 / -1;">
+                            <label>Driver Occupational License</label>
+                            <input type="text" id="edit-driver-occupational-license" name="driverOccupationalLicense" placeholder="OCC12345">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-section">
+                    <h3>Vehicle Information</h3>
+                    <div class="form-grid" style="grid-template-columns: 1fr 1fr 1fr;">
+                        <div class="form-group">
+                            <label>Vehicle Make</label>
+                            <input type="text" id="edit-vehicle-make" name="vehicleMake" placeholder="Ford">
+                        </div>
+                        <div class="form-group">
+                            <label>Vehicle Model</label>
+                            <input type="text" id="edit-vehicle-model" name="vehicleModel" placeholder="Transit">
+                        </div>
+                        <div class="form-group">
+                            <label>License Plate</label>
+                            <input type="text" id="edit-vehicle-plate" name="vehiclePlate" placeholder="ABC123">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-section">
+                    <h3>Transportation Schedule</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Estimated Departure</label>
+                            <input type="datetime-local" id="edit-departure" name="estimatedDeparture">
+                        </div>
+                        <div class="form-group">
+                            <label>Estimated Arrival</label>
+                            <input type="datetime-local" id="edit-arrival" name="estimatedArrival">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="modal-actions">
+                    <button type="button" onclick="closeEditManifestModal()" class="btn-secondary">Cancel</button>
+                    <button type="submit" class="btn-primary">Update Manifest</button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Add form submit handler
+    document.getElementById('edit-manifest-form').addEventListener('submit', handleEditManifestSubmit);
+    
+    // Close on backdrop click
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeEditManifestModal();
+        }
+    });
+    
+    return modal;
+}
+
+/**
+ * Close edit manifest modal
+ */
+function closeEditManifestModal() {
+    const modal = document.getElementById('edit-manifest-modal');
+    if (modal) {
+        modal.classList.remove('active');
+    }
+}
+
+/**
+ * Handle edit manifest form submission
+ */
+async function handleEditManifestSubmit(e) {
+    e.preventDefault();
+    
+    const modal = document.getElementById('edit-manifest-modal');
+    const invoiceId = modal.dataset.invoiceId;
+    
+    // Collect form data
+    const updates = {};
+    const driverName = document.getElementById('edit-driver-name').value.trim();
+    const driverLicense = document.getElementById('edit-driver-license').value.trim();
+    const driverOccupationalLicense = document.getElementById('edit-driver-occupational-license').value.trim();
+    const vehicleMake = document.getElementById('edit-vehicle-make').value.trim();
+    const vehicleModel = document.getElementById('edit-vehicle-model').value.trim();
+    const vehiclePlate = document.getElementById('edit-vehicle-plate').value.trim();
+    const departure = document.getElementById('edit-departure').value;
+    const arrival = document.getElementById('edit-arrival').value;
+    
+    // Only include fields that have values
+    if (driverName) updates.driverName = driverName;
+    if (driverLicense) updates.driverLicense = driverLicense;
+    if (driverOccupationalLicense) updates.driverOccupationalLicense = driverOccupationalLicense;
+    if (vehicleMake) updates.vehicleMake = vehicleMake;
+    if (vehicleModel) updates.vehicleModel = vehicleModel;
+    if (vehiclePlate) updates.vehiclePlate = vehiclePlate;
+    if (departure) updates.estimatedDeparture = new Date(departure).toISOString();
+    if (arrival) updates.estimatedArrival = new Date(arrival).toISOString();
+    
+    if (Object.keys(updates).length === 0) {
+        alert('Please provide at least one field to update');
+        return;
+    }
+    
+    try {
+        // Show loading state
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        const originalText = submitBtn.textContent;
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Updating...';
+        
+        const response = await fetch('/api/v1/fulfillment/manifest/update', {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                invoice_id: parseInt(invoiceId),
+                ...updates
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            // Check if it's a timeout/service error (503)
+            if (response.status === 503 || response.status === 504) {
+                const errorMsg = data.error || 'METRC API timeout. The server took too long to respond.';
+                const retryMsg = data.retryable ? '\n\nThis is a temporary issue. Please try again in a few moments.' : '';
+                throw new Error(`${errorMsg}${retryMsg}`);
+            }
+            throw new Error(data.error || 'Failed to update manifest');
+        }
+        
+        alert(`Manifest updated successfully! ${data.message || ''}`);
+        closeEditManifestModal();
+        
+        // Reload page to show updated information
+        window.location.reload();
+        
+    } catch (error) {
+        console.error('Error updating manifest:', error);
+        
+        // Show user-friendly error message
+        let errorMessage = error.message || 'Failed to update manifest';
+        
+        // If it's a network error, provide more context
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+            errorMessage = 'Network error. Please check your connection and try again.';
+        }
+        
+        alert(`Error: ${errorMessage}`);
+        
+        // Re-enable submit button
+        const submitBtn = e.target.querySelector('button[type="submit"]');
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Update Manifest';
+        }
+    }
+}
 
 /**
  * View manifest PDF in modal

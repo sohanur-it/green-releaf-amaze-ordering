@@ -255,29 +255,78 @@ class FulfillmentController {
                 return res.status(400).json({ error: 'licenseNumber is required' });
             }
 
-            // Try multiple endpoints to get transporters
+            // Try multiple endpoints to get transporters with pagination
             // Since /transfers/transporters might not exist, we'll try:
             // 1. /transfers/create/transporters (returns available transporters for transfers)
             // 2. /facilities (returns all facilities, filter for transporters)
-            let response = null;
+            let allTransporters = [];
             let endpointUsed = null;
             let error = null;
+            let endpointWorks = false;
 
-            // Method 1: Try /transfers/create/transporters
+            // Method 1: Try /transfers/create/transporters with pagination
             try {
                 endpointUsed = `${apiBaseUrl}/transfers/create/transporters`;
                 console.log(`[Fulfillment] Attempting endpoint: GET ${endpointUsed}?licenseNumber=${licenseNumber}`);
                 
-                response = await metrcAuth.makeAuthenticatedRequest({
-                    method: 'GET',
-                    url: endpointUsed,
-                    params: {
-                        licenseNumber: licenseNumber
-                    },
-                    timeout: 15000
-                });
+                // Fetch all pages
+                let page = 1;
+                let hasMorePages = true;
+                const pageSize = 500; // Maximum allowed by API
                 
-                console.log(`[Fulfillment] ✅ Successfully called ${endpointUsed}`);
+                while (hasMorePages) {
+                    console.log(`[Fulfillment] Fetching page ${page}...`);
+                    
+                    const response = await metrcAuth.makeAuthenticatedRequest({
+                        method: 'GET',
+                        url: endpointUsed,
+                        params: {
+                            licenseNumber: licenseNumber,
+                            page: page,
+                            pageSize: pageSize
+                        },
+                        timeout: 15000
+                    });
+                    
+                    // Parse the response
+                    let pageTransporters = [];
+                    if (Array.isArray(response.data)) {
+                        pageTransporters = response.data;
+                    } else if (response.data?.data && Array.isArray(response.data.data)) {
+                        pageTransporters = response.data.data;
+                    } else if (response.data?.transporters && Array.isArray(response.data.transporters)) {
+                        pageTransporters = response.data.transporters;
+                    } else if (response.data?.facilities && Array.isArray(response.data.facilities)) {
+                        pageTransporters = response.data.facilities;
+                    }
+                    
+                    allTransporters = allTransporters.concat(pageTransporters);
+                    console.log(`[Fulfillment] Retrieved ${pageTransporters.length} transporters from page ${page} (total: ${allTransporters.length})`);
+                    
+                    // Check if there are more pages
+                    if (response.data) {
+                        const total = response.data.total || response.data.totalCount || 0;
+                        const totalPages = response.data.totalPages || Math.ceil(total / pageSize);
+                        const currentPageSize = pageTransporters.length;
+                        
+                        // If we got fewer results than pageSize, we're done
+                        // Or if we've reached totalPages
+                        hasMorePages = currentPageSize === pageSize && (totalPages === 0 || page < totalPages);
+                    } else {
+                        // If no pagination info, stop if we got fewer than pageSize
+                        hasMorePages = pageTransporters.length === pageSize;
+                    }
+                    
+                    page++;
+                    
+                    // Small delay to avoid rate limiting
+                    if (hasMorePages) {
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                }
+                
+                endpointWorks = true;
+                console.log(`[Fulfillment] ✅ Successfully fetched all transporters from ${endpointUsed} (${allTransporters.length} total)`);
             } catch (firstError) {
                 console.warn(`[Fulfillment] Endpoint ${endpointUsed} failed:`, firstError.message);
                 if (firstError.response) {
@@ -286,22 +335,67 @@ class FulfillmentController {
                 }
                 error = firstError;
                 
-                // Method 2: Try /facilities endpoint (fallback)
+                // Method 2: Try /facilities endpoint with pagination (fallback)
                 try {
                     endpointUsed = `${apiBaseUrl}/facilities`;
                     console.log(`[Fulfillment] Trying alternative endpoint: GET ${endpointUsed}?licenseNumber=${licenseNumber}`);
                     
-                    response = await metrcAuth.makeAuthenticatedRequest({
-                        method: 'GET',
-                        url: endpointUsed,
-                        params: {
-                            licenseNumber: licenseNumber
-                        },
-                        timeout: 15000
-                    });
+                    // Fetch all pages
+                    let page = 1;
+                    let hasMorePages = true;
+                    const pageSize = 500;
                     
-                    console.log(`[Fulfillment] ✅ Successfully called ${endpointUsed}`);
+                    while (hasMorePages) {
+                        console.log(`[Fulfillment] Fetching page ${page}...`);
+                        
+                        const response = await metrcAuth.makeAuthenticatedRequest({
+                            method: 'GET',
+                            url: endpointUsed,
+                            params: {
+                                licenseNumber: licenseNumber,
+                                page: page,
+                                pageSize: pageSize
+                            },
+                            timeout: 15000
+                        });
+                        
+                        // Parse the response
+                        let pageTransporters = [];
+                        if (Array.isArray(response.data)) {
+                            pageTransporters = response.data;
+                        } else if (response.data?.data && Array.isArray(response.data.data)) {
+                            pageTransporters = response.data.data;
+                        } else if (response.data?.transporters && Array.isArray(response.data.transporters)) {
+                            pageTransporters = response.data.transporters;
+                        } else if (response.data?.facilities && Array.isArray(response.data.facilities)) {
+                            pageTransporters = response.data.facilities;
+                        }
+                        
+                        allTransporters = allTransporters.concat(pageTransporters);
+                        console.log(`[Fulfillment] Retrieved ${pageTransporters.length} transporters from page ${page} (total: ${allTransporters.length})`);
+                        
+                        // Check if there are more pages
+                        if (response.data) {
+                            const total = response.data.total || response.data.totalCount || 0;
+                            const totalPages = response.data.totalPages || Math.ceil(total / pageSize);
+                            const currentPageSize = pageTransporters.length;
+                            
+                            hasMorePages = currentPageSize === pageSize && (totalPages === 0 || page < totalPages);
+                        } else {
+                            hasMorePages = pageTransporters.length === pageSize;
+                        }
+                        
+                        page++;
+                        
+                        // Small delay to avoid rate limiting
+                        if (hasMorePages) {
+                            await new Promise(resolve => setTimeout(resolve, 200));
+                        }
+                    }
+                    
+                    endpointWorks = true;
                     error = null;
+                    console.log(`[Fulfillment] ✅ Successfully fetched all transporters from ${endpointUsed} (${allTransporters.length} total)`);
                 } catch (secondError) {
                     console.error(`[Fulfillment] ❌ Both endpoints failed. Last error:`, secondError.message);
                     if (secondError.response) {
@@ -312,7 +406,7 @@ class FulfillmentController {
                 }
             }
 
-            if (!response) {
+            if (!endpointWorks || allTransporters.length === 0) {
                 throw new Error(
                     `Failed to fetch transporters from METRC API. ` +
                     `Tried endpoints: ${apiBaseUrl}/transfers/create/transporters and ${apiBaseUrl}/facilities. ` +
@@ -321,34 +415,10 @@ class FulfillmentController {
                 );
             }
 
-            console.log(`[Fulfillment] ✅ METRC API response received from ${endpointUsed}`);
-            console.log(`[Fulfillment] Response data type:`, typeof response.data);
-            console.log(`[Fulfillment] Response data (first 1000 chars):`, JSON.stringify(response.data, null, 2).substring(0, 1000));
-
-            // Parse the response
-            let transporters = [];
-            if (Array.isArray(response.data)) {
-                transporters = response.data;
-                console.log(`[Fulfillment] Response is direct array with ${transporters.length} items`);
-            } else if (response.data?.data && Array.isArray(response.data.data)) {
-                transporters = response.data.data;
-                console.log(`[Fulfillment] Response has data property with ${transporters.length} items`);
-            } else if (response.data?.transporters && Array.isArray(response.data.transporters)) {
-                transporters = response.data.transporters;
-                console.log(`[Fulfillment] Response has transporters property with ${transporters.length} items`);
-            } else if (response.data?.facilities && Array.isArray(response.data.facilities)) {
-                transporters = response.data.facilities;
-                console.log(`[Fulfillment] Response has facilities property with ${transporters.length} items`);
-            } else {
-                console.warn(`[Fulfillment] Unexpected response format. Full response structure:`, Object.keys(response.data || {}));
-                console.warn(`[Fulfillment] Response data:`, JSON.stringify(response.data).substring(0, 1000));
-                transporters = [];
-            }
-
-            console.log(`[Fulfillment] Found ${transporters.length} transporter(s) from METRC API`);
+            console.log(`[Fulfillment] Found ${allTransporters.length} total transporter(s) from METRC API (all pages)`);
 
             // Format transporters for dropdown
-            const formattedTransporters = transporters.map(transporter => {
+            const formattedTransporters = allTransporters.map(transporter => {
                 // Extract transporter ID and license number from various possible field names
                 const transporterId = transporter.id || 
                                      transporter.transporterId || 
@@ -420,29 +490,80 @@ class FulfillmentController {
                 return res.status(400).json({ error: 'licenseNumber is required' });
             }
 
-                // Try multiple endpoints to get recipients
+                // Try multiple endpoints to get recipients with pagination
             // Since /transfers/recipients doesn't exist, we'll try:
             // 1. /transfers/create/destinations (returns available destination facilities)
             // 2. /facilities (returns all facilities)
-            let response = null;
+            let allRecipients = [];
             let endpointUsed = null;
             let error = null;
+            let endpointWorks = false;
 
-            // Method 1: Try /transfers/create/destinations (most likely to work)
+            // Method 1: Try /transfers/create/destinations with pagination
             try {
                 endpointUsed = `${apiBaseUrl}/transfers/create/destinations`;
                 console.log(`[Fulfillment] Attempting endpoint: GET ${endpointUsed}?licenseNumber=${licenseNumber}`);
                 
-                response = await metrcAuth.makeAuthenticatedRequest({
-                    method: 'GET',
-                    url: endpointUsed,
-                    params: {
-                        licenseNumber: licenseNumber
-                    },
-                    timeout: 15000
-                });
+                // Fetch all pages
+                let page = 1;
+                let hasMorePages = true;
+                const pageSize = 500; // Maximum allowed by API
                 
-                console.log(`[Fulfillment] ✅ Successfully called ${endpointUsed}`);
+                while (hasMorePages) {
+                    console.log(`[Fulfillment] Fetching page ${page}...`);
+                    
+                    const response = await metrcAuth.makeAuthenticatedRequest({
+                        method: 'GET',
+                        url: endpointUsed,
+                        params: {
+                            licenseNumber: licenseNumber,
+                            page: page,
+                            pageSize: pageSize
+                        },
+                        timeout: 15000
+                    });
+                    
+                    // Parse the response
+                    let pageRecipients = [];
+                    if (Array.isArray(response.data)) {
+                        pageRecipients = response.data;
+                    } else if (response.data?.data && Array.isArray(response.data.data)) {
+                        pageRecipients = response.data.data;
+                    } else if (response.data?.recipients && Array.isArray(response.data.recipients)) {
+                        pageRecipients = response.data.recipients;
+                    } else if (response.data?.destinations && Array.isArray(response.data.destinations)) {
+                        pageRecipients = response.data.destinations;
+                    } else if (response.data?.facilities && Array.isArray(response.data.facilities)) {
+                        pageRecipients = response.data.facilities;
+                    }
+                    
+                    allRecipients = allRecipients.concat(pageRecipients);
+                    console.log(`[Fulfillment] Retrieved ${pageRecipients.length} recipients from page ${page} (total: ${allRecipients.length})`);
+                    
+                    // Check if there are more pages
+                    if (response.data) {
+                        const total = response.data.total || response.data.totalCount || 0;
+                        const totalPages = response.data.totalPages || Math.ceil(total / pageSize);
+                        const currentPageSize = pageRecipients.length;
+                        
+                        // If we got fewer results than pageSize, we're done
+                        // Or if we've reached totalPages
+                        hasMorePages = currentPageSize === pageSize && (totalPages === 0 || page < totalPages);
+                    } else {
+                        // If no pagination info, stop if we got fewer than pageSize
+                        hasMorePages = pageRecipients.length === pageSize;
+                    }
+                    
+                    page++;
+                    
+                    // Small delay to avoid rate limiting
+                    if (hasMorePages) {
+                        await new Promise(resolve => setTimeout(resolve, 200));
+                    }
+                }
+                
+                endpointWorks = true;
+                console.log(`[Fulfillment] ✅ Successfully fetched all recipients from ${endpointUsed} (${allRecipients.length} total)`);
             } catch (firstError) {
                 console.warn(`[Fulfillment] Endpoint ${endpointUsed} failed:`, firstError.message);
                 if (firstError.response) {
@@ -451,22 +572,69 @@ class FulfillmentController {
                 }
                 error = firstError;
                 
-                // Method 2: Try /facilities endpoint
+                // Method 2: Try /facilities endpoint with pagination
                 try {
                     endpointUsed = `${apiBaseUrl}/facilities`;
                     console.log(`[Fulfillment] Trying alternative endpoint: GET ${endpointUsed}?licenseNumber=${licenseNumber}`);
                     
-                    response = await metrcAuth.makeAuthenticatedRequest({
-                        method: 'GET',
-                        url: endpointUsed,
-                        params: {
-                            licenseNumber: licenseNumber
-                        },
-                        timeout: 15000
-                    });
+                    // Fetch all pages
+                    let page = 1;
+                    let hasMorePages = true;
+                    const pageSize = 500;
                     
-                    console.log(`[Fulfillment] ✅ Successfully called ${endpointUsed}`);
-                    error = null; // Clear error since this worked
+                    while (hasMorePages) {
+                        console.log(`[Fulfillment] Fetching page ${page}...`);
+                        
+                        const response = await metrcAuth.makeAuthenticatedRequest({
+                            method: 'GET',
+                            url: endpointUsed,
+                            params: {
+                                licenseNumber: licenseNumber,
+                                page: page,
+                                pageSize: pageSize
+                            },
+                            timeout: 15000
+                        });
+                        
+                        // Parse the response
+                        let pageRecipients = [];
+                        if (Array.isArray(response.data)) {
+                            pageRecipients = response.data;
+                        } else if (response.data?.data && Array.isArray(response.data.data)) {
+                            pageRecipients = response.data.data;
+                        } else if (response.data?.recipients && Array.isArray(response.data.recipients)) {
+                            pageRecipients = response.data.recipients;
+                        } else if (response.data?.destinations && Array.isArray(response.data.destinations)) {
+                            pageRecipients = response.data.destinations;
+                        } else if (response.data?.facilities && Array.isArray(response.data.facilities)) {
+                            pageRecipients = response.data.facilities;
+                        }
+                        
+                        allRecipients = allRecipients.concat(pageRecipients);
+                        console.log(`[Fulfillment] Retrieved ${pageRecipients.length} recipients from page ${page} (total: ${allRecipients.length})`);
+                        
+                        // Check if there are more pages
+                        if (response.data) {
+                            const total = response.data.total || response.data.totalCount || 0;
+                            const totalPages = response.data.totalPages || Math.ceil(total / pageSize);
+                            const currentPageSize = pageRecipients.length;
+                            
+                            hasMorePages = currentPageSize === pageSize && (totalPages === 0 || page < totalPages);
+                        } else {
+                            hasMorePages = pageRecipients.length === pageSize;
+                        }
+                        
+                        page++;
+                        
+                        // Small delay to avoid rate limiting
+                        if (hasMorePages) {
+                            await new Promise(resolve => setTimeout(resolve, 200));
+                        }
+                    }
+                    
+                    endpointWorks = true;
+                    error = null;
+                    console.log(`[Fulfillment] ✅ Successfully fetched all recipients from ${endpointUsed} (${allRecipients.length} total)`);
                 } catch (secondError) {
                     console.error(`[Fulfillment] ❌ Both endpoints failed. Last error:`, secondError.message);
                     if (secondError.response) {
@@ -477,7 +645,7 @@ class FulfillmentController {
                 }
             }
 
-            if (!response) {
+            if (!endpointWorks || allRecipients.length === 0) {
                 // Check if it's a METRC server issue
                 const isServerError = error?.response?.status === 500 || 
                                      error?.message?.includes('500') ||
@@ -501,39 +669,10 @@ class FulfillmentController {
                 );
             }
 
-            console.log(`[Fulfillment] ✅ METRC API response received from ${endpointUsed}`);
-            console.log(`[Fulfillment] Response data type:`, typeof response.data);
-            console.log(`[Fulfillment] Response data (first 1000 chars):`, JSON.stringify(response.data, null, 2).substring(0, 1000));
-
-            // Parse the response - could be array or object with data property
-            // For /transfers/create/destinations, it returns destination facilities
-            // For /facilities, it returns all facilities
-            let recipients = [];
-            if (Array.isArray(response.data)) {
-                recipients = response.data;
-                console.log(`[Fulfillment] Response is direct array with ${recipients.length} items`);
-            } else if (response.data?.data && Array.isArray(response.data.data)) {
-                recipients = response.data.data;
-                console.log(`[Fulfillment] Response has data property with ${recipients.length} items`);
-            } else if (response.data?.recipients && Array.isArray(response.data.recipients)) {
-                recipients = response.data.recipients;
-                console.log(`[Fulfillment] Response has recipients property with ${recipients.length} items`);
-            } else if (response.data?.destinations && Array.isArray(response.data.destinations)) {
-                recipients = response.data.destinations;
-                console.log(`[Fulfillment] Response has destinations property with ${recipients.length} items`);
-            } else if (response.data?.facilities && Array.isArray(response.data.facilities)) {
-                recipients = response.data.facilities;
-                console.log(`[Fulfillment] Response has facilities property with ${recipients.length} items`);
-            } else {
-                console.warn(`[Fulfillment] Unexpected response format. Full response structure:`, Object.keys(response.data || {}));
-                console.warn(`[Fulfillment] Response data:`, JSON.stringify(response.data).substring(0, 1000));
-                recipients = [];
-            }
-
-            console.log(`[Fulfillment] Found ${recipients.length} recipient(s) from METRC API`);
+            console.log(`[Fulfillment] Found ${allRecipients.length} total recipient(s) from METRC API (all pages)`);
 
             // Format recipients for dropdown
-            const formattedRecipients = recipients.map(recipient => {
+            const formattedRecipients = allRecipients.map(recipient => {
                 // Extract recipient ID and license number from various possible field names
                 const recipientId = recipient.id || 
                                    recipient.recipientId || 
@@ -622,6 +761,41 @@ class FulfillmentController {
             console.error('[Fulfillment] Error getting manifest preview:', error);
             res.status(500).json({ error: error.message });
         }
+    }
+
+    /**
+     * Get manifest payload preview (before creation)
+     * GET /api/v1/fulfillment/manifest/preview/:invoiceId
+     */
+    async getManifestPreview(req, res) {
+        try {
+            const invoiceId = parseInt(req.params.invoiceId);
+            const userId = req.user.id;
+
+            if (!invoiceId) {
+                return res.status(400).json({ error: 'invoice_id is required' });
+            }
+
+            // Get the payload that would be sent to METRC
+            const payload = await manifestCreationService.getManifestPayloadPreview(invoiceId, userId);
+            
+            res.json({
+                success: true,
+                payload: payload,
+                invoice_id: invoiceId
+            });
+        } catch (error) {
+            console.error(`[Fulfillment] Error getting manifest preview:`, error);
+            res.status(400).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Get manifest payload preview (alias for consistency)
+     * GET /api/v1/fulfillment/manifest/payload-preview/:invoiceId
+     */
+    async getManifestPayloadPreview(req, res) {
+        return this.getManifestPreview(req, res);
     }
 
     /**
@@ -739,9 +913,64 @@ class FulfillmentController {
                 reason,
                 target_manifest_or_license || null
             );
+            
+            // Check if the result indicates a failure
+            if (!result.success) {
+                const errorMessage = result.error || 'Failed to void manifest';
+                const isTimeout = errorMessage.includes('timeout') || errorMessage.includes('504') || errorMessage.includes('408');
+                const isServiceUnavailable = errorMessage.includes('503') || errorMessage.includes('unavailable');
+                
+                if (isTimeout || isServiceUnavailable) {
+                    return res.status(503).json({ 
+                        error: errorMessage,
+                        retryable: true 
+                    });
+                } else {
+                    return res.status(400).json({ error: errorMessage });
+                }
+            }
+            
             res.json(result);
         } catch (error) {
             console.error('[Fulfillment] Error voiding manifest:', error);
+            const errorMessage = error.message || 'Failed to void manifest';
+            const isTimeout = errorMessage.includes('timeout') || errorMessage.includes('504') || errorMessage.includes('408');
+            const isServiceUnavailable = errorMessage.includes('503') || errorMessage.includes('unavailable');
+            
+            if (isTimeout || isServiceUnavailable) {
+                return res.status(503).json({ 
+                    error: errorMessage,
+                    retryable: true 
+                });
+            } else {
+                return res.status(400).json({ error: errorMessage });
+            }
+        }
+    }
+
+    /**
+     * Get manifest data for editing
+     * GET /api/v1/fulfillment/manifest/edit/:invoiceId
+     */
+    async getManifestForEdit(req, res) {
+        try {
+            const { invoiceId } = req.params;
+            const userId = req.user.id;
+
+            if (!invoiceId) {
+                return res.status(400).json({ error: 'invoice_id is required' });
+            }
+
+            const manifestVoidingService = require('../Services/manifestVoidingService');
+            const result = await manifestVoidingService.getManifestDataForEdit(parseInt(invoiceId), userId);
+            
+            if (!result.success) {
+                return res.status(400).json({ error: result.error || 'Failed to get manifest data' });
+            }
+            
+            res.json(result);
+        } catch (error) {
+            console.error('[Fulfillment] Error getting manifest data for edit:', error);
             res.status(400).json({ error: error.message });
         }
     }
@@ -760,10 +989,43 @@ class FulfillmentController {
             }
 
             const result = await manifestVoidingService.updateManifest(invoice_id, userId, updates);
+            
+            // Check if the result indicates a failure
+            if (!result.success) {
+                // Determine appropriate status code based on error type
+                const errorMessage = result.error || 'Failed to update manifest';
+                const isTimeout = errorMessage.includes('timeout') || errorMessage.includes('504') || errorMessage.includes('408');
+                const isServiceUnavailable = errorMessage.includes('503') || errorMessage.includes('unavailable');
+                
+                if (isTimeout || isServiceUnavailable) {
+                    // Return 503 for timeout/service unavailable errors
+                    return res.status(503).json({ 
+                        error: errorMessage,
+                        retryable: true 
+                    });
+                } else {
+                    // Return 400 for validation/client errors
+                    return res.status(400).json({ error: errorMessage });
+                }
+            }
+            
             res.json(result);
         } catch (error) {
             console.error('[Fulfillment] Error updating manifest:', error);
-            res.status(400).json({ error: error.message });
+            
+            // Check if it's a timeout or service error
+            const errorMessage = error.message || 'Failed to update manifest';
+            const isTimeout = errorMessage.includes('timeout') || errorMessage.includes('504') || errorMessage.includes('408');
+            const isServiceUnavailable = errorMessage.includes('503') || errorMessage.includes('unavailable');
+            
+            if (isTimeout || isServiceUnavailable) {
+                return res.status(503).json({ 
+                    error: errorMessage,
+                    retryable: true 
+                });
+            }
+            
+            res.status(400).json({ error: errorMessage });
         }
     }
 

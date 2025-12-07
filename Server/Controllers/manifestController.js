@@ -283,17 +283,29 @@ class ManifestController {
                 });
             }
 
-            const status = await manifestService.getManifestStatus(manifestNumber);
+            // Use manifestStatusService for consistent status format
+            const manifestStatusService = require('../Services/manifestStatusService');
             
-            if (status) {
+            // Try to get license from query or use default
+            const { license } = req.query;
+            
+            const statusResult = await manifestStatusService.checkManifestStatus(manifestNumber, license);
+            
+            if (statusResult && statusResult.status) {
+                // Return status in a format that's easy to check
                 res.json({
                     success: true,
-                    data: status
+                    status: statusResult.status,  // 'active', 'voided', 'accepted', 'not_found', 'error'
+                    message: statusResult.message,
+                    data: statusResult.data
                 });
             } else {
-                res.status(404).json({
-                    success: false,
-                    error: 'Manifest not found'
+                // If statusResult is null or doesn't have status, return not_found
+                res.json({
+                    success: true,
+                    status: 'not_found',
+                    message: 'Manifest status could not be determined',
+                    data: null
                 });
             }
             

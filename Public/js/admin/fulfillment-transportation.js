@@ -3,8 +3,8 @@
 
 document.addEventListener('DOMContentLoaded', () => {
     initializeForm();
-    loadRecipients();
-    loadTransporters(); // Re-enabled - transporter is required by METRC
+    loadRecipients(); // Load recipient dropdown
+    loadTransporters(); // Transporter is required by METRC
     setupFormValidation();
     setupDeliveryWindowValidation();
 });
@@ -42,6 +42,67 @@ function formatDateTimeLocal(date) {
 }
 
 /**
+ * Display and log the auto-fetched recipientId from destination license
+ * RecipientId is automatically fetched on the backend from destination license (DIS000085)
+ */
+function displayAutoRecipientId() {
+    const recipientIdInput = document.getElementById('recipient-id');
+    const recipientIdDisplay = document.getElementById('recipient-id-display');
+    const storeId = window.storeId;
+    const metrcLicense = window.metrcLicense;
+    
+    console.log(`[Recipient] 🔍 ==========================================`);
+    console.log(`[Recipient] 🔍 RecipientId Display & Verification`);
+    console.log(`[Recipient] 🔍 ==========================================`);
+    console.log(`[Recipient] Invoice ID: ${window.invoiceId || 'NOT SET'}`);
+    console.log(`[Recipient] Store ID: ${storeId || 'NOT SET'}`);
+    console.log(`[Recipient] METRC License: ${metrcLicense || 'NOT SET'}`);
+    
+    // Get recipientId from backend (auto-fetched from METRC license)
+    const recipientId = window.autoRecipientId || (recipientIdInput ? recipientIdInput.value : null);
+    const recipientName = window.autoRecipientName || 'N/A';
+    
+    if (recipientId) {
+        const parsedId = parseInt(recipientId, 10);
+        if (!isNaN(parsedId) && parsedId > 0) {
+            // Update hidden input
+            if (recipientIdInput) {
+                recipientIdInput.value = parsedId;
+            }
+            
+            // Update display field
+            if (recipientIdDisplay) {
+                recipientIdDisplay.value = parsedId;
+            }
+            
+            console.log(`[Recipient] ✅ RecipientId: ${parsedId}`);
+            console.log(`[Recipient] ✅ Recipient Name: ${recipientName}`);
+            console.log(`[Recipient] ✅ Fetched from METRC license: ${metrcLicense}`);
+            console.log(`[Recipient] ✅ Store ID: ${storeId}`);
+            console.log(`[Recipient] ✅ RecipientId is ready for manifest creation`);
+        } else {
+            console.error(`[Recipient] ❌ Invalid recipientId: ${recipientId}`);
+            if (recipientIdDisplay) {
+                recipientIdDisplay.value = 'Error: Invalid ID';
+            }
+        }
+    } else {
+        console.error(`[Recipient] ❌ RecipientId not found`);
+        if (!metrcLicense) {
+            console.error(`[Recipient] ❌ METRC license not set - cannot lookup recipientId`);
+            console.error(`[Recipient] ❌ Store ID (${storeId}) cannot be used directly for METRC API lookup`);
+            console.error(`[Recipient] ❌ Please set location_license_number (METRC license) for this location`);
+        } else {
+            console.error(`[Recipient] ❌ Could not fetch recipientId from METRC license: ${metrcLicense}`);
+            console.error(`[Recipient] ❌ Check server logs for METRC API lookup errors`);
+        }
+        if (recipientIdDisplay) {
+            recipientIdDisplay.value = 'Not Found';
+        }
+    }
+}
+
+/**
  * Load available recipients from METRC T3 API
  */
 async function loadRecipients() {
@@ -51,6 +112,12 @@ async function loadRecipients() {
 
     if (!recipientSelect || !recipientIdInput) {
         console.error('Recipient elements not found');
+        return;
+    }
+    
+    // If recipient is already auto-detected and dropdown is hidden, don't load
+    if (recipientSelect.style.display === 'none' && window.autoRecipientId) {
+        console.log('[Recipients] Recipient already auto-detected, skipping load');
         return;
     }
 
@@ -71,6 +138,16 @@ async function loadRecipients() {
         if (data.recipients && data.recipients.length > 0) {
             console.log(`[Recipients] ✅ Loaded ${data.recipients.length} recipient(s) from METRC API`);
             
+            const destinationLicense = window.destinationLicense;
+            console.log(`[Recipients] 🔍 Looking for destination license: "${destinationLicense}"`);
+            console.log(`[Recipients] 🔍 Available recipients from METRC:`, data.recipients.map(r => ({
+                id: r.id,
+                licenseNumber: r.licenseNumber,
+                name: r.name
+            })));
+            
+            let autoSelectedRecipient = null;
+            
             data.recipients.forEach(recipient => {
                 const option = document.createElement('option');
                 option.value = recipient.id; // Store the numeric ID as value
@@ -78,9 +155,56 @@ async function loadRecipients() {
                 option.setAttribute('data-license', recipient.licenseNumber);
                 option.setAttribute('data-name', recipient.name);
                 recipientSelect.appendChild(option);
+                
+                // Auto-select recipient that matches destination license
+                // Try exact match first, then case-insensitive match
+                const exactMatch = destinationLicense && recipient.licenseNumber === destinationLicense;
+                const caseInsensitiveMatch = destinationLicense && 
+                    recipient.licenseNumber && 
+                    recipient.licenseNumber.toUpperCase().trim() === destinationLicense.toUpperCase().trim();
+                
+                if (exactMatch || caseInsensitiveMatch) {
+                    if (exactMatch) {
+                        console.log(`[Recipients] ✅ Exact match found: "${recipient.licenseNumber}" === "${destinationLicense}"`);
+                    } else {
+                        console.log(`[Recipients] ✅ Case-insensitive match found: "${recipient.licenseNumber}" matches "${destinationLicense}"`);
+                    }
+                    autoSelectedRecipient = {
+                        id: recipient.id,
+                        licenseNumber: recipient.licenseNumber,
+                        name: recipient.name,
+                        displayName: recipient.displayName || `${recipient.name} (${recipient.licenseNumber})`
+                    };
+                }
             });
 
-            // Handle recipient selection - log when selected
+            // Auto-select recipient that matches destination license
+            if (autoSelectedRecipient) {
+                recipientSelect.value = autoSelectedRecipient.id;
+                recipientIdInput.value = autoSelectedRecipient.id;
+                console.log(`[Recipients] ✅ Auto-selected recipient matching destination license:`, {
+                    id: autoSelectedRecipient.id,
+                    licenseNumber: autoSelectedRecipient.licenseNumber,
+                    name: autoSelectedRecipient.name,
+                    destinationLicense: destinationLicense,
+                    matches: 'YES ✓'
+                });
+            } else if (destinationLicense) {
+                console.warn(`[Recipients] ⚠️ ==========================================`);
+                console.warn(`[Recipients] ⚠️ No recipient found matching destination license: "${destinationLicense}"`);
+                console.warn(`[Recipients] ⚠️ ==========================================`);
+                console.warn(`[Recipients] ⚠️ Available license numbers from METRC:`, 
+                    data.recipients.map(r => `"${r.licenseNumber}"`).join(', '));
+                console.warn(`[Recipients] ⚠️ Possible reasons:`);
+                console.warn(`[Recipients] ⚠️ 1. License "${destinationLicense}" is not in METRC's list of available recipients`);
+                console.warn(`[Recipients] ⚠️ 2. License "${destinationLicense}" is not authorized to receive transfers from your source license`);
+                console.warn(`[Recipients] ⚠️ 3. License number format mismatch (check for spaces, case differences)`);
+                console.warn(`[Recipients] ⚠️ 4. The recipient facility may need to be configured in METRC first`);
+                console.warn(`[Recipients] ⚠️ ==========================================`);
+                console.warn(`[Recipients] ⚠️ Please manually select the correct recipient facility from the dropdown`);
+            }
+
+            // Handle recipient selection change (if user manually changes)
             recipientSelect.addEventListener('change', (e) => {
                 const selectedOption = e.target.options[e.target.selectedIndex];
                 const recipientId = e.target.value;
@@ -93,9 +217,10 @@ async function loadRecipients() {
                         id: recipientId,
                         licenseNumber: licenseNumber,
                         name: name,
-                        displayName: selectedOption.textContent
+                        displayName: selectedOption.textContent,
+                        destinationLicense: destinationLicense,
+                        matches: licenseNumber === destinationLicense ? 'YES ✓' : 'NO ⚠️'
                     });
-                    console.log(`[Recipients] ✅ Valid recipient ID retrieved from T3 API: ${recipientId}`);
                 } else {
                     recipientIdInput.value = '';
                     console.log(`[Recipients] ⚠️ No recipient selected`);
@@ -144,6 +269,16 @@ async function loadTransporters() {
         if (data.transporters && data.transporters.length > 0) {
             console.log(`[Transporters] ✅ Loaded ${data.transporters.length} transporter(s) from METRC API`);
             
+            const transporterLicense = window.transporterLicense;
+            console.log(`[Transporters] 🔍 Looking for transporter license: "${transporterLicense}"`);
+            console.log(`[Transporters] 🔍 Available transporters from METRC:`, data.transporters.map(t => ({
+                id: t.id,
+                licenseNumber: t.licenseNumber,
+                name: t.name
+            })));
+            
+            let autoSelectedTransporter = null;
+            
             data.transporters.forEach(transporter => {
                 const option = document.createElement('option');
                 option.value = transporter.id; // Store the numeric ID as value
@@ -151,7 +286,54 @@ async function loadTransporters() {
                 option.setAttribute('data-license', transporter.licenseNumber);
                 option.setAttribute('data-name', transporter.name);
                 transporterSelect.appendChild(option);
+                
+                // Auto-select transporter that matches transporter license
+                // Try exact match first, then case-insensitive match
+                const exactMatch = transporterLicense && transporter.licenseNumber === transporterLicense;
+                const caseInsensitiveMatch = transporterLicense && 
+                    transporter.licenseNumber && 
+                    transporter.licenseNumber.toUpperCase().trim() === transporterLicense.toUpperCase().trim();
+                
+                if (exactMatch || caseInsensitiveMatch) {
+                    if (exactMatch) {
+                        console.log(`[Transporters] ✅ Exact match found: "${transporter.licenseNumber}" === "${transporterLicense}"`);
+                    } else {
+                        console.log(`[Transporters] ✅ Case-insensitive match found: "${transporter.licenseNumber}" matches "${transporterLicense}"`);
+                    }
+                    autoSelectedTransporter = {
+                        id: transporter.id,
+                        licenseNumber: transporter.licenseNumber,
+                        name: transporter.name,
+                        displayName: transporter.displayName || `${transporter.name} (${transporter.licenseNumber})`
+                    };
+                }
             });
+
+            // Auto-select transporter that matches transporter license
+            if (autoSelectedTransporter) {
+                transporterSelect.value = autoSelectedTransporter.id;
+                transporterIdInput.value = autoSelectedTransporter.id;
+                console.log(`[Transporters] ✅ Auto-selected transporter matching license:`, {
+                    id: autoSelectedTransporter.id,
+                    licenseNumber: autoSelectedTransporter.licenseNumber,
+                    name: autoSelectedTransporter.name,
+                    transporterLicense: transporterLicense,
+                    matches: 'YES ✓'
+                });
+            } else if (transporterLicense) {
+                console.warn(`[Transporters] ⚠️ ==========================================`);
+                console.warn(`[Transporters] ⚠️ No transporter found matching license: "${transporterLicense}"`);
+                console.warn(`[Transporters] ⚠️ ==========================================`);
+                console.warn(`[Transporters] ⚠️ Available license numbers from METRC:`, 
+                    data.transporters.map(t => `"${t.licenseNumber}"`).join(', '));
+                console.warn(`[Transporters] ⚠️ Possible reasons:`);
+                console.warn(`[Transporters] ⚠️ 1. License "${transporterLicense}" is not in METRC's list of available transporters`);
+                console.warn(`[Transporters] ⚠️ 2. License "${transporterLicense}" is not authorized as a transporter`);
+                console.warn(`[Transporters] ⚠️ 3. License number format mismatch (check for spaces, case differences)`);
+                console.warn(`[Transporters] ⚠️ 4. The transporter facility may need to be configured in METRC first`);
+                console.warn(`[Transporters] ⚠️ ==========================================`);
+                console.warn(`[Transporters] ⚠️ Please manually select the correct transporter facility from the dropdown`);
+            }
 
             // Handle transporter selection - log when selected
             transporterSelect.addEventListener('change', (e) => {
@@ -166,7 +348,9 @@ async function loadTransporters() {
                         id: transporterId,
                         licenseNumber: licenseNumber,
                         name: name,
-                        displayName: selectedOption.textContent
+                        displayName: selectedOption.textContent,
+                        transporterLicense: transporterLicense,
+                        matches: licenseNumber === transporterLicense ? 'YES ✓' : 'NO ⚠️'
                     });
                     console.log(`[Transporters] ✅ Valid transporter ID retrieved from T3 API: ${transporterId}`);
                 } else {
@@ -280,18 +464,21 @@ async function submitTransportationDetails() {
 
     try {
         const formData = new FormData(form);
+        const metrcLicense = window.metrcLicense;
+        const storeId = window.storeId;
         
-        // Get recipient ID from hidden input (REQUIRED)
-        const recipientId = document.getElementById('recipient-id')?.value;
+        // Get recipient ID from hidden input (from dropdown selection)
+        const recipientIdInput = document.getElementById('recipient-id');
+        const recipientId = recipientIdInput?.value || null;
         const recipientSelect = document.getElementById('recipient-facility');
         const selectedRecipient = recipientSelect?.options[recipientSelect.selectedIndex];
         
         if (!recipientId) {
-            throw new Error('Please select a recipient facility');
+            throw new Error('Please select a recipient facility from the dropdown');
         }
-
-        console.log('[Transportation] Submitting with recipient ID:', recipientId);
-        console.log('[Transportation] Selected recipient:', selectedRecipient?.textContent);
+        
+        console.log('[Transportation] ✅ Submitting with recipient ID:', recipientId);
+        console.log('[Transportation] ✅ Selected recipient:', selectedRecipient?.textContent);
 
         // Get transporter ID from hidden input (REQUIRED - from dropdown selection)
         const transporterIdInput = document.getElementById('transporter-id');
@@ -322,10 +509,20 @@ async function submitTransportationDetails() {
             transporterName: transporterName,
             transporterId: transporterId, // Required - from dropdown selection
             phoneNumber: formData.get('phoneNumber') || '',
-            recipientId: recipientId // Required - recipient ID from dropdown
+            recipientId: recipientId // Required - from dropdown selection
         };
         
-        console.log('Submitting data:', data);
+        console.log(`[Transportation] 📤 ==========================================`);
+        console.log(`[Transportation] 📤 Form Data Being Submitted`);
+        console.log(`[Transportation] 📤 ==========================================`);
+        console.log(`[Transportation] Invoice ID: ${data.invoice_id}`);
+        console.log(`[Transportation] RecipientId: ${data.recipientId || 'NULL - Please select from dropdown'}`);
+        console.log(`[Transportation] TransporterId: ${data.transporterId || 'NULL'}`);
+        console.log(`[Transportation] Store ID: ${storeId || 'NOT SET'}`);
+        console.log(`[Transportation] METRC License: ${metrcLicense || 'NOT SET'}`);
+        console.log(`[Transportation] METRC License: ${metrcLicense || 'NOT SET'}`);
+        console.log(`[Transportation] Full data object:`, JSON.stringify(data, null, 2));
+        console.log(`[Transportation] 📤 ==========================================`);
 
         const response = await fetch('/api/v1/fulfillment/transportation', {
             method: 'POST',

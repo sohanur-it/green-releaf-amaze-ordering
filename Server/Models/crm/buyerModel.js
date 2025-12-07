@@ -20,7 +20,17 @@ const Buyer = {
                 s.color AS stage_color,
                 df.name AS deal_flow_name,
                 (SELECT COUNT(*) FROM "ORDERS-buyer_contacts" WHERE orders_buyer_id = b.entry_id) AS contact_count,
-                (SELECT string_agg(t.name, ', ') FROM "ORDERS-buyer_tags" t WHERE t.orders_buyer_id = b.entry_id) AS tags
+                (SELECT string_agg(t.name, ', ') FROM "ORDERS-buyer_tags" t WHERE t.orders_buyer_id = b.entry_id) AS tags,
+                (SELECT string_agg(DISTINCT bl.state_license, ', ' ORDER BY bl.state_license) 
+                 FROM "ORDERS-buyer_locations" bl 
+                 WHERE bl.orders_buyer_id = b.entry_id 
+                 AND bl.state_license IS NOT NULL 
+                 AND bl.state_license != '') AS licenses,
+                (SELECT string_agg(DISTINCT bl.metrc_license_number, ', ' ORDER BY bl.metrc_license_number) 
+                 FROM "ORDERS-buyer_locations" bl 
+                 WHERE bl.orders_buyer_id = b.entry_id 
+                 AND bl.metrc_license_number IS NOT NULL 
+                 AND bl.metrc_license_number != '') AS metrc_licenses
             FROM "ORDERS-buyers" b
                      LEFT JOIN "ORDERS-buyer_stages" s ON b.fk_stage_id = s.entry_id
                      LEFT JOIN "ORDERS-deal_flows" df ON b.fk_deal_flow_id = df.entry_id

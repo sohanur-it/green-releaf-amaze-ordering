@@ -277,6 +277,21 @@ class ManifestCreationService {
             const failedManifests = [];
             let partialFailure = false;
 
+            // Build all payloads for preview (before creating)
+            const allPayloads = [];
+            for (const [license, licenseData] of Object.entries(packagesByLicense)) {
+                const payload = await this.buildManifestPayloadForLicense(
+                    invoiceId,
+                    inv.invoice_number,
+                    inv.fk_location_id,
+                    license,
+                    licenseData,
+                    transportationDetails,
+                    client
+                );
+                allPayloads.push({ license, payload });
+            }
+
             // Process each license in the same transaction to avoid deadlocks
             // NOTE: We process licenses sequentially in the same transaction to avoid
             // deadlock issues with foreign key constraints
@@ -703,20 +718,46 @@ class ManifestCreationService {
      * Build manifest payload for a specific license
      */
     async buildManifestPayloadForLicense(invoiceId, invoiceNumber, locationId, license, licenseData, transportDetails, client) {
-        // Get destination license from invoice (location_license_number) or location (state_license)
+        // ============================================================================
+        // CRITICAL LICENSE LOGIC:
+        // ============================================================================
+        // SOURCE LICENSE (license parameter): CUL000063 - Where product is coming FROM (our license)
+        // DESTINATION LICENSE (destinationLicense): DIS000085 - Where product is going TO (buyer's store license)
+        // 
+        // The destination license MUST come from the invoice's buyer location (state_license)
+        // This is set when the order is placed in the external dashboard and cannot be changed.
+        // The transportation page shows this as read-only.
+        // ============================================================================
+        // Get destination license from buyer location (state_license) - this is the store's license (e.g., DIS000085)
+        // This should ALWAYS be the buyer's location license and cannot be changed
+        // Priority: 1) location.state_license (buyer location), 2) invoice.location_license_number (fallback)
         const invoice = await client.query(`
             SELECT 
                 i.location_license_number,
-                bl.state_license
+                bl.state_license,
+                bl.name as location_name
             FROM "ORDERS-invoices" i
             LEFT JOIN "ORDERS-buyer_locations" bl ON i.fk_location_id = bl.entry_id
             WHERE i.id = $1
         `, [invoiceId]);
 
-        const destinationLicense = invoice.rows[0]?.location_license_number || invoice.rows[0]?.state_license;
+        // CRITICAL: Destination license is the store's license (DIS000085) - where the product is going
+        // CUL000063 is OUR license number (source) - where the product is coming from
+        // The destination license (DIS000085) is what we display, but recipientId comes from the dropdown selection
+        const destinationLicense = invoice.rows[0]?.state_license || invoice.rows[0]?.location_license_number;
         
         if (!destinationLicense) {
-            throw new Error('Destination license not found. Please ensure the invoice has a location license number.');
+            throw new Error('Destination license not found. Please ensure the buyer location has a state_license configured.');
+        }
+        
+        // Log destination license for debugging
+        console.log(`[Manifest] ✅ Destination License: ${destinationLicense} (Store where product is going)`);
+        console.log(`[Manifest] ✅ Source License: ${license} (Our license - where product is coming from)`);
+        console.log(`[Manifest] ✅ Location: ${invoice.rows[0]?.location_name || 'N/A'}`);
+        
+        // Validate that destination license is not the source license (prevent shipping to self)
+        if (destinationLicense === license) {
+            throw new Error(`Invalid destination license: Cannot ship to the same license (${destinationLicense}). Destination must be the buyer's store license.`);
         }
 
         // Build packages array for this license only
@@ -816,88 +857,35 @@ class ManifestCreationService {
             packages: packages
         };
         
-        // recipientId is REQUIRED by METRC - must be a valid number
-        // Try to get it from transportDetails first (from dropdown selection), otherwise look it up or throw error
+        // ============================================================================
+        // RECIPIENT ID: FROM DROPDOWN SELECTION
+        // ============================================================================
+        // recipientId is selected by user from the dropdown on transportation page
+        // Destination license (DIS000085) is the store where product is going
+        // Source license (CUL000063) is our license - where product is coming from
+        // ============================================================================
         let recipientId = null;
         
+        // Get recipientId from transportation details (selected from dropdown)
         if (transportDetails.recipientId) {
             recipientId = parseInt(transportDetails.recipientId, 10);
             if (!isNaN(recipientId) && recipientId > 0) {
-                console.log(`[Manifest] ✅ Using recipientId from transportation details (from dropdown): ${recipientId}`);
+                console.log(`[Manifest] ✅ Using recipientId from dropdown selection: ${recipientId}`);
             } else {
-                recipientId = null; // Invalid value, try lookup
-                console.warn(`[Manifest] Invalid recipientId in transportDetails: ${transportDetails.recipientId}`);
-            }
-        } else {
-            console.log(`[Manifest] recipientId not found in transportDetails`);
-        }
-        
-        // If recipientId is not available, try to look it up from METRC API
-        if (!recipientId) {
-            console.log(`[Manifest] recipientId not found in transportDetails, attempting lookup for destination license: ${destinationLicense}`);
-            
-            // First, try to get recipient ID from database (buyer location might have it stored)
-            // Use SAVEPOINT to prevent transaction abort if column doesn't exist
-            try {
-                // Create a savepoint so we can rollback just this query if it fails
-                await client.query('SAVEPOINT recipient_id_lookup');
-                
-                try {
-                    const locationQuery = await client.query(`
-                        SELECT metrc_recipient_facility_id, state_license
-                        FROM "ORDERS-buyer_locations"
-                        WHERE entry_id = $1
-                    `, [locationId]);
-                    
-                    if (locationQuery.rows.length > 0 && locationQuery.rows[0].metrc_recipient_facility_id) {
-                        recipientId = parseInt(locationQuery.rows[0].metrc_recipient_facility_id, 10);
-                        if (!isNaN(recipientId) && recipientId > 0) {
-                            console.log(`[Manifest] Found recipientId in database: ${recipientId}`);
-                        } else {
-                            recipientId = null;
-                        }
-                    }
-                    
-                    // Release savepoint if query succeeded
-                    await client.query('RELEASE SAVEPOINT recipient_id_lookup');
-                } catch (columnError) {
-                    // Column doesn't exist or query failed - rollback to savepoint
-                    await client.query('ROLLBACK TO SAVEPOINT recipient_id_lookup');
-                    console.log(`[Manifest] metrc_recipient_facility_id column may not exist, skipping database lookup`);
-                }
-            } catch (dbError) {
-                // If savepoint creation fails, just log and continue
-                console.warn(`[Manifest] Failed to query database for recipient ID:`, dbError.message);
-                // Don't rethrow - allow transaction to continue
-            }
-            
-            // If still not found, try METRC API lookup
-            if (!recipientId) {
-                try {
-                    recipientId = await this.lookupRecipientIdByLicense(destinationLicense, license);
-                    console.log(`[Manifest] Looked up recipientId from METRC: ${recipientId}`);
-                } catch (error) {
-                    console.error(`[Manifest] Failed to lookup recipientId from METRC:`, error.message);
-                    // Continue - will throw error below if still null
-                }
+                recipientId = null;
             }
         }
         
-        // recipientId is REQUIRED - throw error if we still don't have it
+        // recipientId is REQUIRED - must be selected from dropdown
         if (!recipientId || isNaN(recipientId) || recipientId <= 0) {
             throw new Error(
-                `recipientId is required but not found. Destination license: ${destinationLicense}. ` +
-                `Please ensure the recipient facility ID is configured. You can: ` +
-                `1) Add it to the buyer location's metrc_recipient_facility_id field in the database, ` +
-                `2) Ensure the facility exists in METRC and is accessible from source license ${license}, ` +
-                `3) Contact support to configure the recipient facility ID for this location.`
+                `recipientId is required but not found. ` +
+                `Please go back to the transportation details page and select a recipient facility from the dropdown. ` +
+                `The recipient ID must be selected from the METRC T3 API recipient list.`
             );
         }
         
         destinationPayload.recipientId = recipientId;
-        // Note: METRC API only accepts recipientId (numeric ID), not recipientFacilityLicenseNumber
-        // The license number is not needed in the payload - recipientId is sufficient
-        
         console.log(`[Manifest] ✅ Using recipientId ${recipientId} for manifest creation (selected from dropdown)`);
         
         const transporterPayload = {
@@ -1189,7 +1177,6 @@ class ManifestCreationService {
             // Validate payload structure - ensure no null values in numeric fields
             this.validatePayloadForNumericFields(payload);
             
-            console.log(`[Manifest] Payload validated. Full payload:`, JSON.stringify(payload, null, 2).substring(0, 1000));
             
             // Call METRC T3 API to create transfer/manifest
             // Use submit=true parameter to actually create the manifest (not just dry run)
@@ -1204,12 +1191,6 @@ class ManifestCreationService {
                 timeout: 60000  // 60 seconds for manifest creation
             });
             
-            console.log(`[Manifest] ✅ METRC API response received`);
-            console.log(`[Manifest] Response status:`, response.status);
-            console.log(`[Manifest] Response status text:`, response.statusText);
-            console.log(`[Manifest] Full response data:`, JSON.stringify(response.data, null, 2));
-            console.log(`[Manifest] Response data type:`, typeof response.data);
-            console.log(`[Manifest] Is response.data an array?`, Array.isArray(response.data));
             
             // Extract manifest information from response
             // METRC typically returns the created transfer in response.data
@@ -1716,6 +1697,142 @@ class ManifestCreationService {
             }
         }
         console.log(`[Manifest] ✓ Finished recording all manifest packages`);
+    }
+
+    /**
+     * Get manifest payload preview (without creating manifest)
+     * Returns the payloads that would be sent to METRC
+     * GET /api/v1/fulfillment/manifest/preview/:invoiceId
+     */
+    async getManifestPayloadPreview(invoiceId, userId) {
+        console.log(`[Manifest Preview] ========================================`);
+        console.log(`[Manifest Preview] Getting payload preview for invoice ${invoiceId}`);
+        console.log(`[Manifest Preview] ========================================`);
+        
+        const client = await pool.connect();
+
+        try {
+            // Get invoice and transportation details
+            const invoice = await client.query(`
+                SELECT 
+                    id,
+                    invoice_number,
+                    transportation_details,
+                    fk_location_id,
+                    status,
+                    fulfillment_accepted_by
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [invoiceId]);
+
+            if (invoice.rows.length === 0) {
+                throw new Error('Invoice not found');
+            }
+
+            const inv = invoice.rows[0];
+            
+            // Validate invoice status
+            if (inv.status !== 'Fulfillment_Accepted' && inv.status !== 'Fulfillment_Issue') {
+                throw new Error(`Cannot preview manifest - invoice status is ${inv.status}. Must be Fulfillment_Accepted or Fulfillment_Issue.`);
+            }
+
+            if (!inv.transportation_details) {
+                throw new Error('Transportation details not entered. Please complete the transportation form first.');
+            }
+
+            // Parse transportation details
+            const transportationDetails = typeof inv.transportation_details === 'string'
+                ? JSON.parse(inv.transportation_details)
+                : inv.transportation_details;
+            
+            console.log(`[Manifest Preview] Transportation details:`, JSON.stringify(transportationDetails, null, 2).substring(0, 1000));
+            console.log(`[Manifest Preview] recipientId: ${transportationDetails?.recipientId}`);
+            console.log(`[Manifest Preview] transporterId: ${transportationDetails?.transporterId}`);
+
+            // Validate recipientId and transporterId are present
+            if (!transportationDetails?.recipientId) {
+                throw new Error('recipientId is missing from transportation details. Please go back and select a recipient facility.');
+            }
+
+            if (!transportationDetails?.transporterId) {
+                throw new Error('transporterId is missing from transportation details. Please go back and select a transporter facility.');
+            }
+
+            // Get all line items
+            const allLineItems = await client.query(`
+                SELECT 
+                    id, 
+                    fk_batch_id, 
+                    assigned_package_labels,
+                    line_total,
+                    quantity_ordered
+                FROM "ORDERS-invoice-line-items"
+                WHERE fk_invoice_id = $1
+            `, [invoiceId]);
+
+            if (allLineItems.rows.length === 0) {
+                throw new Error('No line items found for invoice');
+            }
+
+            // Group packages by license
+            console.log(`[Manifest Preview] Grouping packages by license...`);
+            const packagesByLicense = await this.groupPackagesByLicense(invoiceId, allLineItems.rows, client);
+            console.log(`[Manifest Preview] Grouped into ${Object.keys(packagesByLicense).length} license(s)`);
+
+            const licenseCount = Object.keys(packagesByLicense).length;
+            if (licenseCount === 0) {
+                throw new Error('No packages found for any license');
+            }
+
+            // Build payloads for each license
+            const payloads = [];
+            let totalPackages = 0;
+
+            for (const [license, licenseData] of Object.entries(packagesByLicense)) {
+                console.log(`[Manifest Preview] Building payload for license ${license}...`);
+                
+                const payload = await this.buildManifestPayloadForLicense(
+                    invoiceId,
+                    inv.invoice_number,
+                    inv.fk_location_id,
+                    license,
+                    licenseData,
+                    transportationDetails,
+                    client
+                );
+
+                payloads.push({
+                    license: license,
+                    packageCount: licenseData.packages.length,
+                    payload: payload
+                });
+
+                totalPackages += licenseData.packages.length;
+            }
+
+            console.log(`[Manifest Preview] ✅ Built ${payloads.length} payload(s) for ${totalPackages} total packages`);
+
+            return {
+                invoice_id: invoiceId,
+                invoice_number: inv.invoice_number,
+                licenseCount: licenseCount,
+                totalPackages: totalPackages,
+                payloads: payloads,
+                transportationDetails: {
+                    recipientId: transportationDetails.recipientId,
+                    transporterId: transportationDetails.transporterId,
+                    driverName: transportationDetails.driverName,
+                    estimatedDeparture: transportationDetails.estimatedDeparture,
+                    estimatedArrival: transportationDetails.estimatedArrival
+                }
+            };
+
+        } catch (error) {
+            console.error(`[Manifest Preview] Error:`, error);
+            throw error;
+        } finally {
+            client.release();
+        }
     }
 }
 

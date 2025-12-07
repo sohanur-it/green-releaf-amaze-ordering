@@ -197,15 +197,29 @@ function renderManifestPreview(progress, preview) {
  * Create manifest
  */
 async function createManifest() {
-    if (!confirm('Create METRC manifest(s)? This action cannot be undone.')) {
-        return;
-    }
-
     const createBtn = document.querySelector('.btn-create');
-    createBtn.disabled = true;
-    createBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating Manifest...';
-
+    
     try {
+        // Get the payload preview
+        const previewResponse = await fetch(`/api/v1/fulfillment/manifest/preview/${window.invoiceId}`);
+        const previewData = await previewResponse.json();
+
+        if (!previewResponse.ok) {
+            throw new Error(previewData.error || 'Failed to get manifest preview');
+        }
+
+        // Confirm before creating
+        const confirmMessage = `Create manifest(s) for invoice ${previewData.payload.invoice_number}?\n\n` +
+            `This will create ${previewData.payload.licenseCount} manifest(s) in METRC.`;
+
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+
+        createBtn.disabled = true;
+        createBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating Manifest...';
+
+        // Now create the manifest
         const response = await fetch('/api/v1/fulfillment/manifest/create', {
             method: 'POST',
             headers: {
@@ -483,6 +497,12 @@ async function handleUpdateManifest(e) {
         const data = await response.json();
         
         if (!response.ok) {
+            // Check if it's a timeout/service error (503)
+            if (response.status === 503 || response.status === 504) {
+                const errorMsg = data.error || 'METRC API timeout. The server took too long to respond.';
+                const retryMsg = data.retryable ? '\n\nThis is a temporary issue. Please try again in a few moments.' : '';
+                throw new Error(`${errorMsg}${retryMsg}`);
+            }
             throw new Error(data.error || 'Failed to update manifest');
         }
         
@@ -493,7 +513,16 @@ async function handleUpdateManifest(e) {
         
     } catch (error) {
         console.error('Error updating manifest:', error);
-        alert(`Error: ${error.message}`);
+        
+        // Show user-friendly error message
+        let errorMessage = error.message || 'Failed to update manifest';
+        
+        // If it's a network error, provide more context
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+            errorMessage = 'Network error. Please check your connection and try again.';
+        }
+        
+        alert(`Error: ${errorMessage}`);
     }
 }
 

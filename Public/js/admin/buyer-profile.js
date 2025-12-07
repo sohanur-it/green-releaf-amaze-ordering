@@ -221,7 +221,9 @@ document.addEventListener('DOMContentLoaded', () => {
         return `
             <td>${location.name || ''}</td>
             <td>${address}</td>
-            <td>${location.state_license || 'N/A'}</td>
+            <td>
+                <div><strong>Store ID:</strong> ${location.state_license || 'N/A'}</div>
+            </td>
             <td>${location.delivery_zone || ''}</td>
             <td><code>${location.access_code || ''}</code></td>
             <td class="table-actions">
@@ -234,6 +236,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     data-location-state="${location.state || ''}"
                     data-location-zip="${location.zip || ''}"
                     data-location-state_license="${location.state_license || ''}"
+                    data-location-metrc_license_number="${location.metrc_license_number || ''}"
                     data-location-delivery_zone="${location.delivery_zone || ''}">
                     Edit
                 </button>
@@ -530,6 +533,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 document.getElementById('locationState').value = target.dataset.locationState || '';
                 document.getElementById('locationZip').value = target.dataset.locationZip || '';
                 document.getElementById('locationLicense').value = target.dataset.locationState_license || '';
+                const metrcLicenseInput = document.getElementById('locationMetrcLicense');
+                if (metrcLicenseInput) {
+                    metrcLicenseInput.value = target.dataset.locationMetrcLicenseNumber || '';
+                }
                 document.getElementById('locationDeliveryZone').value = target.dataset.locationDelivery_zone || '';
                 
                 // Make all fields except delivery_zone read-only for fulfillment users
