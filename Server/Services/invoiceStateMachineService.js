@@ -44,19 +44,22 @@ class InvoiceStateMachineService {
      * Valid invoice state transitions as defined in Module 4 requirements
      */
     static VALID_TRANSITIONS = {
-        'Draft': ['Pending_Approval', 'Approved', 'Cancelled'],
-        'Pending_Approval': ['Approved', 'Cancelled'],
-        'Approved': ['Fulfillment_Accepted', 'Cancelled'],
-        'Fulfillment_Accepted': ['Fulfillment_Issue', 'Manifested', 'Partially_Manifested', 'Cancelled'],
+        'Draft': ['Pending_Approval', 'Approved', 'Cancelled', 'Voided'],
+        'Pending_Approval': ['Approved', 'Cancelled', 'Voided'],
+        'Approved': ['Fulfillment_Accepted', 'Cancelled', 'Voided'],
+        'Fulfillment_Accepted': ['Fulfillment_Issue', 'Manifested', 'Partially_Manifested', 'Cancelled', 'Voided'],
         'Fulfillment_Issue': ['Approved'], // sales fixes, re-submits
         'Partially_Manifested': ['Manifested', 'Fulfillment_Issue'],
-        'Manifested': ['Shipped', 'Fulfillment_Issue'],
+        'Manifested': ['Shipped', 'Fulfillment_Issue', 'Manifest_Voided'],
+        'Partially_Voided': ['Fulfillment_Accepted', 'Manifested', 'Fulfillment_Issue'], // Can rescan after partial void
+        'Manifest_Voided': ['Fulfillment_Accepted', 'Approved'], // Can rescan after manifest voided
         'Shipped': ['Delivered', 'Cancelled_After_Ship'],
         'Delivered': ['Partially_Rejected', 'Fully_Rejected', 'Issue_After_Shipped', 'Paid'],
         'Partially_Rejected': ['Paid'],
         'Fully_Rejected': [], // terminal state
         'Issue_After_Shipped': ['Paid'],
         'Cancelled': [], // terminal
+        'Voided': [], // terminal - invoice voided
         'Cancelled_After_Ship': [], // terminal (needs inventory recovery check)
         'Paid': [] // terminal
     };

@@ -344,6 +344,14 @@
     width: 90%;
     box-shadow: 0 10px 25px rgba(0,0,0,0.2);
     color: var(--text-color);
+    position: relative;
+    z-index: 1001;
+}
+
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    10%, 30%, 50%, 70%, 90% { transform: translateX(-10px); }
+    20%, 40%, 60%, 80% { transform: translateX(10px); }
 }
 
 .dark-theme .rejection-alert-content {
@@ -589,11 +597,8 @@
             </p>
         </div>
         <div class="alert-actions" style="margin-top: 1.5rem;">
-            <button class="btn-verify" onclick="acknowledgePackageRemoval()" style="background: #f59e0b; border-color: #f59e0b;">
+            <button class="btn-verify" onclick="acknowledgePackageRemoval()" style="background: #f59e0b; border-color: #f59e0b; width: 100%;">
                 <i class="fas fa-check-circle"></i> I Have Removed This Package
-            </button>
-            <button class="btn-skip" onclick="cancelPackageRemoval()">
-                <i class="fas fa-times"></i> Cancel
             </button>
         </div>
     </div>

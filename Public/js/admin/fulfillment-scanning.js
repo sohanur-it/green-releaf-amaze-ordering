@@ -503,6 +503,7 @@ function skipRejectedPackage() {
 
 /**
  * Show package removal confirmation modal
+ * This modal cannot be dismissed - user must acknowledge removal
  */
 function showPackageRemovalConfirmation(alert, packageLabel) {
     window.currentPackageLabel = packageLabel;
@@ -521,6 +522,49 @@ function showPackageRemovalConfirmation(alert, packageLabel) {
     `;
 
     modal.classList.add('active');
+    
+    // Prevent closing modal by clicking outside (on backdrop)
+    // Store the handler so we can check if modal is still active
+    const backdropClickHandler = function(e) {
+        // Only prevent if clicking the backdrop itself, not the content
+        if (e.target === modal && modal.classList.contains('active')) {
+            e.preventDefault();
+            e.stopPropagation();
+            // Show visual feedback that clicking outside doesn't work
+            const content = modal.querySelector('.rejection-alert-content');
+            if (content) {
+                content.style.animation = 'shake 0.5s';
+                setTimeout(() => {
+                    content.style.animation = '';
+                }, 500);
+            }
+        }
+    };
+    
+    // Remove any existing handler first
+    modal.removeEventListener('click', window.packageRemovalBackdropHandler);
+    window.packageRemovalBackdropHandler = backdropClickHandler;
+    modal.addEventListener('click', backdropClickHandler);
+    
+    // Prevent closing modal with ESC key
+    const escHandler = function(e) {
+        if (e.key === 'Escape' && modal.classList.contains('active')) {
+            e.preventDefault();
+            e.stopPropagation();
+            // Show visual feedback that ESC doesn't work
+            const content = modal.querySelector('.rejection-alert-content');
+            if (content) {
+                content.style.animation = 'shake 0.5s';
+                setTimeout(() => {
+                    content.style.animation = '';
+                }, 500);
+            }
+        }
+    };
+    
+    // Store handler so we can remove it later
+    window.packageRemovalEscHandler = escHandler;
+    document.addEventListener('keydown', escHandler);
 }
 
 /**
@@ -554,7 +598,21 @@ async function acknowledgePackageRemoval() {
         }
 
         // Close modal and continue scanning
-        document.getElementById('package-removal-modal').classList.remove('active');
+        const modal = document.getElementById('package-removal-modal');
+        modal.classList.remove('active');
+        
+        // Remove ESC key handler
+        if (window.packageRemovalEscHandler) {
+            document.removeEventListener('keydown', window.packageRemovalEscHandler);
+            window.packageRemovalEscHandler = null;
+        }
+        
+        // Remove backdrop click handler
+        if (window.packageRemovalBackdropHandler) {
+            modal.removeEventListener('click', window.packageRemovalBackdropHandler);
+            window.packageRemovalBackdropHandler = null;
+        }
+        
         showScannerStatus('info', `Package ${window.currentPackageLabel} removal acknowledged. Please continue scanning.`);
         window.currentPackageLabel = null;
         window.packageRemovalAlert = null;
@@ -591,7 +649,7 @@ async function removePackage(lineItemId, packageLabel) {
     }
 
     try {
-        const response = await fetch('/api/v1/admin/fulfillment/sessions/remove-package', {
+        const response = await fetch('/api/v1/fulfillment/admin/sessions/remove-package', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -628,7 +686,7 @@ async function editPackage(lineItemId, oldPackageLabel) {
     }
 
     try {
-        const response = await fetch('/api/v1/admin/fulfillment/sessions/edit-package', {
+        const response = await fetch('/api/v1/fulfillment/admin/sessions/edit-package', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

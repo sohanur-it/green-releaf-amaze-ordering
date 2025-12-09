@@ -61,7 +61,7 @@ class FulfillmentQueueService {
             LEFT JOIN "ORDERS-invoice-line-items" li ON i.id = li.fk_invoice_id
             LEFT JOIN users u ON i.fulfillment_accepted_by = u.id
             
-            WHERE i.status IN ('Approved', 'Fulfillment_Accepted', 'Fulfillment_Issue')
+            WHERE i.status IN ('Approved', 'Fulfillment_Accepted', 'Fulfillment_Issue', 'Manifest_Voided', 'Partially_Voided')
         `;
 
         const params = [];
@@ -124,7 +124,7 @@ class FulfillmentQueueService {
             LEFT JOIN "ORDERS-buyer_locations" bl ON i.fk_location_id = bl.entry_id
             LEFT JOIN "ORDERS-invoice-line-items" li ON i.id = li.fk_invoice_id
             LEFT JOIN users u ON i.fulfillment_accepted_by = u.id
-            WHERE i.status IN ('Approved', 'Fulfillment_Accepted', 'Fulfillment_Issue')
+            WHERE i.status IN ('Approved', 'Fulfillment_Accepted', 'Fulfillment_Issue', 'Manifest_Voided', 'Partially_Voided')
         `;
 
         // Apply same filters to count query
@@ -227,9 +227,9 @@ class FulfillmentQueueService {
             SELECT 
                 COUNT(*) FILTER (WHERE i.status = 'Approved') as pending,
                 COUNT(*) FILTER (WHERE i.status = 'Fulfillment_Accepted') as in_progress,
-                COUNT(*) FILTER (WHERE i.status = 'Fulfillment_Issue') as issues
+                COUNT(*) FILTER (WHERE i.status IN ('Fulfillment_Issue', 'Manifest_Voided', 'Partially_Voided')) as issues
             FROM "ORDERS-invoices" i
-            WHERE i.status IN ('Approved', 'Fulfillment_Accepted', 'Fulfillment_Issue')
+            WHERE i.status IN ('Approved', 'Fulfillment_Accepted', 'Fulfillment_Issue', 'Manifest_Voided', 'Partially_Voided')
         `;
 
         const params = [];
@@ -271,9 +271,10 @@ class FulfillmentQueueService {
 
             const inv = invoice.rows[0];
 
-            // Validate status
-            if (inv.status !== 'Approved') {
-                throw new Error(`Cannot claim order with status: ${inv.status}`);
+            // Validate status - can claim Approved, Manifest_Voided, or Partially_Voided invoices
+            const claimableStatuses = ['Approved', 'Manifest_Voided', 'Partially_Voided'];
+            if (!claimableStatuses.includes(inv.status)) {
+                throw new Error(`Cannot claim order with status: ${inv.status}. Only Approved, Manifest_Voided, or Partially_Voided orders can be claimed.`);
             }
 
             // Check if already claimed

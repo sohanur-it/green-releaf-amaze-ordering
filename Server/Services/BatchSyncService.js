@@ -1455,9 +1455,30 @@ class BatchSyncService {
 
     /**
      * Close database connections
+     * Adds timeout to prevent hanging if connections are stuck
      */
     async close() {
-        await this.pool.end();
+        try {
+            // Set a timeout for pool closing to prevent indefinite hangs
+            await Promise.race([
+                this.pool.end(),
+                new Promise((_, reject) => 
+                    setTimeout(() => reject(new Error('Pool close timeout after 10 seconds')), 10000)
+                )
+            ]);
+            console.log('✅ BatchSyncService pool closed successfully');
+        } catch (error) {
+            if (error.message.includes('timeout')) {
+                console.warn('⚠️ Pool close timed out - forcing close');
+                // Force close by removing all idle connections
+                this.pool.end().catch(() => {
+                    // Ignore errors on forced close
+                });
+            } else {
+                console.warn('⚠️ Error closing BatchSyncService pool:', error.message);
+                throw error;
+            }
+        }
     }
 }
 

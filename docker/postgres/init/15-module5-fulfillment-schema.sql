@@ -8,6 +8,8 @@
 
 DO $$ BEGIN
     ALTER TYPE invoice_status ADD VALUE IF NOT EXISTS 'Partially_Voided';
+    ALTER TYPE invoice_status ADD VALUE IF NOT EXISTS 'Manifest_Voided';
+    ALTER TYPE invoice_status ADD VALUE IF NOT EXISTS 'Voided';
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
@@ -358,6 +360,7 @@ COMMENT ON TABLE "ORDERS-rejected_packages" IS
 
 DO $$ BEGIN
     ALTER TYPE modification_type ADD VALUE IF NOT EXISTS 'package_scanned';
+    ALTER TYPE modification_type ADD VALUE IF NOT EXISTS 'package_removed';
     ALTER TYPE modification_type ADD VALUE IF NOT EXISTS 'scanning_cancelled';
     ALTER TYPE modification_type ADD VALUE IF NOT EXISTS 'manifests_created';
     ALTER TYPE modification_type ADD VALUE IF NOT EXISTS 'manifest_voided';

@@ -584,19 +584,20 @@ async function confirmLink() {
                     <p>${data.message || 'METRC items have been linked to this master product'}</p>
                     <div class="success-details">
                         <div><strong>Items Linked:</strong> ${linkedItemsList.length}</div>
-                        <div><strong>Batches Updated:</strong> ${data.batches_updated || 0}</div>
+                        <div><strong>Batches Linked:</strong> ${data.batches_linked || data.batches_updated || 0}</div>
+                        ${data.batches_with_warnings > 0 ? `<div class="text-warning"><strong>Batches with Warnings:</strong> ${data.batches_with_warnings}</div>` : ''}
                     </div>
-                    <p class="text-muted mt-3">Redirecting to products page...</p>
+                    <p class="text-muted mt-3">Redirecting to product details page...</p>
                 </div>
             `;
             
             // Hide footer buttons
             document.querySelector('.modal-footer').style.display = 'none';
             
-            // Redirect after 2 seconds
+            // Redirect to product details page to see batches immediately
             setTimeout(() => {
-                window.location.href = '/admin/products';
-            }, 2000);
+                window.location.href = `/admin/products/${productId}`;
+            }, 1500);
         } else {
             modalBody.innerHTML = `
                 <div class="error-message">

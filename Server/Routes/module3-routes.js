@@ -384,15 +384,14 @@ router.post('/products/master/:id/link-items/confirm', async (req, res) => {
             WHERE b.metrc_item_name = ANY($1)
         `, [metrc_item_names]);
         
-        // Separate valid and invalid batches
-        const validBatches = [];
-        const invalidBatches = [];
+        // Separate batches with warnings (missing source packages) but link ALL batches
+        const allBatchIds = batchesToLink.rows.map(b => b.id);
+        const batchesWithWarnings = [];
         
         for (const batch of batchesToLink.rows) {
-            if (batch.source_package_exists && batch.existing_package_count > 0) {
-                validBatches.push(batch.id);
-            } else {
-                invalidBatches.push({
+            // Check if batch has source package issues (for warning only, not blocking)
+            if (!batch.source_package_exists || batch.existing_package_count === 0) {
+                batchesWithWarnings.push({
                     id: batch.id,
                     batch_name: batch.batch_name,
                     metrc_item_name: batch.metrc_item_name,
@@ -404,22 +403,22 @@ router.post('/products/master/:id/link-items/confirm', async (req, res) => {
             }
         }
         
-        // Warn about invalid batches but don't fail - allow linking valid ones
-        if (invalidBatches.length > 0) {
-            console.warn(`⚠️  WARNING: ${invalidBatches.length} batch(es) have invalid/missing source packages:`);
-            invalidBatches.forEach(b => {
+        // Warn about batches with missing source packages but still link them
+        if (batchesWithWarnings.length > 0) {
+            console.warn(`⚠️  WARNING: ${batchesWithWarnings.length} batch(es) have invalid/missing source packages (will still be linked):`);
+            batchesWithWarnings.forEach(b => {
                 console.warn(`   - Batch ${b.id} (${b.batch_name}): ${b.reason}`);
             });
             
-            // Log invalid batches to audit log
+            // Log warning to audit log
             await auditLogger.logAction({
                 userId: userId,
                 action: 'batch_validation_warning',
                 resourceType: 'Master Product',
                 resourceId: productId.toString(),
                 details: {
-                    message: `${invalidBatches.length} batch(es) have invalid/missing source packages and were NOT linked`,
-                    invalid_batches: invalidBatches,
+                    message: `${batchesWithWarnings.length} batch(es) have invalid/missing source packages but were still linked`,
+                    batches_with_warnings: batchesWithWarnings,
                     product_name: productName
                 },
                 status: 'warning',
@@ -427,17 +426,17 @@ router.post('/products/master/:id/link-items/confirm', async (req, res) => {
             });
         }
         
-        // Only link batches with valid source packages
+        // Link ALL batches that match the METRC item names (immediate linking)
         let result;
-        if (validBatches.length > 0) {
+        if (allBatchIds.length > 0) {
             result = await client.query(`
                 UPDATE "ORDERS-batches"
                 SET fk_master_product_id = $1
                 WHERE id = ANY($2)
-                RETURNING id, batch_name, metrc_item_name
-            `, [productId, validBatches]);
+                RETURNING id, batch_name, metrc_item_name, status
+            `, [productId, allBatchIds]);
         } else {
-            // No valid batches to link
+            // No batches found to link
             result = { rows: [], rowCount: 0 };
         }
 
@@ -473,20 +472,23 @@ router.post('/products/master/:id/link-items/confirm', async (req, res) => {
 
         // Build response message
         let message = `Successfully linked ${metrc_item_names.length} METRC items to ${productName}`;
-        if (validBatches.length > 0) {
-            message += ` (${validBatches.length} valid batch(es) linked)`;
+        if (result.rowCount > 0) {
+            message += ` (${result.rowCount} batch(es) linked immediately)`;
+        } else {
+            message += `. No existing batches found - batches will appear after the next sync.`;
         }
-        if (invalidBatches.length > 0) {
-            message += `. WARNING: ${invalidBatches.length} batch(es) were NOT linked due to missing source packages.`;
+        if (batchesWithWarnings.length > 0) {
+            message += ` Note: ${batchesWithWarnings.length} batch(es) have missing source packages but were still linked.`;
         }
         
         res.json({
             success: true,
             batches_updated: result.rowCount,
-            batches_valid: validBatches.length,
-            batches_invalid: invalidBatches.length,
-            invalid_batches: invalidBatches.length > 0 ? invalidBatches : undefined,
-            message: message
+            batches_linked: result.rowCount,
+            batches_with_warnings: batchesWithWarnings.length,
+            batches_with_warnings_details: batchesWithWarnings.length > 0 ? batchesWithWarnings : undefined,
+            message: message,
+            product_id: productId  // Include product ID for redirect
         });
 
     } catch (error) {
@@ -2137,11 +2139,10 @@ router.post('/admin/sync/batches', async (req, res) => {
         });
         
         const result = await Promise.race([syncPromise, timeoutPromise]);
-        await batchSyncService.close();
         
         const duration = Date.now() - startTime;
         
-        // Update sync history on success
+        // Update sync history on success (before closing connections)
         if (historyId && client) {
             try {
                 const scriptOutput = `Batch sync completed: ${result.changes.new} new, ${result.changes.updated} updated, ${result.changes.removed} removed, ${result.changes.packageChanges} package changes`;
@@ -2155,7 +2156,7 @@ router.post('/admin/sync/batches', async (req, res) => {
             }
         }
         
-        // Record success
+        // Record success (before closing connections)
         try {
             await syncFailureTracker.recordSuccess('sync-batches', licenseNumber);
         } catch (trackError) {
@@ -2163,11 +2164,27 @@ router.post('/admin/sync/batches', async (req, res) => {
         }
 
         console.log('✅ Batch sync completed successfully via API');
+        
+        // Send response BEFORE closing pool (non-blocking)
         res.json({
             success: true,
             duration_ms: duration,
             changes: result.changes
         });
+        
+        // Close pool asynchronously after response is sent (with timeout)
+        setTimeout(async () => {
+            try {
+                await Promise.race([
+                    batchSyncService.close(),
+                    new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Pool close timeout')), 10000)
+                    )
+                ]);
+            } catch (closeError) {
+                console.warn('⚠️ Error closing batch sync pool (non-critical):', closeError.message);
+            }
+        }, 100);
 
     } catch (error) {
         const duration = Date.now() - startTime;
@@ -2203,11 +2220,8 @@ router.post('/admin/sync/batches', async (req, res) => {
         if (client) {
             client.release();
         }
-        try {
-            await batchSyncService.close();
-        } catch (closeError) {
-            // Ignore close errors
-        }
+        // Don't close batchSyncService here - it's closed asynchronously after response
+        // Closing here would block the response and cause freezing
     }
 });
 

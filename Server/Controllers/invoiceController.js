@@ -1161,7 +1161,9 @@ class InvoiceController {
                     b.allocated_quantity,
                     (b.quantity - b.allocated_quantity) as available_quantity,
                     COALESCE(b.override_price, p.default_price, 0) as unit_price,
-                    b.status
+                    b.status,
+                    b.partial_package_count,
+                    b.partial_package_details
                 FROM "ORDERS-batches" b
                 INNER JOIN "ORDERS-products" p ON b.fk_master_product_id = p.entry_id
                 WHERE b.fk_master_product_id = $1
@@ -2435,13 +2437,13 @@ class InvoiceController {
                 });
             }
 
-            // Transition to Cancelled (void)
+            // Transition to Voided status (not Cancelled, to distinguish from cancellation)
             const invoiceStateMachine = require('../Services/invoiceStateMachineService');
             
             // Add timeout wrapper
             const transitionPromise = invoiceStateMachine.transitionTo(
                 id,
-                'Cancelled',
+                'Voided',
                 userId,
                 `Invoice voided: ${reason.trim()}`
             );

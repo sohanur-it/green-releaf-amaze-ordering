@@ -165,7 +165,7 @@ class ManifestVoidingService {
 
                     // PHASE 2: ACTUAL VOID (submit=true)
                     console.log(`[Void] Submitting void to METRC for ${manifest.number} (submit=true)...`);
-                    const voidResult = await this.voidManifestInMetrc(manifest.id, manifest.license);
+                    const voidResult = await this.voidManifestInMetrc(manifest.id, manifest.license, manifest.number);
                     
                     if (!voidResult.success) {
                         throw new Error(`Void failed: ${voidResult.error}`);
@@ -218,8 +218,8 @@ class ManifestVoidingService {
 
             let newStatus = inv.status;
             if (remainingManifests.length === 0) {
-                // All manifests voided
-                newStatus = 'Fulfillment_Issue';
+                // All manifests voided - set to Manifest_Voided so it can be rescanned
+                newStatus = 'Manifest_Voided';
             } else if (voidedManifests.length > 0 && remainingManifests.length > 0) {
                 // Partial void
                 newStatus = 'Partially_Voided';
@@ -332,7 +332,7 @@ class ManifestVoidingService {
                 failed_manifests: failedManifests.map(f => f.manifest.number),
                 all_voided: remainingManifests.length === 0,
                 message: remainingManifests.length === 0
-                    ? `All ${voidedManifests.length} manifest(s) voided. Order returned to Fulfillment Issue state.`
+                    ? `All ${voidedManifests.length} manifest(s) voided. Order status set to Manifest_Voided - ready to rescan.`
                     : `Partial void: ${voidedManifests.length} manifest(s) voided, ${remainingManifests.length} remaining.`
             };
 
@@ -612,16 +612,17 @@ class ManifestVoidingService {
      * POST /transfers/void?licenseNumber=LIC-00001&submit=true
      * Payload: {"id":12345}
      * Includes retry logic for 504 Gateway Timeout errors
+     * After timeout, verifies if void actually succeeded by checking manifest status
      */
-    async voidManifestInMetrc(manifestMetrcId, license) {
+    async voidManifestInMetrc(manifestMetrcId, license, manifestNumber = null) {
         const maxRetries = 3;
-        const baseDelay = 2000; // 2 seconds base delay
+        const baseDelay = 3000; // 3 seconds base delay (increased from 2s)
         
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 const shouldSubmit = getMetrcSubmitValue();
                 
-                console.log(`[Void] Voiding manifest ${manifestMetrcId} in METRC (submit=${shouldSubmit}, attempt ${attempt}/${maxRetries})...`);
+                console.log(`[Void] Voiding manifest ${manifestMetrcId}${manifestNumber ? ` (${manifestNumber})` : ''} in METRC (submit=${shouldSubmit}, attempt ${attempt}/${maxRetries})...`);
                 
                 const response = await metrcAuth.makeAuthenticatedRequest({
                     method: 'POST',
@@ -633,7 +634,7 @@ class ManifestVoidingService {
                     data: {
                         id: parseInt(manifestMetrcId, 10)
                     },
-                    timeout: 60000  // 60 seconds - same as manifest creation
+                    timeout: 90000  // 90 seconds - increased from 60s for slow METRC responses
                 });
 
                 console.log(`[Void] ✓ Successfully voided manifest in METRC`);
@@ -648,9 +649,29 @@ class ManifestVoidingService {
                                  error.message?.includes('504') ||
                                  (error.response?.data && typeof error.response.data === 'string' && error.response.data.includes('504'));
                 
+                // If timeout and we have manifest number, verify if void actually succeeded
+                if (isTimeout && manifestNumber) {
+                    console.log(`[Void] ⚠️ Timeout occurred - verifying if void actually succeeded for manifest ${manifestNumber}...`);
+                    try {
+                        const manifestStatusService = require('./manifestStatusService');
+                        // Wait a bit for METRC to process
+                        await new Promise(resolve => setTimeout(resolve, 3000));
+                        const statusCheck = await manifestStatusService.checkManifestStatus(manifestNumber, license);
+                        
+                        if (statusCheck && statusCheck.status === 'voided') {
+                            console.log(`[Void] ✓ Manifest ${manifestNumber} was successfully voided (verified after timeout)`);
+                            return { success: true, data: { verified: true, message: 'Void succeeded but response timed out' } };
+                        } else {
+                            console.log(`[Void] ⚠️ Manifest ${manifestNumber} status: ${statusCheck?.status || 'unknown'} - void may not have succeeded`);
+                        }
+                    } catch (verifyError) {
+                        console.warn(`[Void] ⚠️ Could not verify void status: ${verifyError.message}`);
+                    }
+                }
+                
                 if (isTimeout && attempt < maxRetries) {
-                    // Calculate exponential backoff delay with jitter
-                    const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 1000;
+                    // Calculate exponential backoff delay with jitter (longer delays)
+                    const delay = baseDelay * Math.pow(2, attempt - 1) + Math.random() * 2000;
                     console.log(`[Void] ⚠️ Gateway timeout (504), retrying in ${Math.round(delay)}ms...`);
                     await new Promise(resolve => setTimeout(resolve, delay));
                     continue; // Retry
@@ -667,9 +688,13 @@ class ManifestVoidingService {
                     const isHtmlError = typeof data === 'string' && data.includes('<!DOCTYPE html>');
                     
                     if (status === 504 || status === 408) {
+                        // If we have manifest number, suggest checking status manually
+                        const suggestion = manifestNumber 
+                            ? ` Note: The void request may have succeeded despite the timeout. Check manifest ${manifestNumber} status manually.`
+                            : '';
                         return { 
                             success: false, 
-                            error: `METRC API gateway timeout (${status}). The server took too long to respond. Please try again in a few moments.` 
+                            error: `METRC API gateway timeout (${status}). The server took too long to respond. Please try again in a few moments.${suggestion}` 
                         };
                     }
                     if (status === 400) {

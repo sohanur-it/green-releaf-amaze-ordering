@@ -114,6 +114,10 @@ async function loadDeliveryZones() {
  */
 async function loadQueue() {
     const queueList = document.getElementById('queue-list');
+    
+    // Save scroll position before clearing content
+    const scrollPosition = window.scrollY || document.documentElement.scrollTop;
+    
     queueList.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i><p>Loading queue...</p></div>';
 
     try {
@@ -140,6 +144,12 @@ async function loadQueue() {
         }
         updatePagination(data.pagination);
 
+        // Restore scroll position after content is rendered
+        // Use requestAnimationFrame to ensure DOM has updated
+        requestAnimationFrame(() => {
+            window.scrollTo(0, scrollPosition);
+        });
+
     } catch (error) {
         console.error('Error loading queue:', error);
         queueList.innerHTML = `
@@ -149,6 +159,11 @@ async function loadQueue() {
                 <p>${error.message}</p>
             </div>
         `;
+        
+        // Restore scroll position even on error
+        requestAnimationFrame(() => {
+            window.scrollTo(0, scrollPosition);
+        });
     }
 }
 
@@ -170,12 +185,29 @@ function renderQueue(orders) {
     }
 
     queueList.innerHTML = orders.map(order => {
-        const statusClass = order.status === 'Approved' ? 'available' : 
-                          order.status === 'Fulfillment_Accepted' ? 'claimed' : 'issue';
-        const statusText = order.status === 'Approved' ? 'Available' :
-                          order.status === 'Fulfillment_Accepted' ? 'In Progress' : 'Issue';
+        // Determine status class and text
+        let statusClass = 'issue';
+        let statusText = 'Issue';
         
-        const canClaim = order.status === 'Approved' && !order.fulfillment_accepted_by;
+        if (order.status === 'Approved') {
+            statusClass = 'available';
+            statusText = 'Available';
+        } else if (order.status === 'Fulfillment_Accepted') {
+            statusClass = 'claimed';
+            statusText = 'In Progress';
+        } else if (order.status === 'Manifest_Voided') {
+            statusClass = 'issue';
+            statusText = 'Manifest Voided - Ready to Rescan';
+        } else if (order.status === 'Partially_Voided') {
+            statusClass = 'issue';
+            statusText = 'Partially Voided';
+        } else if (order.status === 'Fulfillment_Issue') {
+            statusClass = 'issue';
+            statusText = 'Issue';
+        }
+        
+        // Can claim if: Approved, Manifest_Voided, or Partially_Voided (and not already assigned)
+        const canClaim = (order.status === 'Approved' || order.status === 'Manifest_Voided' || order.status === 'Partially_Voided') && !order.fulfillment_accepted_by;
         const isAssignedToMe = order.fulfillment_accepted_by === window.currentUserId;
         const isSalesUserReadOnly = window.isSalesUser && !window.isFulfillmentUser;
 
@@ -229,8 +261,8 @@ function renderQueue(orders) {
                         </button>
                     ` : ''}
                     ${!isSalesUserReadOnly && isAssignedToMe ? `
-                        <button class="btn-view" onclick="startScanning(${order.id})" ${order.status === 'Fulfillment_Issue' ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''} title="${order.status === 'Fulfillment_Issue' ? 'Cannot start scanning - invoice has an issue' : ''}">
-                            <i class="fas fa-barcode"></i> Start Scanning
+                        <button class="btn-view" onclick="startScanning(${order.id})" ${order.status === 'Fulfillment_Issue' ? 'disabled style="opacity: 0.5; cursor: not-allowed;"' : ''} title="${order.status === 'Fulfillment_Issue' ? 'Cannot start scanning - invoice has an issue' : (order.status === 'Manifest_Voided' ? 'Manifest was voided - ready to rescan' : (order.status === 'Partially_Voided' ? 'Partially voided - ready to rescan' : ''))}">
+                            <i class="fas fa-barcode"></i> ${order.status === 'Manifest_Voided' ? 'Rescan' : 'Start Scanning'}
                         </button>
                         <button class="btn-view" style="background: #ef4444;" onclick="releaseOrder(${order.id})">
                             <i class="fas fa-undo"></i> Release
@@ -276,7 +308,7 @@ function updateStats(data) {
         const orders = Array.isArray(data) ? data : [];
         pending = orders.filter(o => o.status === 'Approved').length;
         inProgress = orders.filter(o => o.status === 'Fulfillment_Accepted').length;
-        issues = orders.filter(o => o.status === 'Fulfillment_Issue').length;
+        issues = orders.filter(o => ['Fulfillment_Issue', 'Manifest_Voided', 'Partially_Voided'].includes(o.status)).length;
     }
 
     document.getElementById('stat-pending').textContent = pending;

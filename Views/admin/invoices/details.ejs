@@ -81,7 +81,12 @@
 .status-pending_approval { background: #fff3e0; color: #e65100; }
 .status-approved { background: #e8f5e9; color: #2e7d32; }
 .status-fulfillment_accepted { background: #f3e5f5; color: #7b1fa2; }
+.status-fulfillment_issue { background: #fff3e0; color: #e65100; }
 .status-manifested { background: #e0f2f1; color: #00695c; }
+.status-partially_manifested { background: #fff9c4; color: #f57f17; }
+.status-partially_voided { background: #ffebee; color: #c62828; }
+.status-manifest_voided { background: #ffebee; color: #c62828; }
+.status-voided { background: #424242; color: white; }
 .status-shipped { background: #e8eaf6; color: #283593; }
 .status-delivered { background: #c8e6c9; color: #1b5e20; }
 .status-paid { background: #4caf50; color: white; }
@@ -295,7 +300,7 @@
             <% 
             // Show void button for statuses before shipping (only for Sales Admin or Sales Rep)
             const canVoid = (isSalesAdmin || isSalesRep || isAdmin) && 
-                           ['Draft', 'Pending_Approval', 'Approved', 'Fulfillment_Accepted', 'Fulfillment_Issue', 'Partially_Manifested', 'Manifested'].includes(invoice.status) &&
+                           ['Draft', 'Pending_Approval', 'Approved', 'Fulfillment_Accepted', 'Fulfillment_Issue', 'Partially_Manifested', 'Manifested', 'Manifest_Voided', 'Partially_Voided'].includes(invoice.status) &&
                            !invoice.shipped_at;
             %>
             <% if (canVoid) { %>
@@ -518,10 +523,10 @@
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
         <h3 style="color: var(--text-color); margin: 0;">Line Items</h3>
         <% 
-        // Allow editing if invoice is in Draft, Pending_Approval, Approved (before fulfillment starts), or Fulfillment_Issue status
+        // Allow editing if invoice is in Draft, Pending_Approval, Approved (before fulfillment starts), Fulfillment_Issue, Manifest_Voided, or Partially_Voided status
         // Note: Backend will enforce that fulfillment hasn't started scanning
         // Fulfillment users have read-only access
-        const canEdit = !isFulfillmentUser && (invoice.status === 'Draft' || invoice.status === 'Pending_Approval' || invoice.status === 'Approved' || invoice.status === 'Fulfillment_Issue');
+        const canEdit = !isFulfillmentUser && (invoice.status === 'Draft' || invoice.status === 'Pending_Approval' || invoice.status === 'Approved' || invoice.status === 'Fulfillment_Issue' || invoice.status === 'Manifest_Voided' || invoice.status === 'Partially_Voided');
         %>
         <% if (canEdit && (isSalesAdmin || isSalesRep || isAdmin)) { %>
             <button onclick="toggleEditMode()" id="edit-line-items-btn" class="btn btn-primary" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; cursor: pointer;">
@@ -618,8 +623,8 @@
             </div>
         </div>
         
-        <!-- Kick Back to Fulfillment Button - Always visible when invoice is in Fulfillment_Issue status -->
-        <% if (invoice.status === 'Fulfillment_Issue' && !isFulfillmentUser) { %>
+        <!-- Kick Back to Fulfillment Button - Visible when invoice is in Fulfillment_Issue, Manifest_Voided, or Partially_Voided status -->
+        <% if ((invoice.status === 'Fulfillment_Issue' || invoice.status === 'Manifest_Voided' || invoice.status === 'Partially_Voided') && !isFulfillmentUser) { %>
         <div class="fulfillment-issue-alert" style="margin-top: 1.5rem; padding: 1rem; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; border-left: 4px solid #f59e0b;">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
                 <div style="flex: 1; min-width: 250px;">
