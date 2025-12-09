@@ -134,10 +134,14 @@ class ManifestVoidingService {
                     if (!statusCheck || !statusCheck.status) {
                         console.warn(`[Void] ⚠️ Could not determine manifest status for ${manifest.number}, proceeding with caution`);
                         // Don't block voiding if we can't determine status - let METRC API handle it
-                    } else if (statusCheck.status !== 'active') {
-                        throw new Error(`Cannot void manifest ${manifest.number}: Manifest is ${statusCheck.status || 'unknown'}. Only active manifests (not yet shipped) can be voided.`);
-                    } else {
+                    } else if (statusCheck.status === 'voided') {
+                        throw new Error(`Cannot void manifest ${manifest.number}: Manifest is already voided.`);
+                    } else if (statusCheck.status === 'active') {
                         console.log(`[Void] ✓ Manifest ${manifest.number} is active - can be voided`);
+                    } else if (statusCheck.status === 'accepted') {
+                        console.log(`[Void] ⚠️ Manifest ${manifest.number} is accepted - attempting to void (METRC will validate if allowed)`);
+                    } else {
+                        console.warn(`[Void] ⚠️ Manifest ${manifest.number} status is ${statusCheck.status} - attempting to void (METRC will validate if allowed)`);
                     }
 
                     // Check if we should submit (true) or dry run (false)
@@ -145,11 +149,11 @@ class ManifestVoidingService {
                     
                     if (!shouldSubmit) {
                         console.log(`[Void] ⚠️ DRY RUN MODE: METRC_SUBMIT_TRANSFERS=false, validating only...`);
-                        // Just validate that manifest can be voided
-                        if (statusCheck.status !== 'active') {
-                            throw new Error(`Cannot void manifest: Manifest is ${statusCheck.status}. Only active manifests can be voided.`);
+                        // Just validate that manifest is not already voided
+                        if (statusCheck && statusCheck.status === 'voided') {
+                            throw new Error(`Cannot void manifest: Manifest is already voided.`);
                         }
-                        console.log(`[Void] ✓ Dry run validation passed (manifest is active)`);
+                        console.log(`[Void] ✓ Dry run validation passed (manifest status: ${statusCheck?.status || 'unknown'})`);
                         // In dry run mode, don't actually void, just return success
                         voidedManifests.push({
                             manifestNumber: manifest.number,

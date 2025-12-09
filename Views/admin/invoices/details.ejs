@@ -1829,15 +1829,24 @@ async function voidManifest(manifestNumber, invoiceId) {
             }
         }
         
-        if (manifestStatus && manifestStatus !== 'active') {
-            alert(`Cannot void manifest: Manifest is ${manifestStatus}. Only active manifests (not yet shipped) can be voided.`);
+        // Only block if manifest is already voided
+        if (manifestStatus === 'voided') {
+            alert(`Cannot void manifest: Manifest is already voided.`);
             return;
+        }
+        
+        // Warn user if manifest is accepted (not active), but allow them to proceed
+        // METRC API will validate if the manifest can actually be voided
+        if (manifestStatus === 'accepted') {
+            if (!confirm(`Manifest is accepted (not active). METRC will validate if it can be voided. Do you want to proceed?`)) {
+                return;
+            }
         }
         
         // If status is still undefined, warn but allow proceeding (backend will validate)
         if (!manifestStatus) {
             console.warn('Could not determine manifest status from API response:', statusData);
-            if (!confirm('Could not verify manifest status. Do you want to proceed with voiding? (Only proceed if manifest has not shipped)')) {
+            if (!confirm('Could not verify manifest status. Do you want to proceed with voiding? METRC will validate if the manifest can be voided.')) {
                 return;
             }
         }
