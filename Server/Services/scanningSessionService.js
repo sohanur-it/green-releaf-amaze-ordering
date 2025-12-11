@@ -46,12 +46,25 @@ class ScanningSessionService {
 
             const inv = invoice.rows[0];
 
-            if (inv.status !== 'Fulfillment_Accepted') {
+            // Allow scanning for Fulfillment_Accepted, Fulfillment_Issue, and Manifest_Voided (allows rescanning)
+            const allowedStatuses = ['Fulfillment_Accepted', 'Fulfillment_Issue', 'Manifest_Voided'];
+            if (!allowedStatuses.includes(inv.status)) {
                 await client.query('ROLLBACK');
-                if (inv.status === 'Fulfillment_Issue') {
-                    throw new Error('Cannot start scanning - invoice has an active issue. Please resolve the issue first.');
+                throw new Error(`Cannot start scanning - invoice status is ${inv.status}. Allowed statuses: ${allowedStatuses.join(', ')}`);
+            }
+            
+            // If status is Manifest_Voided, check if sales has acknowledged the void
+            if (inv.status === 'Manifest_Voided') {
+                const voidCheck = await client.query(`
+                    SELECT sales_acknowledged_void, voided_at
+                    FROM "ORDERS-invoices"
+                    WHERE id = $1
+                `, [invoiceId]);
+                
+                if (voidCheck.rows.length > 0 && voidCheck.rows[0].voided_at && !voidCheck.rows[0].sales_acknowledged_void) {
+                    await client.query('ROLLBACK');
+                    throw new Error('Cannot start scanning - sales team must acknowledge the voided manifest before rescanning can begin. Please contact sales.');
                 }
-                throw new Error(`Cannot start scanning - invoice status is ${inv.status}`);
             }
 
             // Allow admins to scan even if not assigned, but regular workers must be assigned

@@ -29,7 +29,7 @@ class ManifestStatusTrackingService {
                     delivered_at,
                     inventory_finalized
                 FROM "ORDERS-invoices"
-                WHERE status IN ('Manifested', 'Shipped', 'Partially_Manifested')
+                WHERE status IN ('Manifested', 'Shipped', 'Partially_Manifested', 'Manifest_Voided', 'Partially_Voided')
                     AND manifest_metrc_ids IS NOT NULL
                     AND jsonb_array_length(manifest_metrc_ids::jsonb) > 0
                 ORDER BY manifest_created_at DESC
@@ -187,6 +187,68 @@ class ManifestStatusTrackingService {
                 if (!updates.inventory_finalized) {
                     await this.finalizeInventoryDeductions(invoiceId, client);
                     updates.inventory_finalized = true;
+                }
+            }
+
+            // Handle Voided manifests (detected from METRC)
+            const anyVoided = statusResults.some(r => r.status.status === 'Voided');
+            const allVoided = statusResults.every(r => r.status.status === 'Voided');
+            
+            if (anyVoided && ['Manifested', 'Shipped', 'Partially_Manifested'].includes(currentStatus)) {
+                // Check if manifest was voided in METRC (not through our system)
+                const invoice = await client.query(`
+                    SELECT status, sales_acknowledged_void, voided_at
+                    FROM "ORDERS-invoices"
+                    WHERE id = $1
+                `, [invoiceId]);
+                
+                if (invoice.rows.length > 0) {
+                    const inv = invoice.rows[0];
+                    
+                    // If not already voided in our system, mark as voided
+                    if (!inv.voided_at && inv.status !== 'Manifest_Voided' && inv.status !== 'Partially_Voided') {
+                        if (allVoided) {
+                            newStatus = 'Manifest_Voided';
+                        } else {
+                            newStatus = 'Partially_Voided';
+                        }
+                        
+                        // Set voided fields but don't set sales_acknowledged_void (requires sales acknowledgment)
+                        await client.query(`
+                            UPDATE "ORDERS-invoices"
+                            SET 
+                                status = $1,
+                                voided_at = NOW(),
+                                sales_acknowledged_void = false,
+                                sales_acknowledged_void_at = NULL,
+                                sales_acknowledged_void_by = NULL,
+                                voided_manifest_reason = CASE 
+                                    WHEN voided_manifest_reason IS NULL THEN 'Manifest voided in METRC (detected by sync)'
+                                    ELSE voided_manifest_reason
+                                END,
+                                status_updated_at = NOW()
+                            WHERE id = $2
+                        `, [newStatus, invoiceId]);
+                        
+                        // Clear assigned packages to allow rescanning
+                        await client.query(`
+                            UPDATE "ORDERS-invoice-line-items"
+                            SET 
+                                assigned_package_labels = NULL,
+                                quantity_fulfilled = 0
+                            WHERE fk_invoice_id = $1
+                        `, [invoiceId]);
+                        
+                        // Clear any active scanning sessions
+                        await client.query(`
+                            UPDATE "ORDERS-scanning-sessions"
+                            SET session_status = 'cancelled',
+                                cancelled_at = NOW()
+                            WHERE fk_invoice_id = $1 AND session_status = 'active'
+                        `, [invoiceId]);
+                        
+                        console.log(`[Status Sync] Detected voided manifest for invoice ${invoiceId} - requires sales acknowledgment`);
+                    }
                 }
             }
 

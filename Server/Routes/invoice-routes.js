@@ -288,6 +288,13 @@ router.post('/:id/fulfillment/issue', auth, auditMiddleware, invoiceController.r
 router.post('/:id/void', auth, requireRole('Sales Admin', 'Sales Representative', 'Administrator'), auditMiddleware, invoiceController.voidInvoice);
 
 /**
+ * Acknowledge voided manifest (sales team)
+ * POST /api/v1/invoices/:id/acknowledge-void
+ * Requires: Sales Admin, Sales Representative, or Administrator
+ */
+router.post('/:id/acknowledge-void', auth, requireRole('Sales Admin', 'Sales Representative', 'Administrator'), auditMiddleware, invoiceController.acknowledgeVoidedManifest);
+
+/**
  * Update invoice notes (customer and internal)
  * PATCH /api/v1/invoices/:id/notes
  */

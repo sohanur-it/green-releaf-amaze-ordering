@@ -359,6 +359,7 @@ body {
                             <th>Quantity</th>
                             <th>Allocated</th>
                             <th>Available</th>
+                            <th>Partials</th>
                             <th>THC %</th>
                             <th>Production Date</th>
                             <th>Actions</th>
@@ -382,6 +383,22 @@ body {
                                 <td><%= batch.allocated_quantity %></td>
                                 <td>
                                     <strong class="text-success"><%= batch.quantity - batch.allocated_quantity %></strong>
+                                </td>
+                                <td>
+                                    <% 
+                                        const partialCount = batch.partial_package_count || 0;
+                                        const partialList = (batch.partial_package_details && batch.partial_package_details.partial_packages) || [];
+                                        const partialTooltip = partialList.length
+                                            ? partialList.map(p => `${p.label}${p.quantity ? ' (Qty: ' + p.quantity + ')' : ''}`).join(', ')
+                                            : '';
+                                    %>
+                                    <% if (partialCount > 0) { %>
+                                        <span class="badge bg-warning text-dark" title="<%= partialTooltip %>">
+                                            <%= partialCount %> partial<%= partialCount > 1 ? 's' : '' %>
+                                        </span>
+                                    <% } else { %>
+                                        <span class="text-muted">0</span>
+                                    <% } %>
                                 </td>
                                 <td>
                                     <% if (batch.thc_percentage) { %>

@@ -576,6 +576,19 @@ async function confirmLink() {
         const data = await response.json();
         
         if (data.success) {
+            // After linking, immediately refresh batches for these METRC items so
+            // quantities/availability are up-to-date without waiting for the next sync.
+            try {
+                await fetch(`/api/v1/products/master/${productId}/refresh-batches`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ metrc_item_names: linkedItemsList })
+                });
+            } catch (refreshError) {
+                console.warn('Warning: Failed to refresh batches after linking items:', refreshError);
+                // Non-fatal – the scheduled sync will still correct quantities later
+            }
+
             // Show success message
             modalBody.innerHTML = `
                 <div class="success-message">

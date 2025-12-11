@@ -216,40 +216,42 @@ class ManifestVoidingService {
             const remainingNumbers = remainingManifests.map(m => m.number);
             const voidedNumbers = voidedManifests.map(m => m.number);
 
+            // Determine new status based on void results
             let newStatus = inv.status;
             if (remainingManifests.length === 0) {
-                // All manifests voided - set to Manifest_Voided so it can be rescanned
+                // All manifests voided - set to Manifest_Voided to allow rescanning
                 newStatus = 'Manifest_Voided';
             } else if (voidedManifests.length > 0 && remainingManifests.length > 0) {
                 // Partial void
                 newStatus = 'Partially_Voided';
             }
 
+            // Update manifest-related fields first (before status transition)
             await client.query(`
                 UPDATE "ORDERS-invoices"
                 SET 
-                    status = $1,
-                    metrc_manifest_numbers = $2::jsonb,
-                    manifest_metrc_ids = $3::jsonb,
+                    metrc_manifest_numbers = $1::jsonb,
+                    manifest_metrc_ids = $2::jsonb,
                     voided_manifest_number = CASE 
-                        WHEN voided_manifest_number IS NULL THEN $4
-                        ELSE voided_manifest_number || ', ' || $4
+                        WHEN voided_manifest_number IS NULL THEN $3
+                        ELSE voided_manifest_number || ', ' || $3
                     END,
-                    voided_manifest_reason = $5,
+                    voided_manifest_reason = $4,
                     voided_at = NOW(),
-                    voided_by = $6,
+                    voided_by = $5,
+                    sales_acknowledged_void = false,
+                    sales_acknowledged_void_at = NULL,
+                    sales_acknowledged_void_by = NULL,
                     fulfillment_issue_reported_at = CASE 
-                        WHEN $7 = true THEN NOW()
+                        WHEN $6 = true THEN NOW()
                         ELSE fulfillment_issue_reported_at
                     END,
                     fulfillment_issue_note = CASE 
-                        WHEN $7 = true THEN $8
+                        WHEN $6 = true THEN $7
                         ELSE fulfillment_issue_note
-                    END,
-                    status_updated_at = NOW()
-                WHERE id = $9
+                    END
+                WHERE id = $8
             `, [
-                newStatus,
                 JSON.stringify(remainingNumbers),
                 JSON.stringify(remainingManifests),
                 voidedNumbers.join(', '),
@@ -288,7 +290,7 @@ class ManifestVoidingService {
                 `, [userId, invoiceId, voidedManifest.number]);
             }
 
-            // Log void
+            // Log void to history
             await client.query(`
                 INSERT INTO "ORDERS-invoice-history" (
                     fk_invoice_id,
@@ -317,7 +319,32 @@ class ManifestVoidingService {
                 })
             ]);
 
+            // Commit the transaction before state machine transition
             await client.query('COMMIT');
+            
+            // Use state machine to transition status (ensures proper history, WebSocket, etc.)
+            // Do this AFTER committing the manifest updates so we have a clean state
+            if (newStatus !== inv.status) {
+                const invoiceStateMachine = require('./invoiceStateMachineService');
+                const transitionReason = remainingManifests.length === 0 
+                    ? `All manifests voided: ${reason}` 
+                    : `Partial void: ${voidedNumbers.join(', ')} - ${reason}`;
+                
+                const transitionResult = await invoiceStateMachine.transitionTo(
+                    invoiceId,
+                    newStatus,
+                    userId,
+                    transitionReason
+                );
+                
+                if (!transitionResult.success) {
+                    // If transition fails, we still have the manifest fields updated
+                    // but status might be wrong - log error but don't fail completely
+                    console.error(`[Void] ⚠️ Status transition failed: ${transitionResult.error}`);
+                    console.error(`[Void] Invoice ${invoiceId} manifest voided but status transition to ${newStatus} failed`);
+                    // Still return success since manifest was voided, just status update failed
+                }
+            }
 
             // Alert admin if partial void
             if (failedManifests.length > 0 || (voidedManifests.length > 0 && remainingManifests.length > 0)) {

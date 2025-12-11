@@ -229,6 +229,92 @@ class BatchSyncService {
     }
 
     /**
+     * Refresh batches for a specific set of METRC item names.
+     *
+     * This is a targeted mini-sync used after linking METRC items to a master product
+     * so that quantities/availability are up-to-date immediately, without waiting for
+     * the full scheduled sync.
+     *
+     * @param {string[]} metrcItemNames - Array of METRC item names (e.g. "M0000...: V2 Amaze Hashish 1g - Triple Burger")
+     * @returns {Promise<{success: boolean, updated: number, batches: Array}>}
+     */
+    async refreshBatchesForItems(metrcItemNames) {
+        if (!Array.isArray(metrcItemNames) || metrcItemNames.length === 0) {
+            return {
+                success: true,
+                updated: 0,
+                batches: []
+            };
+        }
+
+        console.log('🔄 Refreshing batches for METRC items:', metrcItemNames);
+
+        // 1. Execute extraction query and filter to just these item names
+        const freshBatchesAll = await this.executeBatchExtractionQuery();
+        const freshBatches = freshBatchesAll.filter(b => metrcItemNames.includes(b.name));
+
+        if (freshBatches.length === 0) {
+            console.warn('⚠️ No fresh batches found for specified METRC items during refresh');
+            return {
+                success: true,
+                updated: 0,
+                batches: []
+            };
+        }
+
+        // 2. Load existing batches and filter by these item names
+        const existingBatchesAll = await this.loadExistingBatches();
+        const existingBatches = existingBatchesAll.filter(b => metrcItemNames.includes(b.metrc_item_name));
+
+        // 3. Detect changes only for these items and apply them with full history tracking
+        const changes = this.detectChanges(freshBatches, existingBatches);
+
+        // If nothing changed, just return current DB state
+        if (
+            changes.new.length === 0 &&
+            changes.updated.length === 0 &&
+            changes.removed.length === 0 &&
+            changes.packageChanges.length === 0
+        ) {
+            console.log('ℹ️ No batch changes detected for specified METRC items');
+        } else {
+            await this.applyChangesWithHistory(changes);
+        }
+
+        // 4. Return the latest batch records for these items
+        const client = await this.pool.connect();
+        try {
+            const result = await client.query(`
+                SELECT 
+                    id,
+                    batch_name,
+                    metrc_item_name,
+                    quantity,
+                    allocated_quantity,
+                    (quantity - COALESCE(allocated_quantity, 0)) as available_quantity,
+                    status,
+                    fk_master_product_id
+                FROM "ORDERS-batches"
+                WHERE metrc_item_name = ANY($1)
+                ORDER BY created_at DESC
+            `, [metrcItemNames]);
+
+            console.log(`✅ Refreshed ${result.rowCount} batch(es) for specified METRC items`);
+
+            return {
+                success: true,
+                updated: result.rowCount,
+                batches: result.rows
+            };
+        } catch (error) {
+            console.error('❌ Failed to load refreshed batches:', error.message);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
      * Load existing batches from the database
      */
     async loadExistingBatches() {

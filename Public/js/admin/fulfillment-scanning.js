@@ -1191,15 +1191,18 @@ async function checkInvoiceStatus() {
                 const status = data.data.status;
                 const hasIssue = status === 'Fulfillment_Issue';
                 
+                const reportBtn = document.getElementById('btn-report-issue');
                 const updateBtn = document.getElementById('btn-update-issue');
                 const addNoteBtn = document.getElementById('btn-add-note');
                 const cancelBtn = document.getElementById('btn-cancel-issue');
                 
                 if (hasIssue) {
+                    if (reportBtn) reportBtn.style.display = 'none';
                     if (updateBtn) updateBtn.style.display = 'inline-block';
                     if (addNoteBtn) addNoteBtn.style.display = 'inline-block';
                     if (cancelBtn) cancelBtn.style.display = 'inline-block';
                 } else {
+                    if (reportBtn) reportBtn.style.display = 'inline-block';
                     if (updateBtn) updateBtn.style.display = 'none';
                     if (addNoteBtn) addNoteBtn.style.display = 'none';
                     if (cancelBtn) cancelBtn.style.display = 'none';

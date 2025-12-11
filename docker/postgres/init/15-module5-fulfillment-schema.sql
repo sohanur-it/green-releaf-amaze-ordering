@@ -14,6 +14,18 @@ EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
 
+DO $$ BEGIN
+    ALTER TYPE invoice_status ADD VALUE IF NOT EXISTS 'Manifest_Voided';
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
+DO $$ BEGIN
+    ALTER TYPE invoice_status ADD VALUE IF NOT EXISTS 'Voided';
+EXCEPTION
+    WHEN duplicate_object THEN null;
+END $$;
+
 -- Note: 'Partially_Manifested' already exists in Module 4 schema
 
 -- =====================================================
@@ -25,7 +37,10 @@ ALTER TABLE "ORDERS-invoices"
     ADD COLUMN IF NOT EXISTS voided_manifest_number VARCHAR(100),
     ADD COLUMN IF NOT EXISTS voided_manifest_reason TEXT,
     ADD COLUMN IF NOT EXISTS voided_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS voided_by INTEGER REFERENCES users(id);
+    ADD COLUMN IF NOT EXISTS voided_by INTEGER REFERENCES users(id),
+    ADD COLUMN IF NOT EXISTS sales_acknowledged_void BOOLEAN DEFAULT false,
+    ADD COLUMN IF NOT EXISTS sales_acknowledged_void_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS sales_acknowledged_void_by INTEGER REFERENCES users(id);
 
 -- Add manifest tracking (supporting multi-license)
 -- First check if single manifest fields exist, then migrate to arrays

@@ -98,6 +98,7 @@ const DB_CONFIG = {
 };
 
 const pool = new Pool(DB_CONFIG);
+const batchSyncService = new BatchSyncService();
 
 // =============================================
 // MASTER PRODUCT MANAGEMENT
@@ -517,6 +518,82 @@ router.post('/products/master/:id/link-items/confirm', async (req, res) => {
         });
     } finally {
         client.release();
+    }
+});
+
+/**
+ * @swagger
+ * /api/v1/products/master/{id}/refresh-batches:
+ *   post:
+ *     summary: Refresh METRC batches for linked items (immediate quantity update)
+ *     description: >
+ *       Re-runs the METRC batch extraction logic for the specified METRC item names and
+ *       updates the corresponding ORDERS-batches rows so that quantity/availability
+ *       are correct immediately after linking.
+ *     tags: [Module 3 - Batches]
+ *     security:
+ *       - sessionAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Master Product ID (for context; not used directly in refresh)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               metrc_item_names:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 example: ["M00002313117: V2 Amaze 3.5g - Amaze Orange"]
+ *     responses:
+ *       200:
+ *         description: Batches refreshed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 updated:
+ *                   type: integer
+ *                 batches:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Batch'
+ */
+router.post('/products/master/:id/refresh-batches', auth, async (req, res) => {
+    try {
+        const { metrc_item_names } = req.body || {};
+
+        if (!Array.isArray(metrc_item_names) || metrc_item_names.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'metrc_item_names (non-empty array) is required'
+            });
+        }
+
+        const result = await batchSyncService.refreshBatchesForItems(metrc_item_names);
+
+        res.json({
+            success: true,
+            updated: result.updated || 0,
+            batches: result.batches || []
+        });
+    } catch (error) {
+        console.error('Error refreshing batches for METRC items:', error.message);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to refresh batches for specified METRC items',
+            message: error.message
+        });
     }
 });
 

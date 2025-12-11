@@ -49,17 +49,18 @@ class InvoiceStateMachineService {
         'Approved': ['Fulfillment_Accepted', 'Cancelled', 'Voided'],
         'Fulfillment_Accepted': ['Fulfillment_Issue', 'Manifested', 'Partially_Manifested', 'Cancelled', 'Voided'],
         'Fulfillment_Issue': ['Approved'], // sales fixes, re-submits
-        'Partially_Manifested': ['Manifested', 'Fulfillment_Issue'],
-        'Manifested': ['Shipped', 'Fulfillment_Issue', 'Manifest_Voided'],
-        'Partially_Voided': ['Fulfillment_Accepted', 'Manifested', 'Fulfillment_Issue'], // Can rescan after partial void
-        'Manifest_Voided': ['Fulfillment_Accepted', 'Approved'], // Can rescan after manifest voided
+        'Partially_Manifested': ['Manifested', 'Fulfillment_Issue', 'Manifest_Voided'],
+        'Manifested': ['Shipped', 'Fulfillment_Issue', 'Manifest_Voided', 'Partially_Voided'],
+        'Partially_Voided': ['Manifested', 'Manifest_Voided', 'Fulfillment_Issue'],
+        'Manifest_Voided': ['Fulfillment_Accepted', 'Fulfillment_Issue'], // Allows rescanning after sales acknowledgment
+        'Partially_Voided': ['Manifested', 'Manifest_Voided', 'Fulfillment_Issue'], // Partial void - can continue or void all
         'Shipped': ['Delivered', 'Cancelled_After_Ship'],
         'Delivered': ['Partially_Rejected', 'Fully_Rejected', 'Issue_After_Shipped', 'Paid'],
         'Partially_Rejected': ['Paid'],
         'Fully_Rejected': [], // terminal state
         'Issue_After_Shipped': ['Paid'],
         'Cancelled': [], // terminal
-        'Voided': [], // terminal - invoice voided
+        'Voided': [], // terminal - entire invoice voided
         'Cancelled_After_Ship': [], // terminal (needs inventory recovery check)
         'Paid': [] // terminal
     };
@@ -166,14 +167,14 @@ class InvoiceStateMachineService {
                 console.error('⚠️ Error in postTransitionEffects (non-critical):', error.message);
             });
 
-            const eventName = newStatus === 'Cancelled'
+            const eventName = (newStatus === 'Cancelled' || newStatus === 'Voided')
                 ? 'invoice_cancelled'
                 : 'invoice_status_changed';
 
             websocketService.broadcastInvoiceEvent(invoiceId, eventName, {
                 old_status: currentStatus,
                 new_status: newStatus,
-                cart_cleared: newStatus === 'Cancelled'
+                cart_cleared: (newStatus === 'Cancelled' || newStatus === 'Voided')
             }).catch(error => {
                 console.error('❌ Error broadcasting invoice status change:', error.message);
             });
@@ -287,6 +288,64 @@ class InvoiceStateMachineService {
                     UPDATE "ORDERS-invoices"
                     SET cart_expires_at = NOW()
                     WHERE id = $1
+                `, [invoiceId]);
+            }
+            
+            // -> Voided (entire invoice voided)
+            if (to === 'Voided') {
+                const releaseResult = await this.releaseAllAllocations(invoiceId, client);
+                if (!releaseResult.success) {
+                    return releaseResult;
+                }
+
+                // Broadcast inventory updates for all affected batches
+                try {
+                    const allocationService = require('./allocationService');
+                    const lineItems = await client.query(`
+                        SELECT DISTINCT fk_batch_id
+                        FROM "ORDERS-invoice-line-items"
+                        WHERE fk_invoice_id = $1 AND fk_batch_id IS NOT NULL
+                    `, [invoiceId]);
+                    
+                    Promise.all(lineItems.rows.map(async (item) => {
+                        try {
+                            const batchId = item.fk_batch_id;
+                            const newAvailable = await allocationService.getAvailableQuantity(batchId);
+                            await allocationService.broadcastInventoryUpdate(batchId, newAvailable);
+                        } catch (wsError) {
+                            console.error(`WebSocket broadcast error for batch ${item.fk_batch_id} (non-critical):`, wsError.message);
+                        }
+                    })).catch(error => {
+                        console.error('WebSocket broadcast error (non-critical) during voiding:', error.message);
+                    });
+                } catch (wsError) {
+                    console.error('Error querying line items for broadcast (non-critical):', wsError.message);
+                }
+
+                // Immediately expire any associated external cart session
+                await client.query(`
+                    UPDATE "ORDERS-invoices"
+                    SET cart_expires_at = NOW()
+                    WHERE id = $1
+                `, [invoiceId]);
+            }
+            
+            // -> Manifest_Voided (allows rescanning)
+            if (to === 'Manifest_Voided') {
+                // Clear assigned packages to allow rescanning
+                await client.query(`
+                    UPDATE "ORDERS-invoice-line-items"
+                    SET quantity_fulfilled = 0,
+                        fk_package_id = NULL
+                    WHERE fk_invoice_id = $1
+                `, [invoiceId]);
+                
+                // Clear any active scanning sessions
+                await client.query(`
+                    UPDATE "ORDERS-scanning-sessions"
+                    SET session_status = 'cancelled',
+                        cancelled_at = NOW()
+                    WHERE fk_invoice_id = $1 AND session_status = 'active'
                 `, [invoiceId]);
             }
             
@@ -456,6 +515,23 @@ class InvoiceStateMachineService {
                     const notificationService = require('./notificationService');
                     await notificationService.notifyCustomerCancellation(invoiceId);
                 }
+            }
+            
+            // Voided: Notify if external
+            if (to === 'Voided') {
+                const invoice = await this.pool.query(
+                    'SELECT source FROM "ORDERS-invoices" WHERE id = $1', 
+                    [invoiceId]
+                );
+                if (invoice.rows.length > 0 && invoice.rows[0].source === 'External') {
+                    const notificationService = require('./notificationService');
+                    await notificationService.notifyCustomerCancellation(invoiceId);
+                }
+            }
+            
+            // Manifest_Voided: Notify fulfillment team that rescanning is needed
+            if (to === 'Manifest_Voided') {
+                console.log(`🔄 Invoice ${invoiceId} manifest voided - ready for rescanning`);
             }
         } catch (error) {
             console.error('⚠️ Error in postTransitionEffects:', error.message);

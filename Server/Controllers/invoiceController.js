@@ -2437,7 +2437,7 @@ class InvoiceController {
                 });
             }
 
-            // Transition to Voided status (not Cancelled, to distinguish from cancellation)
+            // Transition to Voided (entire invoice voided)
             const invoiceStateMachine = require('../Services/invoiceStateMachineService');
             
             // Add timeout wrapper
@@ -2472,6 +2472,122 @@ class InvoiceController {
             res.status(500).json({
                 success: false,
                 error: 'Failed to void invoice',
+                details: error.message
+            });
+        }
+    }
+
+    /**
+     * Acknowledge voided manifest (sales team)
+     * POST /api/v1/invoices/:id/acknowledge-void
+     */
+    async acknowledgeVoidedManifest(req, res) {
+        try {
+            const { id } = req.params;
+            const userId = req.session.userId || req.user?.id;
+            
+            if (!userId) {
+                return res.status(401).json({
+                    success: false,
+                    error: 'User not authenticated'
+                });
+            }
+
+            const { query } = require('../config/database');
+            
+            // Get invoice and verify it's in Manifest_Voided or Partially_Voided status
+            const invoice = await query(`
+                SELECT 
+                    id, 
+                    invoice_number,
+                    status,
+                    voided_at,
+                    sales_acknowledged_void
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [id]);
+
+            if (invoice.rows.length === 0) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'Invoice not found'
+                });
+            }
+
+            const inv = invoice.rows[0];
+
+            // Verify invoice has a voided manifest
+            if (!['Manifest_Voided', 'Partially_Voided'].includes(inv.status)) {
+                return res.status(400).json({
+                    success: false,
+                    error: `Invoice is not in a voided manifest status. Current status: ${inv.status}`
+                });
+            }
+
+            if (!inv.voided_at) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Invoice does not have a voided manifest'
+                });
+            }
+
+            if (inv.sales_acknowledged_void) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Voided manifest has already been acknowledged'
+                });
+            }
+
+            // Update invoice to mark sales acknowledgment
+            await query(`
+                UPDATE "ORDERS-invoices"
+                SET 
+                    sales_acknowledged_void = true,
+                    sales_acknowledged_void_at = NOW(),
+                    sales_acknowledged_void_by = $1,
+                    status_updated_at = NOW()
+                WHERE id = $2
+            `, [userId, id]);
+
+            // Log to invoice history
+            await query(`
+                INSERT INTO "ORDERS-invoice-history" (
+                    fk_invoice_id, 
+                    modification_type, 
+                    field_name,
+                    old_value, 
+                    new_value, 
+                    reason, 
+                    changed_by_user_id
+                ) VALUES ($1, 'status_changed', 'sales_acknowledged_void', 'false', 'true', 'Sales acknowledged voided manifest - ready for rescanning', $2)
+            `, [id, userId]);
+
+            // Broadcast update
+            const websocketService = require('../Services/websocketService');
+            websocketService.broadcastInvoiceEvent(id, 'invoice_status_changed', {
+                status: inv.status,
+                sales_acknowledged_void: true,
+                message: 'Sales acknowledged voided manifest - fulfillment can now rescan'
+            }).catch(error => {
+                console.error('Error broadcasting invoice update:', error.message);
+            });
+
+            res.json({
+                success: true,
+                message: 'Voided manifest acknowledged. Fulfillment team can now rescan.',
+                data: {
+                    invoiceId: id,
+                    invoiceNumber: inv.invoice_number,
+                    salesAcknowledged: true,
+                    acknowledgedAt: new Date().toISOString()
+                }
+            });
+
+        } catch (error) {
+            console.error('Error acknowledging voided manifest:', error);
+            res.status(500).json({
+                success: false,
+                error: 'Failed to acknowledge voided manifest',
                 details: error.message
             });
         }

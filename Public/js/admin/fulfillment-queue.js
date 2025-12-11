@@ -66,11 +66,13 @@ document.addEventListener('DOMContentLoaded', () => {
         pageSize = parseInt(pageSizeSelect.value) || 25;
     }
     
-    loadQueue();
+    // Initial load: show loading state, no need to preserve scroll
+    loadQueue({ showLoading: true, preserveScroll: false });
     
     // Set up auto-refresh every 30 seconds
     setInterval(() => {
-        loadQueue();
+        // Auto-refresh: do NOT show loading overlay, and preserve scroll
+        loadQueue({ showLoading: false, preserveScroll: true });
     }, 30000);
 });
 
@@ -111,14 +113,25 @@ async function loadDeliveryZones() {
 
 /**
  * Load fulfillment queue
+ * @param {Object} options
+ * @param {boolean} [options.showLoading=true] - whether to show the loading spinner
+ * @param {boolean} [options.preserveScroll=false] - whether to preserve the scroll position of the queue list
  */
-async function loadQueue() {
+async function loadQueue(options = {}) {
+    const { showLoading = true, preserveScroll = false } = options;
     const queueList = document.getElementById('queue-list');
-    
-    // Save scroll position before clearing content
-    const scrollPosition = window.scrollY || document.documentElement.scrollTop;
-    
-    queueList.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i><p>Loading queue...</p></div>';
+
+    if (!queueList) return;
+
+    // Capture current scroll position if requested
+    let previousScrollTop = 0;
+    if (preserveScroll) {
+        previousScrollTop = queueList.scrollTop;
+    }
+
+    if (showLoading) {
+        queueList.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i><p>Loading queue...</p></div>';
+    }
 
     try {
         const params = new URLSearchParams({
@@ -144,26 +157,24 @@ async function loadQueue() {
         }
         updatePagination(data.pagination);
 
-        // Restore scroll position after content is rendered
-        // Use requestAnimationFrame to ensure DOM has updated
-        requestAnimationFrame(() => {
-            window.scrollTo(0, scrollPosition);
-        });
+        // Restore scroll position if requested
+        if (preserveScroll) {
+            queueList.scrollTop = previousScrollTop;
+        }
 
     } catch (error) {
         console.error('Error loading queue:', error);
-        queueList.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-exclamation-triangle"></i>
-                <h3>Error Loading Queue</h3>
-                <p>${error.message}</p>
-            </div>
-        `;
-        
-        // Restore scroll position even on error
-        requestAnimationFrame(() => {
-            window.scrollTo(0, scrollPosition);
-        });
+        if (showLoading) {
+            queueList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h3>Error Loading Queue</h3>
+                    <p>${error.message}</p>
+                </div>
+            `;
+        } else {
+            console.error('Queue load error (silent refresh):', error.message);
+        }
     }
 }
 
@@ -358,7 +369,8 @@ function applyFilters() {
     }
     
     currentPage = 1;
-    loadQueue();
+    // User-triggered filter change: show loading, don't need to preserve scroll
+    loadQueue({ showLoading: true, preserveScroll: false });
 }
 
 /**
@@ -377,7 +389,8 @@ function changePage(delta) {
     const newPage = currentPage + delta;
     if (newPage >= 1 && newPage <= totalPages) {
         currentPage = newPage;
-        loadQueue();
+        // Pagination change: show loading, reset scroll to top naturally
+        loadQueue({ showLoading: true, preserveScroll: false });
     }
 }
 
@@ -385,7 +398,8 @@ function changePage(delta) {
  * Refresh queue
  */
 function refreshQueue() {
-    loadQueue();
+    // Manual refresh button: quick refresh without losing scroll
+    loadQueue({ showLoading: false, preserveScroll: true });
 }
 
 /**
@@ -420,7 +434,8 @@ async function claimOrder(invoiceId) {
         }
 
         alert(`Order ${data.invoice_number} claimed successfully!`);
-        loadQueue();
+        // After claim, reload queue but keep user's scroll position
+        loadQueue({ showLoading: false, preserveScroll: true });
 
     } catch (error) {
         console.error('Error claiming order:', error);
@@ -472,7 +487,8 @@ async function releaseOrder(invoiceId) {
         }
 
         alert('Order released successfully');
-        loadQueue();
+        // After release, reload queue but keep user's scroll position
+        loadQueue({ showLoading: false, preserveScroll: true });
 
     } catch (error) {
         console.error('Error releasing order:', error);
@@ -514,7 +530,8 @@ async function reassignOrder(invoiceId) {
         }
 
         alert('Order reassigned successfully');
-        loadQueue();
+        // After reassign, reload queue but keep user's scroll position
+        loadQueue({ showLoading: false, preserveScroll: true });
 
     } catch (error) {
         console.error('Error reassigning order:', error);

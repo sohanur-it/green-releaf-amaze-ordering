@@ -108,10 +108,25 @@ class ManifestCreationService {
             const inv = invoice.rows[0];
             console.log(`[Manifest] Invoice status: ${inv.status}, assigned to: ${inv.fulfillment_accepted_by}`);
 
-            // Allow manifest creation if status is Fulfillment_Accepted or Fulfillment_Issue
+            // Allow manifest creation if status is Fulfillment_Accepted, Fulfillment_Issue, or Manifest_Voided
             // (Fulfillment_Issue might be from a previous scanning issue that was resolved)
-            if (inv.status !== 'Fulfillment_Accepted' && inv.status !== 'Fulfillment_Issue') {
-                throw new Error(`Cannot create manifest - invoice status is ${inv.status}. Must be Fulfillment_Accepted or Fulfillment_Issue.`);
+            // (Manifest_Voided allows rescanning and creating a new manifest after void)
+            const allowedStatuses = ['Fulfillment_Accepted', 'Fulfillment_Issue', 'Manifest_Voided'];
+            if (!allowedStatuses.includes(inv.status)) {
+                throw new Error(`Cannot create manifest - invoice status is ${inv.status}. Must be one of: ${allowedStatuses.join(', ')}.`);
+            }
+            
+            // If status is Manifest_Voided, verify sales has acknowledged the void
+            if (inv.status === 'Manifest_Voided') {
+                const voidCheck = await client.query(`
+                    SELECT sales_acknowledged_void, voided_at
+                    FROM "ORDERS-invoices"
+                    WHERE id = $1
+                `, [invoiceId]);
+                
+                if (voidCheck.rows.length > 0 && voidCheck.rows[0].voided_at && !voidCheck.rows[0].sales_acknowledged_void) {
+                    throw new Error('Cannot create manifest - sales team must acknowledge the voided manifest before a new manifest can be created. Please contact sales.');
+                }
             }
 
             if (inv.fulfillment_accepted_by !== userId) {
