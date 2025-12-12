@@ -1,10 +1,20 @@
 /**
  * Fix batch data flags and update status to Sellable
- * Usage: node scripts/fix-batch-sellable.js <batchId>
+ * 
+ * Usage:
+ *   NODE_ENV=development node scripts/fix-batch-sellable.js <batchId>
+ *   NODE_ENV=production  node scripts/fix-batch-sellable.js <batchId>
  */
 
 const path = require('path');
-require('dotenv').config({ path: path.join(__dirname, '../config/production.env') });
+
+// Load environment configuration
+const envFile =
+  process.env.NODE_ENV === 'production'
+    ? path.join(__dirname, '../config/production.env')
+    : path.join(__dirname, '../config/local.env');
+
+require('dotenv').config({ path: envFile });
 
 const { pool } = require('../Server/config/database');
 
