@@ -278,7 +278,7 @@ class BatchSyncService {
         ) {
             console.log('ℹ️ No batch changes detected for specified METRC items');
         } else {
-            await this.applyChangesWithHistory(changes);
+            await this.applyChangesWithHistory(changes, chunkSize);
         }
 
         // 4. Return the latest batch records for these items
@@ -360,7 +360,7 @@ class BatchSyncService {
             packageChanges: []
         };
 
-        // Create lookup maps
+        // Create lookup maps by batch_name (primary)
         const existingMap = new Map(
             existingBatches.map(b => [b.batch_name, b])
         );
@@ -368,10 +368,63 @@ class BatchSyncService {
             freshBatches.map(b => [b.batch_name, b])
         );
 
-        // Detect new batches
+        // Also create lookup by METRC item + license for matching when batch_name changes
+        // This handles the case where first_sourcepackage_label changes (packages consumed)
+        const existingByMetrcItem = new Map();
+        for (const batch of existingBatches) {
+            const key = `${batch.metrc_item_name}|||${batch.synclicense || 'unknown'}`;
+            if (!existingByMetrcItem.has(key)) {
+                existingByMetrcItem.set(key, batch);
+            }
+        }
+
+        // Detect new batches and handle batch_name changes
         for (const [batchName, freshBatch] of freshMap) {
             if (!existingMap.has(batchName)) {
-                changes.new.push(freshBatch);
+                // Check if this is actually an existing batch with changed first_sourcepackage_label
+                const metrcKey = `${freshBatch.name}|||${freshBatch.sync_license || 'unknown'}`;
+                const existingByMetrc = existingByMetrcItem.get(metrcKey);
+                
+                if (existingByMetrc && existingByMetrc.batch_name !== batchName) {
+                    // This is the same batch but with a different first_sourcepackage_label
+                    // Treat it as an update, not a new batch
+                    const updates = {
+                        batch_name_changed: {
+                            old: existingByMetrc.batch_name,
+                            new: batchName
+                        },
+                        first_sourcepackage_label: {
+                            old: existingByMetrc.first_sourcepackage_label,
+                            new: freshBatch.first_sourcepackage_label
+                        }
+                    };
+                    
+                    // Check for other changes
+                    if (freshBatch.quantity !== existingByMetrc.quantity) {
+                        updates.quantity = {
+                            old: existingByMetrc.quantity,
+                            new: freshBatch.quantity
+                        };
+                    }
+                    
+                    if (freshBatch.package_count !== existingByMetrc.package_count) {
+                        updates.package_count = {
+                            old: existingByMetrc.package_count,
+                            new: freshBatch.package_count
+                        };
+                    }
+                    
+                    changes.updated.push({
+                        batch_name: existingByMetrc.batch_name, // Use old batch_name for update
+                        new_batch_name: batchName, // Track new batch_name
+                        updates: updates,
+                        full_fresh_data: freshBatch,
+                        existing_batch_id: existingByMetrc.id
+                    });
+                } else {
+                    // Truly a new batch
+                    changes.new.push(freshBatch);
+                }
             }
         }
 
@@ -380,8 +433,23 @@ class BatchSyncService {
             const freshBatch = freshMap.get(batchName);
 
             if (!freshBatch) {
-                // The batch no longer exists in METRC
-                changes.removed.push(existingBatch);
+                // Check if this batch still exists but with different first_sourcepackage_label
+                const metrcKey = `${existingBatch.metrc_item_name}|||${existingBatch.synclicense || 'unknown'}`;
+                let foundInFresh = false;
+                
+                for (const [freshName, fresh] of freshMap) {
+                    const freshMetrcKey = `${fresh.name}|||${fresh.sync_license || 'unknown'}`;
+                    if (freshMetrcKey === metrcKey && freshName !== batchName) {
+                        // This batch exists in fresh but with different name - already handled above
+                        foundInFresh = true;
+                        break;
+                    }
+                }
+                
+                if (!foundInFresh) {
+                    // The batch no longer exists in METRC
+                    changes.removed.push(existingBatch);
+                }
                 continue;
             }
 
@@ -455,6 +523,12 @@ class BatchSyncService {
     async detectOrphanedBatches(existingBatches) {
         const client = await this.getHealthyClient();
         try {
+            // If existingBatches is provided and limited, only check those batches
+            // Otherwise check all batches (for full sync)
+            const batchIds = existingBatches && existingBatches.length > 0
+                ? existingBatches.map(b => b.id)
+                : null;
+            
             // Check which batches have missing source packages
             // CRITICAL FIX: Check which license column exists in activepackages
             // Some environments use sync_license, others use synclicense
@@ -467,7 +541,8 @@ class BatchSyncService {
             `);
             const activepackagesLicenseColumn = licenseColumnCheck.rows[0]?.column_name || 'sync_license';
             
-            const orphanedQuery = `
+            // Build query with optional batch ID filter
+            let orphanedQuery = `
                 SELECT 
                     b.id,
                     b.batch_name,
@@ -502,7 +577,13 @@ class BatchSyncService {
                   AND b.synclicense IS NOT NULL
             `;
             
-            const result = await client.query(orphanedQuery);
+            const queryParams = [];
+            if (batchIds && batchIds.length > 0) {
+                orphanedQuery += ` AND b.id = ANY($1)`;
+                queryParams.push(batchIds);
+            }
+            
+            const result = await client.query(orphanedQuery, queryParams);
             const orphaned = result.rows.filter(b => 
                 !b.source_package_exists || b.existing_package_count === 0
             );
@@ -568,9 +649,9 @@ class BatchSyncService {
      * Apply changes with full history tracking
      * Optimized: Processes in chunks with batch operations
      */
-    async applyChangesWithHistory(changes) {
-        // Reduced chunk size to prevent deadlocks with large batch updates
-        const CHUNK_SIZE = 25; // Process 25 batches per transaction to reduce lock contention
+    async applyChangesWithHistory(changes, chunkSize = 25) {
+        // Use provided chunk size or default to 25 to prevent deadlocks with large batch updates
+        const CHUNK_SIZE = chunkSize || 25;
         
         // Process NEW batches in chunks
         if (changes.new.length > 0) {
@@ -590,11 +671,12 @@ class BatchSyncService {
             }
         }
         
-        // Process REMOVED/ORPHANED batches in chunks
+        // Process REMOVED/ORPHANED batches in chunks (use smaller chunks to avoid deadlocks)
         if (changes.removed.length > 0) {
-            console.log(`📝 Processing ${changes.removed.length} removed/orphaned batches in chunks of ${CHUNK_SIZE}...`);
-            for (let i = 0; i < changes.removed.length; i += CHUNK_SIZE) {
-                const chunk = changes.removed.slice(i, i + CHUNK_SIZE);
+            const removedChunkSize = Math.min(CHUNK_SIZE, 20); // Smaller chunks for removed batches
+            console.log(`📝 Processing ${changes.removed.length} removed/orphaned batches in chunks of ${removedChunkSize}...`);
+            for (let i = 0; i < changes.removed.length; i += removedChunkSize) {
+                const chunk = changes.removed.slice(i, i + removedChunkSize);
                 await this.processRemovedBatchesChunk(chunk, i + 1, changes.removed.length);
             }
         }
@@ -842,19 +924,45 @@ class BatchSyncService {
                 await client.query('BEGIN');
             
             // Step 1: Bulk fetch all batch IDs by name (single query)
-            const batchNames = changes.map(c => c.batch_name);
+            // Handle both old batch_name and new_batch_name (when first_sourcepackage_label changes)
+            const batchNames = changes.map(c => c.batch_name).filter(Boolean);
+            const newBatchNames = changes.map(c => c.new_batch_name).filter(Boolean);
+            const allBatchNames = [...new Set([...batchNames, ...newBatchNames])];
             const batchIdMap = new Map();
+            const batchIdByExistingId = new Map(); // For updates where batch_name changed
             
-            if (batchNames.length > 0) {
+            if (allBatchNames.length > 0) {
                 const batchIdsResult = await client.query(`
                     SELECT id, batch_name, fk_master_product_id, metrc_item_name
                     FROM "ORDERS-batches"
                     WHERE batch_name = ANY($1)
-                `, [batchNames]);
+                `, [allBatchNames]);
                 
                 for (const row of batchIdsResult.rows) {
                     batchIdMap.set(row.batch_name, {
                         id: row.id,
+                        isLinked: row.fk_master_product_id !== null,
+                        metrcItemName: row.metrc_item_name
+                    });
+                }
+            }
+            
+            // Also fetch by existing_batch_id for updates where batch_name changed
+            const existingBatchIds = changes
+                .filter(c => c.existing_batch_id)
+                .map(c => c.existing_batch_id);
+            
+            if (existingBatchIds.length > 0) {
+                const existingIdsResult = await client.query(`
+                    SELECT id, batch_name, fk_master_product_id, metrc_item_name
+                    FROM "ORDERS-batches"
+                    WHERE id = ANY($1)
+                `, [existingBatchIds]);
+                
+                for (const row of existingIdsResult.rows) {
+                    batchIdByExistingId.set(row.id, {
+                        id: row.id,
+                        batch_name: row.batch_name,
                         isLinked: row.fk_master_product_id !== null,
                         metrcItemName: row.metrc_item_name
                     });
@@ -901,13 +1009,24 @@ class BatchSyncService {
             const linkingHistoryInserts = [];
             
             for (const change of changes) {
-                const batchInfo = batchIdMap.get(change.batch_name);
-                if (!batchInfo) {
-                    console.log(`   ⚠️ Batch not found for update: ${change.batch_name}`);
-                    continue;
+                // Handle batch_name changes: use existing_batch_id if available
+                let batchInfo = null;
+                let batchId = null;
+                
+                if (change.existing_batch_id) {
+                    // Batch name changed - use existing_batch_id
+                    batchInfo = batchIdByExistingId.get(change.existing_batch_id);
+                    batchId = change.existing_batch_id;
+                } else {
+                    // Normal update - use batch_name lookup
+                    batchInfo = batchIdMap.get(change.batch_name);
+                    batchId = batchInfo?.id;
                 }
                 
-                const batchId = batchInfo.id;
+                if (!batchInfo || !batchId) {
+                    console.log(`   ⚠️ Batch not found for update: ${change.batch_name} (existing_id: ${change.existing_batch_id})`);
+                    continue;
+                }
                 const productMatch = !batchInfo.isLinked && batchInfo.metrcItemName
                     ? productMatchMap.get(batchInfo.metrcItemName)
                     : null;
@@ -919,6 +1038,9 @@ class BatchSyncService {
                 // Prepare update data
                 updateData.push({
                     batchId,
+                    new_batch_name: change.new_batch_name || null, // New batch_name if it changed
+                    new_first_sourcepackage_label: change.full_fresh_data.first_sourcepackage_label || null,
+                    new_sourcepackagelabels: change.full_fresh_data.sourcepackagelabels || null,
                     quantity: change.full_fresh_data.quantity,
                     package_count: change.full_fresh_data.package_count,
                     full_package_count: change.full_fresh_data.full_package_count,
@@ -961,26 +1083,57 @@ class BatchSyncService {
                 updateData.sort((a, b) => a.batchId - b.batchId);
                 
                 for (const d of updateData) {
+                    // Build dynamic SET clause for batch_name changes
+                    const setClauses = [];
+                    const params = [];
+                    let paramIndex = 1;
+                    
+                    // Add conditional fields first
+                    if (d.new_batch_name) {
+                        setClauses.push(`batch_name = $${paramIndex++}`);
+                        params.push(d.new_batch_name);
+                    }
+                    if (d.new_first_sourcepackage_label) {
+                        setClauses.push(`first_sourcepackage_label = $${paramIndex++}`);
+                        params.push(d.new_first_sourcepackage_label);
+                    }
+                    if (d.new_sourcepackagelabels) {
+                        setClauses.push(`sourcepackagelabels = $${paramIndex++}`);
+                        params.push(d.new_sourcepackagelabels);
+                    }
+                    
+                    // Add standard fields
+                    setClauses.push(`quantity = $${paramIndex++}`);
+                    params.push(d.quantity);
+                    setClauses.push(`package_count = $${paramIndex++}`);
+                    params.push(d.package_count);
+                    setClauses.push(`full_package_count = $${paramIndex++}`);
+                    params.push(d.full_package_count);
+                    setClauses.push(`partial_package_count = $${paramIndex++}`);
+                    params.push(d.partial_package_count);
+                    setClauses.push(`available_labels = $${paramIndex++}::jsonb`);
+                    params.push(d.available_labels);
+                    setClauses.push(`full_package_details = $${paramIndex++}::jsonb`);
+                    params.push(d.full_package_details);
+                    setClauses.push(`partial_package_details = $${paramIndex++}::jsonb`);
+                    params.push(d.partial_package_details);
+                    setClauses.push(`thc_percentage = $${paramIndex++}`);
+                    params.push(d.thc_percentage);
+                    setClauses.push(`last_modified = $${paramIndex++}`);
+                    params.push(d.last_modified);
+                    setClauses.push(`last_synced = NOW()`);
+                    setClauses.push(`fk_master_product_id = COALESCE($${paramIndex++}, fk_master_product_id)`);
+                    params.push(d.product_id);
+                    
+                    // Add WHERE clause parameter
+                    params.push(d.batchId);
+                    
+                    // Execute update
                     await client.query(`
                         UPDATE "ORDERS-batches"
-                        SET 
-                            quantity = $1,
-                            package_count = $2,
-                            full_package_count = $3,
-                            partial_package_count = $4,
-                            available_labels = $5::jsonb,
-                            full_package_details = $6::jsonb,
-                            partial_package_details = $7::jsonb,
-                            thc_percentage = $8,
-                            last_modified = $9,
-                            last_synced = NOW(),
-                            fk_master_product_id = COALESCE($10, fk_master_product_id)
-                        WHERE id = $11
-                    `, [
-                        d.quantity, d.package_count, d.full_package_count, d.partial_package_count,
-                        d.available_labels, d.full_package_details, d.partial_package_details,
-                        d.thc_percentage, d.last_modified, d.product_id, d.batchId
-                    ]);
+                        SET ${setClauses.join(', ')}
+                        WHERE id = $${paramIndex}
+                    `, params);
                 }
             }
             
@@ -1167,9 +1320,14 @@ class BatchSyncService {
      * Orphaned batches are batches whose source packages no longer exist in activepackages
      */
     async processRemovedBatchesChunk(batches, startIndex, total) {
-        const client = await this.getHealthyClient();
-        try {
-            await client.query('BEGIN');
+        const maxDeadlockRetries = 5;
+        const baseDelay = 200; // Base delay in ms for deadlock retries
+        let deadlockRetries = 0;
+        
+        while (deadlockRetries < maxDeadlockRetries) {
+            const client = await this.getHealthyClient();
+            try {
+                await client.query('BEGIN');
             
             for (const batch of batches) {
                 const batchId = batch.id || await this.getBatchIdByName(batch.batch_name, client);
@@ -1184,15 +1342,45 @@ class BatchSyncService {
                 if (isOrphaned) {
                     // Get old status and product info BEFORE update
                     const oldBatchInfo = await client.query(`
-                        SELECT status, fk_master_product_id 
+                        SELECT status, fk_master_product_id, metrc_item_name, synclicense
                         FROM "ORDERS-batches" 
                         WHERE id = $1
                     `, [batchId]);
                     const oldStatus = oldBatchInfo.rows[0]?.status || 'Unknown';
                     const oldProductId = oldBatchInfo.rows[0]?.fk_master_product_id;
+                    const metrcItemName = oldBatchInfo.rows[0]?.metrc_item_name;
+                    const batchLicense = oldBatchInfo.rows[0]?.synclicense;
+                    
+                    // CRITICAL FIX: Check if there are still active packages for this METRC item
+                    // If yes, don't unlink - the batch extraction query will update the batch with new source packages
+                    // Only unlink if there are truly no packages left for this METRC item
+                    const licenseColumnCheck = await client.query(`
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'activepackages' 
+                        AND column_name IN ('sync_license', 'synclicense')
+                        LIMIT 1
+                    `);
+                    const activepackagesLicenseColumn = licenseColumnCheck.rows[0]?.column_name || 'sync_license';
+                    
+                    const activePackagesCheck = await client.query(`
+                        SELECT COUNT(*) as count
+                        FROM activepackages
+                        WHERE item_name = $1
+                          AND ${activepackagesLicenseColumn} = $2
+                          AND isarchived = false
+                          AND isfinished = false
+                    `, [metrcItemName, batchLicense]);
+                    
+                    const hasActivePackages = parseInt(activePackagesCheck.rows[0]?.count || 0, 10) > 0;
+                    
+                    // If there are still active packages for this METRC item, don't unlink
+                    // The batch extraction query will update the batch with new source packages
+                    // Only unlink if there are truly no packages left
+                    const shouldUnlink = !hasActivePackages;
                     
                     // Mark orphaned batch as "On Hold" and set quantity to 0
-                    // Also unlink from product since it's invalid
+                    // Only unlink from product if there are no active packages left for this METRC item
                     // Don't delete it - keep for audit trail
                     await client.query(`
                         UPDATE "ORDERS-batches"
@@ -1200,30 +1388,38 @@ class BatchSyncService {
                             status = 'On Hold',
                             quantity = 0,
                             allocated_quantity = 0,
-                            fk_master_product_id = NULL,
+                            ${shouldUnlink ? 'fk_master_product_id = NULL,' : ''}
                             last_synced = NOW()
                         WHERE id = $1
                     `, [batchId]);
                     
                     // Log to batch history
+                    const reasonMessage = shouldUnlink 
+                        ? 'Batch marked as orphaned - source package missing from activepackages. No active packages left for METRC item. Product unlinked.'
+                        : 'Batch marked as orphaned - source package missing from activepackages. Active packages still exist for METRC item - will be updated by batch extraction query. Product link preserved.';
+                    
                     await client.query(`
                         INSERT INTO "ORDERS-batch-history" (
                             batch_id, change_type, field_name, old_value, new_value,
                             reason, change_details, changed_by_system
                         ) VALUES ($1, 'status_changed', 'status', $2, 'On Hold',
-                                  'Batch marked as orphaned - source package missing from activepackages. Product unlinked.',
-                                  $3::jsonb, true)
-                    `, [batchId, oldStatus, JSON.stringify({
+                                  $3,
+                                  $4::jsonb, true)
+                    `, [batchId, oldStatus, reasonMessage, JSON.stringify({
                         reason: batch.reason,
                         first_sourcepackage_label: batch.first_sourcepackage_label,
                         metrc_item_name: batch.metrc_item_name,
                         action: 'marked_orphaned',
-                        product_unlinked: oldProductId ? true : false,
+                        has_active_packages: hasActivePackages,
+                        active_packages_count: activePackagesCheck.rows[0]?.count || 0,
+                        product_unlinked: shouldUnlink && oldProductId ? true : false,
                         old_product_id: oldProductId
                     })]);
                     
-                    if (oldProductId) {
-                        console.log(`   ⚠️  Marked orphaned batch ${batchId} (${batch.batch_name}) as "On Hold" and unlinked from product ${oldProductId} - source package missing`);
+                    if (shouldUnlink && oldProductId) {
+                        console.log(`   ⚠️  Marked orphaned batch ${batchId} (${batch.batch_name}) as "On Hold" and unlinked from product ${oldProductId} - source package missing, no active packages left for METRC item`);
+                    } else if (oldProductId) {
+                        console.log(`   ⚠️  Marked orphaned batch ${batchId} (${batch.batch_name}) as "On Hold" but kept product link - active packages still exist for METRC item (will be updated by batch extraction)`);
                     } else {
                         console.log(`   ⚠️  Marked orphaned batch ${batchId} (${batch.batch_name}) as "On Hold" - source package missing`);
                     }
@@ -1256,24 +1452,53 @@ class BatchSyncService {
                 }
             }
             
-            await client.query('COMMIT');
-            console.log(`   ✓ Processed ${startIndex + batches.length - 1}/${total} removed/orphaned batches`);
-            
-        } catch (error) {
-            try {
-                await client.query('ROLLBACK');
-            } catch (rollbackError) {
-                console.error(`   ⚠️ Rollback failed: ${rollbackError.message}`);
-            }
-            console.error(`   ❌ Failed to process removed batches chunk: ${error.message}`);
-            throw error;
-        } finally {
-            try {
-                client.release();
-            } catch (releaseError) {
-                console.error(`   ⚠️ Failed to release connection: ${releaseError.message}`);
+                await client.query('COMMIT');
+                console.log(`   ✓ Processed ${startIndex + batches.length - 1}/${total} removed/orphaned batches`);
+                
+                // Success - break out of retry loop
+                try {
+                    client.release();
+                } catch (releaseError) {
+                    console.error(`   ⚠️ Failed to release connection: ${releaseError.message}`);
+                }
+                return;
+                
+            } catch (error) {
+                try {
+                    await client.query('ROLLBACK');
+                } catch (rollbackError) {
+                    // Ignore rollback errors
+                }
+                
+                try {
+                    client.release();
+                } catch (releaseError) {
+                    // Ignore release errors
+                }
+                
+                // Check if it's a deadlock
+                const isDeadlock = error.message && (
+                    error.message.includes('deadlock') ||
+                    error.message.includes('deadlock detected') ||
+                    error.code === '40P01'
+                );
+                
+                if (isDeadlock && deadlockRetries < maxDeadlockRetries - 1) {
+                    deadlockRetries++;
+                    const delay = baseDelay * deadlockRetries; // Exponential backoff
+                    console.log(`   ⚠️ Deadlock detected (attempt ${deadlockRetries}/${maxDeadlockRetries}), retrying in ${delay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                    continue; // Retry
+                } else {
+                    // Not a deadlock, or out of retries
+                    console.error(`   ❌ Failed to process removed batches chunk: ${error.message}`);
+                    throw error;
+                }
             }
         }
+        
+        // Should never reach here, but just in case
+        throw new Error('Failed to process removed batches chunk after all retries');
     }
 
     /**
@@ -1471,33 +1696,63 @@ class BatchSyncService {
         const startTime = Date.now();
         console.log('🔄 Starting batch synchronization...');
         
-        // Add test limit if specified
-        const testLimit = process.env.TEST_SYNC_LIMIT ? parseInt(process.env.TEST_SYNC_LIMIT) : null;
+        // Add test limit if specified (from options, env var, or default to null)
+        const testLimit = options.testLimit || 
+                         (process.env.TEST_SYNC_LIMIT ? parseInt(process.env.TEST_SYNC_LIMIT) : null) ||
+                         (process.env.BATCH_SYNC_LIMIT ? parseInt(process.env.BATCH_SYNC_LIMIT) : null);
+        
         if (testLimit) {
-            console.log(`🧪 TEST MODE: Processing first ${testLimit} items only`);
+            console.log(`🧪 TEST MODE: Processing first ${testLimit} batches only`);
         }
+        
+        // Chunk size for processing (smaller chunks = less deadlock risk)
+        const chunkSize = options.chunkSize || 
+                         (process.env.BATCH_SYNC_CHUNK_SIZE ? parseInt(process.env.BATCH_SYNC_CHUNK_SIZE) : 50);
+        console.log(`📦 Processing in chunks of ${chunkSize} batches`);
 
         try {
             // 1. Execute extraction query
             const freshBatches = await this.executeBatchExtractionQuery();
+            
+            // Apply test limit to fresh batches if specified
+            const limitedFreshBatches = testLimit ? freshBatches.slice(0, testLimit) : freshBatches;
+            if (testLimit && freshBatches.length > testLimit) {
+                console.log(`🧪 Limited fresh batches from ${freshBatches.length} to ${limitedFreshBatches.length} for testing`);
+            }
 
             // 2. Load existing batches
             const existingBatches = await this.loadExistingBatches();
+            
+            // Apply test limit to existing batches if specified (match by METRC item)
+            let limitedExistingBatches = existingBatches;
+            if (testLimit && limitedFreshBatches.length > 0) {
+                const testMetrcItems = new Set(limitedFreshBatches.map(b => b.name));
+                limitedExistingBatches = existingBatches.filter(b => testMetrcItems.has(b.metrc_item_name));
+                if (existingBatches.length > limitedExistingBatches.length) {
+                    console.log(`🧪 Limited existing batches from ${existingBatches.length} to ${limitedExistingBatches.length} for testing`);
+                }
+            }
 
             // 3. Compare and classify changes
-            const changes = this.detectChanges(freshBatches, existingBatches);
+            const changes = this.detectChanges(limitedFreshBatches, limitedExistingBatches);
 
-            // 3.5. Detect orphaned batches (batches with missing source packages)
-            const orphanedBatches = await this.detectOrphanedBatches(existingBatches);
+            // 3.5. Detect orphaned batches (batches with missing source packages) - only for limited batches if test mode
+            const orphanedBatches = await this.detectOrphanedBatches(limitedExistingBatches);
             if (orphanedBatches.length > 0) {
                 console.log(`⚠️  WARNING: ${orphanedBatches.length} orphaned batch(es) detected (missing source packages)`);
                 // Add orphaned batches to removed list for cleanup
                 changes.removed.push(...orphanedBatches);
             }
 
+            // Apply test limit to removed batches if specified
+            if (testLimit && changes.removed.length > testLimit) {
+                console.log(`🧪 Limiting removed batches from ${changes.removed.length} to ${testLimit} for testing`);
+                changes.removed = changes.removed.slice(0, testLimit);
+            }
+
             console.log(`📊 Sync plan: ${changes.new.length} new, ${changes.updated.length} updated, ${changes.removed.length} removed, ${changes.packageChanges.length} package changes`);
 
-            // 4. Apply test limit if specified
+            // 4. Apply test limit if specified (already applied above)
             if (testLimit) {
                 if (changes.new.length > testLimit) {
                     console.log(`🧪 Limiting new batches from ${changes.new.length} to ${testLimit}`);

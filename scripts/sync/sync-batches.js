@@ -81,13 +81,26 @@ async function syncBatches() {
         console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
         console.log(`🏢 Database: ${process.env.DB_DATABASE || 'green_releaf_dev'}`);
         
+        // Check for test limit
+        const testLimit = process.env.TEST_SYNC_LIMIT ? parseInt(process.env.TEST_SYNC_LIMIT) : 
+                         process.env.BATCH_SYNC_LIMIT ? parseInt(process.env.BATCH_SYNC_LIMIT) : null;
+        const chunkSize = process.env.BATCH_SYNC_CHUNK_SIZE ? parseInt(process.env.BATCH_SYNC_CHUNK_SIZE) : 50;
+        
+        if (testLimit) {
+            console.log(`🧪 TEST MODE: Processing first ${testLimit} batches only`);
+        }
+        console.log(`📦 Chunk size: ${chunkSize} batches per chunk`);
+        
         // Create sync history entry OUTSIDE transaction so it's always saved
         const licenseNumber = process.env.SYNC_LICENSE || 'CUL000063';
         historyId = await createSyncHistory(client, 'batches', licenseNumber, null, 'sync-batches.js');
         
         // Now run the actual sync (BatchSyncService handles its own transactions)
         await client.query('BEGIN');
-        const result = await batchSyncService.syncBatches();
+        const result = await batchSyncService.syncBatches({
+            testLimit: testLimit,
+            chunkSize: chunkSize
+        });
         await client.query('COMMIT');
         
         const duration = Date.now() - startTime;
