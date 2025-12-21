@@ -188,13 +188,73 @@ function renderManifestPreview(progress, preview) {
         </div>
     `;
 
-    // Calculate total value (would need invoice data)
-    // For now, just show placeholder
-    document.getElementById('total-value').textContent = 'N/A';
+    // Calculate total value from invoice data
+    // Use setTimeout to ensure DOM is ready
+    setTimeout(() => {
+        loadTotalValue(window.invoiceId);
+    }, 100);
 }
 
 /**
- * Create manifest
+ * Load total value for the invoice
+ */
+async function loadTotalValue(invoiceId) {
+    const totalElement = document.getElementById('total-value');
+    if (!totalElement) {
+        console.warn('Total value element not found');
+        return;
+    }
+    
+    try {
+        console.log(`[Manifest] Loading total value for invoice ${invoiceId}...`);
+        const response = await fetch(`/api/v1/invoices/${invoiceId}`);
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP ${response.status}: Failed to fetch invoice`);
+        }
+        
+        const data = await response.json();
+        console.log(`[Manifest] Invoice API response:`, data);
+        
+        // Handle response structure: { success: true, invoice: { total: ... } }
+        let total = 0;
+        if (data.success && data.invoice && data.invoice.total !== undefined) {
+            total = parseFloat(data.invoice.total || 0);
+            console.log(`[Manifest] Found total in data.invoice.total: ${total}`);
+        } else if (data.success && data.data && data.data.total !== undefined) {
+            total = parseFloat(data.data.total || 0);
+            console.log(`[Manifest] Found total in data.data.total: ${total}`);
+        } else if (data.data && data.data.total !== undefined) {
+            total = parseFloat(data.data.total || 0);
+            console.log(`[Manifest] Found total in data.data.total: ${total}`);
+        } else if (data.total !== undefined) {
+            total = parseFloat(data.total || 0);
+            console.log(`[Manifest] Found total in data.total: ${total}`);
+        } else {
+            console.warn('[Manifest] Total not found in response structure:', JSON.stringify(data, null, 2));
+            totalElement.textContent = 'N/A';
+            return;
+        }
+        
+        if (isNaN(total)) {
+            console.warn('[Manifest] Total is NaN:', total);
+            totalElement.textContent = 'N/A';
+            return;
+        }
+        
+        totalElement.textContent = `$${total.toFixed(2)}`;
+        console.log(`[Manifest] ✓ Total value displayed: $${total.toFixed(2)}`);
+    } catch (error) {
+        console.error('[Manifest] Error loading total value:', error);
+        if (totalElement) {
+            totalElement.textContent = 'N/A';
+        }
+    }
+}
+
+/**
+ * Section 17.2.2: Create manifest with dry run validation
  */
 async function createManifest() {
     const createBtn = document.querySelector('.btn-create');
@@ -208,11 +268,39 @@ async function createManifest() {
             throw new Error(previewData.error || 'Failed to get manifest preview');
         }
 
+        // Section 17.2.2: Perform dry run validation first
+        createBtn.disabled = true;
+        createBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Validating...';
+
+        const dryRunResponse = await fetch('/api/v1/fulfillment/manifest/validate-dry-run', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                invoice_id: window.invoiceId
+            })
+        });
+
+        const dryRunData = await dryRunResponse.json();
+
+        // Show validation results
+        const validationPassed = await showDryRunValidationResults(dryRunData, previewData);
+
+        if (!validationPassed) {
+            // Validation failed - user must fix issues before proceeding
+            createBtn.disabled = false;
+            createBtn.innerHTML = '<i class="fas fa-file-export"></i> Create Manifest(s)';
+            return;
+        }
+
         // Confirm before creating
         const confirmMessage = `Create manifest(s) for invoice ${previewData.payload.invoice_number}?\n\n` +
             `This will create ${previewData.payload.licenseCount} manifest(s) in METRC.`;
 
         if (!confirm(confirmMessage)) {
+            createBtn.disabled = false;
+            createBtn.innerHTML = '<i class="fas fa-file-export"></i> Create Manifest(s)';
             return;
         }
 
@@ -244,6 +332,110 @@ async function createManifest() {
         alert(`Error: ${error.message}`);
         createBtn.disabled = false;
         createBtn.innerHTML = '<i class="fas fa-file-export"></i> Create Manifest(s)';
+    }
+}
+
+/**
+ * Section 17.2.2: Show dry run validation results
+ * Returns true if validation passed and user wants to proceed, false otherwise
+ */
+async function showDryRunValidationResults(dryRunData, previewData) {
+    return new Promise((resolve) => {
+        // Create modal for validation results
+        const modal = document.createElement('div');
+        modal.id = 'dry-run-validation-modal';
+        modal.className = 'modal-overlay active';
+        
+        const allPassed = dryRunData.overall_success === true;
+        const hasErrors = dryRunData.has_errors === true;
+        
+        let validationContent = '';
+        
+        if (allPassed) {
+            // All validations passed
+            validationContent = `
+                <div class="validation-success">
+                    <i class="fas fa-check-circle"></i>
+                    <h3>Dry Run Validation Passed</h3>
+                    <p>All manifest(s) validated successfully. Ready to create in METRC.</p>
+                </div>
+            `;
+        } else {
+            // Show errors for each license
+            validationContent = `
+                <div class="validation-errors">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h3>Dry Run Validation Failed</h3>
+                    <p>The following issues were found during validation:</p>
+                    <div class="validation-details">
+                        ${dryRunData.validation_results.map(result => `
+                            <div class="license-validation ${result.success ? 'success' : 'error'}">
+                                <h4>License: ${result.license} ${result.success ? '<i class="fas fa-check"></i>' : '<i class="fas fa-times"></i>'}</h4>
+                                ${!result.success && result.errors && result.errors.length > 0 ? `
+                                    <ul class="error-list">
+                                        ${result.errors.map(err => `
+                                            <li>
+                                                ${err.package ? `<strong>Package ${err.package}:</strong> ` : ''}
+                                                ${err.message || err}
+                                            </li>
+                                        `).join('')}
+                                    </ul>
+                                ` : ''}
+                                ${result.warnings && result.warnings.length > 0 ? `
+                                    <ul class="warning-list">
+                                        ${result.warnings.map(warn => `
+                                            <li>
+                                                ${warn.package ? `<strong>Package ${warn.package}:</strong> ` : ''}
+                                                ${warn.message || warn}
+                                            </li>
+                                        `).join('')}
+                                    </ul>
+                                ` : ''}
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+        
+        modal.innerHTML = `
+            <div class="modal-content" style="max-width: 700px;">
+                <h3>Manifest Validation Results</h3>
+                ${validationContent}
+                <div class="modal-actions" style="margin-top: 2rem;">
+                    ${allPassed ? `
+                        <button type="button" class="btn-back" onclick="closeDryRunModal(false)">Cancel</button>
+                        <button type="button" class="btn-create" onclick="closeDryRunModal(true)" style="background: #10b981;">
+                            <i class="fas fa-check"></i> Proceed with Creation
+                        </button>
+                    ` : `
+                        <button type="button" class="btn-back" onclick="closeDryRunModal(false)" style="flex: 1;">
+                            <i class="fas fa-times"></i> Close
+                        </button>
+                    `}
+                </div>
+            </div>
+        `;
+        
+        document.body.appendChild(modal);
+        
+        // Store resolve function for modal close
+        window._dryRunModalResolve = resolve;
+    });
+}
+
+/**
+ * Close dry run validation modal
+ */
+function closeDryRunModal(proceed) {
+    const modal = document.getElementById('dry-run-validation-modal');
+    if (modal) {
+        modal.remove();
+    }
+    
+    if (window._dryRunModalResolve) {
+        window._dryRunModalResolve(proceed);
+        delete window._dryRunModalResolve;
     }
 }
 

@@ -106,10 +106,16 @@ class AllocationService {
             `, [quantity, batchId]);
 
             // Update line item if provided, otherwise log allocation separately
+            // Section 17.3.1: Add explicit allocation timestamp tracking
             if (lineItemId) {
                 await client.query(`
                     UPDATE "ORDERS-invoice-line-items"
-                    SET quantity_allocated = COALESCE(quantity_allocated, 0) + $1
+                    SET 
+                        quantity_allocated = COALESCE(quantity_allocated, 0) + $1,
+                        allocated_at = CASE 
+                            WHEN allocated_at IS NULL THEN NOW()
+                            ELSE allocated_at
+                        END
                     WHERE id = $2
                 `, [quantity, lineItemId]);
             }

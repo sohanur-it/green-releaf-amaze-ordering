@@ -11,14 +11,21 @@ class ManifestStatusTrackingService {
     /**
      * Sync manifest statuses from METRC
      * Called by scheduled job every 15 minutes
+     * Section 8.1: Make LIMIT configurable
      */
-    async syncManifestStatuses() {
+    async syncManifestStatuses(limit = null) {
         const client = await pool.connect();
         let syncedCount = 0;
         let errorCount = 0;
 
         try {
-            // Get all invoices with manifests that need status checking
+            // Section 8.1.2: Make LIMIT configurable (currently hardcoded to 100)
+            // Get limit from environment variable or use default
+            const syncLimit = limit || parseInt(process.env.MANIFEST_STATUS_SYNC_LIMIT || '100', 10);
+            
+            // Section 8.1.1: Query includes Partially_Manifested, Manifest_Voided, Partially_Voided
+            // This is intentional - we need to track status of all manifests, including voided ones
+            // to verify they're actually voided in METRC
             const invoices = await client.query(`
                 SELECT 
                     id,
@@ -33,34 +40,125 @@ class ManifestStatusTrackingService {
                     AND manifest_metrc_ids IS NOT NULL
                     AND jsonb_array_length(manifest_metrc_ids::jsonb) > 0
                 ORDER BY manifest_created_at DESC
-                LIMIT 100
-            `);
+                LIMIT $1
+            `, [syncLimit]);
 
             console.log(`[Status Sync] Checking ${invoices.rows.length} invoices...`);
 
+            // Section 8.4.1: Add retry logic for API failures
+            const maxRetries = 3;
+            const retryDelay = 2000; // 2 seconds
+            const persistentFailures = new Map(); // Section 8.4.2: Track persistent failures
+            
             for (const invoice of invoices.rows) {
-                try {
-                    const manifestIds = Array.isArray(invoice.manifest_metrc_ids)
-                        ? invoice.manifest_metrc_ids
-                        : JSON.parse(invoice.manifest_metrc_ids || '[]');
+                let retryCount = 0;
+                let success = false;
+                
+                while (retryCount < maxRetries && !success) {
+                    try {
+                        const manifestIds = Array.isArray(invoice.manifest_metrc_ids)
+                            ? invoice.manifest_metrc_ids
+                            : JSON.parse(invoice.manifest_metrc_ids || '[]');
 
-                    // Check status for each manifest
-                    const statusResults = [];
-                    for (const manifest of manifestIds) {
-                        const status = await this.checkManifestStatus(manifest.id, manifest.license);
-                        statusResults.push({
-                            manifest: manifest,
-                            status: status
-                        });
+                        // Check status for each manifest
+                        const statusResults = [];
+                        for (const manifest of manifestIds) {
+                            const status = await this.checkManifestStatus(manifest.id, manifest.license);
+                            statusResults.push({
+                                manifest: manifest,
+                                status: status
+                            });
+                        }
+
+                        // Process status updates
+                        await this.processStatusUpdates(invoice.id, invoice.status, statusResults, client);
+                        syncedCount++;
+                        success = true;
+
+                    } catch (error) {
+                        retryCount++;
+                        const isRetryable = error.response?.status >= 500 || 
+                                           error.message?.includes('timeout') ||
+                                           error.message?.includes('ECONNRESET');
+                        
+                        if (isRetryable && retryCount < maxRetries) {
+                            console.warn(`[Status Sync] Retryable error for invoice ${invoice.invoice_number} (attempt ${retryCount}/${maxRetries}):`, error.message);
+                            await new Promise(resolve => setTimeout(resolve, retryDelay * retryCount));
+                            continue; // Retry
+                        } else {
+                            // Section 8.4.3: Add investigation logging: Log unexpected statuses for investigation
+                            console.error(`[Status Sync] Error processing invoice ${invoice.invoice_number}:`, error.message);
+                            
+                            // Log to database for investigation
+                            try {
+                                await client.query(`
+                                    INSERT INTO "ORDERS-invoice-history" (
+                                        fk_invoice_id,
+                                        modification_type,
+                                        reason,
+                                        changed_by_system
+                                    ) VALUES ($1, 'status_sync_error', $2, true)
+                                `, [
+                                    invoice.id,
+                                    `Status sync error: ${error.message}. Retry attempts: ${retryCount}/${maxRetries}`
+                                ]);
+                            } catch (logError) {
+                                console.error(`[Status Sync] Failed to log error:`, logError.message);
+                            }
+                            
+                            errorCount++;
+                            
+                            // Section 8.4.2: Track persistent failures
+                            const failureKey = `${invoice.id}`;
+                            const currentFailures = persistentFailures.get(failureKey) || 0;
+                            persistentFailures.set(failureKey, currentFailures + 1);
+                            
+                            success = true; // Stop retrying
+                        }
                     }
-
-                    // Process status updates
-                    await this.processStatusUpdates(invoice.id, invoice.status, statusResults, client);
-                    syncedCount++;
-
-                } catch (error) {
-                    console.error(`[Status Sync] Error processing invoice ${invoice.invoice_number}:`, error.message);
-                    errorCount++;
+                }
+            }
+            
+            // Section 8.4.2: Add persistent failure alerting: Alert admin if failures persist (3+ cycles)
+            for (const [invoiceIdStr, failureCount] of persistentFailures.entries()) {
+                if (failureCount >= 3) {
+                    const invoiceId = parseInt(invoiceIdStr, 10);
+                    const invoice = await client.query(`
+                        SELECT invoice_number
+                        FROM "ORDERS-invoices"
+                        WHERE id = $1
+                    `, [invoiceId]);
+                    
+                    if (invoice.rows.length > 0) {
+                        const notificationStore = require('./notificationStoreService');
+                        const adminUsers = await client.query(`
+                            SELECT DISTINCT u.id
+                            FROM users u
+                            JOIN user_roles ur ON u.id = ur.user_id
+                            JOIN roles r ON ur.role_id = r.id
+                            WHERE (LOWER(r.name) IN ('administrator', 'fulfillment_admin')
+                               OR LOWER(r.role_name) IN ('administrator', 'fulfillment_admin'))
+                               AND u.status = 'active'
+                        `);
+                        
+                        for (const admin of adminUsers.rows) {
+                            await notificationStore.createNotification({
+                                userId: admin.id,
+                                type: 'status_sync_persistent_failure',
+                                title: `Persistent Status Sync Failure: ${invoice.rows[0].invoice_number}`,
+                                message: `Invoice ${invoice.rows[0].invoice_number} has failed status sync ${failureCount} times. Manual intervention required.`,
+                                payload: {
+                                    invoice_id: invoiceId,
+                                    invoice_number: invoice.rows[0].invoice_number,
+                                    failure_count: failureCount
+                                },
+                                priority: 'high',
+                                requiresAck: false
+                            });
+                        }
+                        
+                        console.warn(`[Status Sync] ⚠️ Alerted admins of persistent failure for invoice ${invoice.rows[0].invoice_number} (${failureCount} failures)`);
+                    }
                 }
             }
 
@@ -97,6 +195,32 @@ class ManifestStatusTrackingService {
                 timeout: 15000
             });
 
+            // Section 8.3.1: Extract rejection reason from METRC response (currently hardcoded)
+            // Check for rejection reasons in various possible locations
+            let rejectionReason = null;
+            const data = response.data;
+            
+            if (data.rejectionReason) {
+                rejectionReason = data.rejectionReason;
+            } else if (data.rejection_reason) {
+                rejectionReason = data.rejection_reason;
+            } else if (data.rejectedReason) {
+                rejectionReason = data.rejectedReason;
+            } else if (data.notes && typeof data.notes === 'string' && data.notes.toLowerCase().includes('reject')) {
+                rejectionReason = data.notes;
+            } else if (data.packages && Array.isArray(data.packages)) {
+                // Check if any package has rejection reason
+                const rejectedPackage = data.packages.find(p => p.rejectionReason || p.rejection_reason || p.rejectedReason);
+                if (rejectedPackage) {
+                    rejectionReason = rejectedPackage.rejectionReason || rejectedPackage.rejection_reason || rejectedPackage.rejectedReason;
+                }
+            }
+            
+            // Default if no reason found
+            if (!rejectionReason && (data.packagesSent > 0 && data.packagesReceived < data.packagesSent)) {
+                rejectionReason = 'Package rejected by receiving facility'; // Fallback
+            }
+
             return {
                 success: true,
                 status: response.data.status || 'Unknown',
@@ -105,6 +229,7 @@ class ManifestStatusTrackingService {
                 estimatedArrivalDateTime: response.data.estimatedArrivalDateTime || null,
                 packagesSent: response.data.packagesSent || 0,
                 packagesReceived: response.data.packagesReceived || 0,
+                rejectionReason: rejectionReason,  // Section 8.3.1: Include extracted rejection reason
                 data: response.data
             };
         } catch (error) {
@@ -174,14 +299,36 @@ class ManifestStatusTrackingService {
 
             // Handle Delivered status
             if (allDelivered && ['Manifested', 'Shipped'].includes(currentStatus)) {
-                newStatus = 'Delivered';
+                // Section 8.2.1: Add explicit check: Verify ActualDeliveryDate is set before proceeding
                 const firstDelivery = statusResults
                     .map(r => r.status.actualDeliveryDate)
                     .filter(d => d)
                     .sort()[0];
-                if (firstDelivery) {
-                    updates.delivered_at = firstDelivery;
+                
+                if (!firstDelivery) {
+                    // Section 8.4.3: Add investigation logging: Log unexpected statuses for investigation
+                    console.warn(`[Status Sync] ⚠️ Invoice ${invoiceId} marked as Delivered but ActualDeliveryDate is not set. Status results:`, JSON.stringify(statusResults.map(r => ({ status: r.status.status, actualDeliveryDate: r.status.actualDeliveryDate }))));
+                    
+                    // Log to invoice history for investigation
+                    await client.query(`
+                        INSERT INTO "ORDERS-invoice-history" (
+                            fk_invoice_id,
+                            modification_type,
+                            reason,
+                            changed_by_system
+                        ) VALUES ($1, 'status_sync_issue', $2, true)
+                    `, [
+                        invoiceId,
+                        'Status sync detected Delivered but ActualDeliveryDate is not set. Manual review required.'
+                    ]);
+                    
+                    // Don't transition to Delivered without actual delivery date
+                    await client.query('COMMIT');
+                    return;
                 }
+                
+                newStatus = 'Delivered';
+                updates.delivered_at = firstDelivery;
 
                 // Finalize inventory if not already done
                 if (!updates.inventory_finalized) {
@@ -553,6 +700,9 @@ class ManifestStatusTrackingService {
                         WHERE id = $1
                     `, [pkg.id]);
 
+                    // Section 8.3.1: Extract rejection reason from METRC response (currently hardcoded)
+                    const rejectionReason = result.status.rejectionReason || 'Package rejected by receiving facility';
+                    
                     // Insert into rejected packages table
                     await client.query(`
                         INSERT INTO "ORDERS-rejected_packages" (
@@ -570,7 +720,7 @@ class ManifestStatusTrackingService {
                         pkg.package_label,
                         pkg.package_metrc_id,
                         result.manifest.number,
-                        'Package rejected by receiving facility',
+                        rejectionReason,  // Section 8.3.1: Use extracted rejection reason
                         result.manifest.license,
                         pkg.batch_id
                     ]);
@@ -580,7 +730,57 @@ class ManifestStatusTrackingService {
                         ...pkg,
                         synclicense: pkg.synclicense || result.manifest.license
                     }, client);
+                    
+                    // Collect rejection details for notification
+                    rejectionDetails.push({
+                        package_label: pkg.package_label,
+                        manifest_number: result.manifest.number,
+                        rejection_reason: rejectionReason
+                    });
                 }
+            }
+        }
+        
+        // Section 8.3.2: Add admin notification on rejection: Invoice has rejected packages - review needed
+        if (hasRejections) {
+            const invoice = await client.query(`
+                SELECT invoice_number
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [invoiceId]);
+            
+            if (invoice.rows.length > 0) {
+                const invoiceNumber = invoice.rows[0].invoice_number;
+                const notificationStore = require('./notificationStoreService');
+                
+                // Notify all admins
+                const adminUsers = await client.query(`
+                    SELECT DISTINCT u.id
+                    FROM users u
+                    JOIN user_roles ur ON u.id = ur.user_id
+                    JOIN roles r ON ur.role_id = r.id
+                    WHERE (LOWER(r.name) IN ('administrator', 'fulfillment_admin', 'sales admin')
+                       OR LOWER(r.role_name) IN ('administrator', 'fulfillment_admin', 'sales admin'))
+                       AND u.status = 'active'
+                `);
+                
+                for (const admin of adminUsers.rows) {
+                    await notificationStore.createNotification({
+                        userId: admin.id,
+                        type: 'package_rejection',
+                        title: `Package Rejection: ${invoiceNumber}`,
+                        message: `Invoice ${invoiceNumber} has ${rejectionDetails.length} rejected package(s) - review needed`,
+                        payload: {
+                            invoice_id: invoiceId,
+                            invoice_number: invoiceNumber,
+                            rejected_packages: rejectionDetails
+                        },
+                        priority: 'high',
+                        requiresAck: false
+                    });
+                }
+                
+                console.log(`[Status Sync] ✓ Notified ${adminUsers.rows.length} admin(s) of package rejection for invoice ${invoiceNumber}`);
             }
         }
     }

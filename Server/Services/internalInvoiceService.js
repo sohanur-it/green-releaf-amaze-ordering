@@ -307,10 +307,15 @@ class InternalInvoiceService {
         // Allocate from batch (using allocation service for proper WebSocket broadcasts)
         const allocationService = require('./allocationService');
         
-        // Update quantity_allocated on line item first
+        // Section 17.3.1: Update quantity_allocated on line item with allocation timestamp tracking
         await client.query(`
             UPDATE "ORDERS-invoice-line-items"
-            SET quantity_allocated = $1
+            SET 
+                quantity_allocated = $1,
+                allocated_at = CASE 
+                    WHEN allocated_at IS NULL THEN NOW()
+                    ELSE allocated_at
+                END
             WHERE id = $2
         `, [itemData.quantity, lineItem.rows[0].id]);
         

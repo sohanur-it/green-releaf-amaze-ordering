@@ -152,17 +152,72 @@ class WebSocketService {
 
     /**
      * Handle disconnection cleanup
+     * Section 10.3.2: Add disconnection cleanup - Release locks held by disconnected user, broadcast release events
      */
-    handleDisconnection(ws) {
+    async handleDisconnection(ws) {
         const userId = ws.userId;
 
         if (userId) {
             this.userConnections.delete(userId);
+            
+            // Section 10.3.2: Release locks held by disconnected user
+            try {
+                await this.releaseLocksForDisconnectedUser(userId);
+            } catch (error) {
+                console.error(`[WebSocket] Error releasing locks for disconnected user ${userId}:`, error.message);
+            }
         }
 
         // Remove from all batch subscriptions
         for (const [batchId, clients] of this.batchSubscriptions.entries()) {
             clients.delete(ws);
+        }
+    }
+    
+    /**
+     * Section 10.3.2: Release locks held by disconnected user
+     */
+    async releaseLocksForDisconnectedUser(userId) {
+        const client = await pool.connect();
+        
+        try {
+            // Find all active scanning sessions for this user
+            const sessions = await client.query(`
+                SELECT 
+                    id,
+                    fk_invoice_id,
+                    currently_locked_packages
+                FROM "ORDERS-scanning-sessions"
+                WHERE fk_user_id = $1
+                    AND session_status = 'active'
+                    AND currently_locked_packages IS NOT NULL
+                    AND jsonb_array_length(currently_locked_packages::jsonb) > 0
+            `, [userId]);
+            
+            for (const session of sessions.rows) {
+                const lockedPackages = Array.isArray(session.currently_locked_packages)
+                    ? session.currently_locked_packages
+                    : JSON.parse(session.currently_locked_packages || '[]');
+                
+                if (lockedPackages.length > 0) {
+                    // Clear locked packages from session
+                    await client.query(`
+                        UPDATE "ORDERS-scanning-sessions"
+                        SET currently_locked_packages = '[]'::jsonb
+                        WHERE id = $1
+                    `, [session.id]);
+                    
+                    // Broadcast release events
+                    await this.broadcastPackageReleased(lockedPackages, session.fk_invoice_id);
+                    
+                    console.log(`[WebSocket] Released ${lockedPackages.length} package(s) for disconnected user ${userId} (session ${session.id})`);
+                }
+            }
+        } catch (error) {
+            console.error(`[WebSocket] Error in releaseLocksForDisconnectedUser:`, error.message);
+            throw error;
+        } finally {
+            client.release();
         }
     }
 
@@ -365,6 +420,7 @@ class WebSocketService {
 
     /**
      * Handle notification acknowledgment
+     * Section 10.2: Add WebSocket acknowledgment handler - emit notification:acknowledged event
      */
     async handleNotificationAcknowledgment(ws, notificationId) {
         const userId = ws.userId;
@@ -372,8 +428,33 @@ class WebSocketService {
         try {
             await notificationStore.markNotificationAcknowledged(notificationId, userId);
             console.log(`✓ Notification ${notificationId} acknowledged by user ${userId}`);
+            
+            // Section 10.2: Emit notification:acknowledged event via WebSocket
+            const message = JSON.stringify({
+                type: 'notification:acknowledged',
+                notification_id: notificationId,
+                success: true,
+                timestamp: new Date().toISOString()
+            });
+            
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(message);
+            }
         } catch (error) {
             console.error('❌ Error acknowledging notification:', error.message);
+            
+            // Section 10.2: Send error response via WebSocket
+            const errorMessage = JSON.stringify({
+                type: 'notification:acknowledged',
+                notification_id: notificationId,
+                success: false,
+                error: error.message,
+                timestamp: new Date().toISOString()
+            });
+            
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(errorMessage);
+            }
         }
     }
 
@@ -596,11 +677,11 @@ class WebSocketService {
 
             const payload = {
                 type: 'package:locked',
-                packageLabel,
-                userId,
-                userName,
-                invoiceId,
-                invoiceNumber,
+                package_label: packageLabel,  // Section 10.1: Use consistent naming
+                locked_by_user_id: userId,
+                locked_by_user_name: userName,  // Section 10.1: Include user name for UI display
+                invoice_id: invoiceId,
+                invoice_number: invoiceNumber,
                 timestamp: new Date().toISOString()
             };
 
@@ -793,6 +874,70 @@ class WebSocketService {
         };
 
         this.broadcastJson(payload);
+    }
+
+    /**
+     * Module 5: Broadcast order approved event
+     * Called when an invoice transitions to Approved status
+     * @param {number} invoiceId 
+     * @param {string} invoiceNumber 
+     */
+    async broadcastOrderApproved(invoiceId, invoiceNumber) {
+        if (!this.wss) return;
+
+        try {
+            const client = await pool.connect();
+            const result = await client.query(`
+                SELECT 
+                    i.id,
+                    i.invoice_number,
+                    i.status,
+                    i.approved_at,
+                    i.fk_buyer_id,
+                    i.fk_location_id,
+                    b.name as buyer_name,
+                    bl.name as location_name,
+                    bl.city,
+                    bl.state,
+                    bl.delivery_zone
+                FROM "ORDERS-invoices" i
+                LEFT JOIN "ORDERS-buyers" b ON i.fk_buyer_id = b.entry_id
+                LEFT JOIN "ORDERS-buyer_locations" bl ON i.fk_location_id = bl.entry_id
+                WHERE i.id = $1
+            `, [invoiceId]);
+            client.release();
+
+            if (result.rows.length === 0) {
+                console.warn(`Invoice ${invoiceId} not found for broadcast`);
+                return;
+            }
+
+            const invoice = result.rows[0];
+            const payload = {
+                type: 'order:approved',
+                invoice_id: invoiceId,
+                invoice_number: invoiceNumber || invoice.invoice_number,
+                invoice: {
+                    id: invoice.id,
+                    invoice_number: invoice.invoice_number,
+                    status: invoice.status,
+                    approved_at: invoice.approved_at,
+                    buyer_id: invoice.fk_buyer_id,
+                    buyer_name: invoice.buyer_name,
+                    location_id: invoice.fk_location_id,
+                    location_name: invoice.location_name,
+                    city: invoice.city,
+                    state: invoice.state,
+                    delivery_zone: invoice.delivery_zone
+                },
+                timestamp: new Date().toISOString()
+            };
+
+            this.broadcastJson(payload);
+            console.log(`📡 Broadcasted order approved: ${invoiceNumber || invoice.invoice_number}`);
+        } catch (error) {
+            console.error('Error broadcasting order approved:', error);
+        }
     }
 }
 

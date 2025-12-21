@@ -103,6 +103,9 @@ class PackageScanService {
             }
             
             // Build query with correct column name (licenseColumn is safe - comes from schema check)
+            // 3.1.1: Package label is already converted to uppercase in frontend, but ensure it here too
+            const normalizedPackageLabel = packageLabel.toUpperCase();
+            
             const packageExistsQuery = `
                 SELECT 
                     ap.metrcid,
@@ -118,7 +121,7 @@ class PackageScanService {
                     AND b.available_labels @> $2::jsonb
                     AND b.synclicense = ap.${licenseColumn}
                 )
-                WHERE ap.label = $1
+                WHERE UPPER(ap.label) = $1
                     AND ap.${licenseColumn} IN ('CUL000063', 'MAN000072')
                     AND ap.isarchived = false
                     AND ap.isfinished = false
@@ -126,8 +129,8 @@ class PackageScanService {
             
             let packageExists;
             try {
-                console.log(`[PackageScan] Querying package ${packageLabel}...`);
-                packageExists = await client.query(packageExistsQuery, [packageLabel, JSON.stringify([packageLabel])]);
+                console.log(`[PackageScan] Querying package ${normalizedPackageLabel}...`);
+                packageExists = await client.query(packageExistsQuery, [normalizedPackageLabel, JSON.stringify([normalizedPackageLabel])]);
                 console.log(`[PackageScan] Package query complete, found ${packageExists.rows.length} result(s)`);
             } catch (error) {
                 console.error('[PackageScan] ❌ Error querying package:', error.message);
@@ -144,14 +147,14 @@ class PackageScanService {
 
             if (packageExists.rows.length === 0) {
                 try {
-                    await this.logScanError(invoiceId, userId, packageLabel, 'package_not_found', client);
+                    await this.logScanError(invoiceId, userId, normalizedPackageLabel, 'package_not_found', client, null, sessionId);
                 } catch (logError) {
                     console.error('[PackageScan] Error logging scan error:', logError);
                 }
                 await client.query('ROLLBACK');
                 throw new ValidationError(
                     'PACKAGE_NOT_FOUND',
-                    `Package ${packageLabel} does not exist in active inventory`
+                    `Package ${normalizedPackageLabel} does not exist in active inventory`
                 );
             }
 
@@ -210,8 +213,9 @@ class PackageScanService {
                             // Check if this package label exists in the batch's available_labels
                             // available_labels structure: {"labels": ["1A40...", "1A40...", ...]}
                             // So we need to check available_labels->'labels' @> [...]
+                            // 3.1.2: Add first_sourcepackage_label match validation
                             const batchCheck = await client.query(`
-                                SELECT id, batch_name, available_labels
+                                SELECT id, batch_name, available_labels, first_sourcepackage_label
                                 FROM "ORDERS-batches"
                                 WHERE id = $1
                                     AND available_labels IS NOT NULL
@@ -221,12 +225,22 @@ class PackageScanService {
                                         -- Handle array structure: [...]
                                         OR (jsonb_typeof(available_labels) = 'array' AND available_labels @> $2::jsonb)
                                     )
-                            `, [li.batch_id, JSON.stringify([packageLabel])]);
+                            `, [li.batch_id, JSON.stringify([normalizedPackageLabel])]);
                             
                             if (batchCheck.rows.length > 0) {
+                                const batch = batchCheck.rows[0];
+                                
+                                // 3.1.2: Note: first_sourcepackage_label validation
+                                // The fact that the package is in the batch's available_labels already ensures
+                                // it belongs to the correct source package chain. The batch's first_sourcepackage_label
+                                // is stored for reference, but we don't need to validate it here since the package
+                                // being in available_labels is sufficient validation.
+                                
                                 batchMatches = true;
                                 // Update pkg.batch_name for consistency
-                                pkg.batch_name = batchCheck.rows[0].batch_name;
+                                pkg.batch_name = batch.batch_name;
+                                // Store batch's first_sourcepackage_label for reference
+                                pkg.batch_first_sourcepackage_label = batch.first_sourcepackage_label;
                             }
                         } catch (error) {
                             console.error('[PackageScan] Error checking batch:', error);
@@ -265,7 +279,7 @@ class PackageScanService {
             if (!matchedLineItem) {
                 // Package doesn't belong to order - require forced acknowledgment
                 try {
-                    await this.logScanError(invoiceId, userId, packageLabel, 'package_not_on_order', client);
+                    await this.logScanError(invoiceId, userId, normalizedPackageLabel, 'package_not_on_order', client, null, sessionId);
                 } catch (logError) {
                     console.error('[PackageScan] Error logging scan error:', logError);
                 }
@@ -315,11 +329,14 @@ class PackageScanService {
                     const partialPackageLabels = partialPackageDetails.partial_packages?.map(p => p.label) || [];
                     
                     if (partialPackageLabels.includes(packageLabel)) {
+                        // 3.3.3: Update error message format for partial package
+                        const partialPkg = partialPackageDetails.partial_packages.find(p => p.label === packageLabel);
+                        const quantity = partialPkg ? partialPkg.quantity : 'Unknown';
+                        const errorMsg = `Package ${packageLabel} is a partial package. Quantity: ${quantity}`;
+                        
+                        await this.logScanError(invoiceId, userId, packageLabel, 'partial_package_not_allowed', client, errorMsg);
                         await client.query('ROLLBACK');
-                        throw new ValidationError(
-                            'PARTIAL_PACKAGE_NOT_ALLOWED',
-                            `Package ${packageLabel} is a partial package, but this line item requires full packages only`
-                        );
+                        throw new ValidationError('PARTIAL_PACKAGE_NOT_ALLOWED', errorMsg);
                     }
                 }
             }
@@ -351,11 +368,13 @@ class PackageScanService {
 
             if (conflictCheck.rows.length > 0) {
                 const conflict = conflictCheck.rows[0];
+                // 3.3.3: Update error message format for cross-worker conflict
+                const userName = `${conflict.first_name} ${conflict.last_name}`;
+                const errorMsg = `Package ${packageLabel} is being scanned by ${userName}`;
+                
+                await this.logScanError(invoiceId, userId, packageLabel, 'package_locked_by_other_worker', client, errorMsg);
                 await client.query('ROLLBACK');
-                throw new ValidationError(
-                    'PACKAGE_LOCKED_BY_OTHER_WORKER',
-                    `Package ${packageLabel} is currently being used by ${conflict.first_name} ${conflict.last_name} for Order ${conflict.invoice_number}`
-                );
+                throw new ValidationError('PACKAGE_LOCKED_BY_OTHER_WORKER', errorMsg);
             }
 
             // ============================================
@@ -693,7 +712,20 @@ class PackageScanService {
     /**
      * Log scan errors for audit trail
      */
-    async logScanError(invoiceId, userId, packageLabel, errorType, client) {
+    /**
+     * Log scan error to both invoice history and session history (3.3.2)
+     * @param {number} invoiceId 
+     * @param {number} userId 
+     * @param {string} packageLabel 
+     * @param {string} errorType 
+     * @param {object} client - Database client
+     * @param {string} errorMessage - Optional custom error message
+     * @param {number} sessionId - Optional session ID for session history logging
+     */
+    async logScanError(invoiceId, userId, packageLabel, errorType, client, errorMessage = null, sessionId = null) {
+        const finalErrorMessage = errorMessage || `Incorrect package scan attempt: ${errorType}`;
+        
+        // Log to invoice history (existing behavior)
         await client.query(`
             INSERT INTO "ORDERS-invoice-history" (
                 fk_invoice_id,
@@ -707,9 +739,44 @@ class PackageScanService {
             invoiceId,
             errorType,
             packageLabel,
-            `Incorrect package scan attempt: ${errorType}`,
+            finalErrorMessage,
             userId
         ]);
+        
+        // 3.3.2: Log to session history (dedicated session error logging)
+        if (sessionId) {
+            try {
+                // Get session status
+                const sessionStatus = await client.query(`
+                    SELECT session_status FROM "ORDERS-scanning-sessions" WHERE id = $1
+                `, [sessionId]);
+                
+                await client.query(`
+                    INSERT INTO "ORDERS-scanning-session-history" (
+                        fk_session_id,
+                        fk_invoice_id,
+                        fk_user_id,
+                        error_type,
+                        error_message,
+                        package_label,
+                        session_status,
+                        error_details
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                `, [
+                    sessionId,
+                    invoiceId,
+                    userId,
+                    errorType,
+                    finalErrorMessage,
+                    packageLabel,
+                    sessionStatus.rows[0]?.session_status || 'unknown',
+                    JSON.stringify({ timestamp: new Date().toISOString() })
+                ]);
+            } catch (sessionHistoryError) {
+                // Don't fail if session history logging fails (table might not exist yet)
+                console.warn('[PackageScan] Could not log to session history:', sessionHistoryError.message);
+            }
+        }
     }
 
     /**

@@ -206,8 +206,8 @@ class MasterScheduler {
         scheduledCount++;
         console.log('📅 Scheduled batch auto-promotion job (every 15 minutes during business hours)');
 
-        // Schedule scanning session auto-abandon job (every 10 minutes, 24/7)
-        const sessionAbandonJob = cron.schedule('*/10 * * * *', async () => {
+        // Schedule scanning session auto-abandon job (every 5 minutes, 24/7) - 3.4.1: Changed from 10 to 5 minutes
+        const sessionAbandonJob = cron.schedule('*/5 * * * *', async () => {
             try {
                 console.log('🧹 Running scanning session auto-abandon job...');
                 const result = await scanningSessionService.abandonInactiveSessions();
@@ -224,7 +224,7 @@ class MasterScheduler {
 
         this.jobs.set('sessionAutoAbandon', sessionAbandonJob);
         scheduledCount++;
-        console.log('📅 Scheduled scanning session auto-abandon job (every 10 minutes)');
+        console.log('📅 Scheduled scanning session auto-abandon job (every 5 minutes)');
 
         // Schedule manifest status tracking job (every 15 minutes, 24/7)
         const manifestStatusTrackingService = require('./manifestStatusTrackingService');

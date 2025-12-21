@@ -250,6 +250,106 @@
     font-weight: 600;
     cursor: pointer;
 }
+
+/* Section 17.2.2: Dry Run Validation Modal Styles */
+.validation-success {
+    background: #d1fae5;
+    border: 2px solid #10b981;
+    border-radius: 8px;
+    padding: 1.5rem;
+    text-align: center;
+    margin: 1rem 0;
+}
+
+.validation-success i {
+    font-size: 3rem;
+    color: #10b981;
+    margin-bottom: 1rem;
+}
+
+.validation-success h3 {
+    margin: 0.5rem 0;
+    color: #065f46;
+}
+
+.validation-errors {
+    background: #fee2e2;
+    border: 2px solid #ef4444;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+}
+
+.validation-errors i {
+    font-size: 2rem;
+    color: #ef4444;
+    margin-bottom: 0.5rem;
+}
+
+.validation-errors h3 {
+    margin: 0.5rem 0;
+    color: #991b1b;
+}
+
+.validation-details {
+    margin-top: 1.5rem;
+}
+
+.license-validation {
+    background: white;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border-left: 4px solid #9ca3af;
+}
+
+.license-validation.success {
+    border-left-color: #10b981;
+}
+
+.license-validation.error {
+    border-left-color: #ef4444;
+}
+
+.license-validation h4 {
+    margin: 0 0 0.75rem 0;
+    color: var(--text-color);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.license-validation h4 i {
+    font-size: 1rem;
+}
+
+.license-validation.success h4 i {
+    color: #10b981;
+}
+
+.license-validation.error h4 i {
+    color: #ef4444;
+}
+
+.error-list, .warning-list {
+    margin: 0.5rem 0 0 1.5rem;
+    padding: 0;
+    list-style: disc;
+}
+
+.error-list li {
+    color: #991b1b;
+    margin: 0.5rem 0;
+}
+
+.warning-list li {
+    color: #92400e;
+    margin: 0.5rem 0;
+}
+
+.error-list strong, .warning-list strong {
+    font-family: 'Courier New', monospace;
+}
 </style>
 
 <div class="manifest-container">

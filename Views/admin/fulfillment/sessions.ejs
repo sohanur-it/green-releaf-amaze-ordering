@@ -109,6 +109,18 @@
         </button>
     </div>
 
+    <!-- 3.4.3: Abandoned Sessions Count Dashboard -->
+    <div class="stats-cards" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+        <div class="stat-card" style="background: var(--card-bg, white); padding: 1.5rem; border-radius: 12px; box-shadow: var(--card-shadow, 0 2px 8px rgba(0,0,0,0.1)); border-left: 4px solid #3b82f6;">
+            <h3 id="stat-active-sessions" style="margin: 0 0 0.5rem 0; font-size: 2rem; font-weight: 700; color: var(--text-color);">0</h3>
+            <p style="margin: 0; color: var(--text-light); font-size: 0.9rem;">Active Sessions</p>
+        </div>
+        <div class="stat-card" style="background: var(--card-bg, white); padding: 1.5rem; border-radius: 12px; box-shadow: var(--card-shadow, 0 2px 8px rgba(0,0,0,0.1)); border-left: 4px solid #f59e0b;">
+            <h3 id="stat-abandoned-sessions" style="margin: 0 0 0.5rem 0; font-size: 2rem; font-weight: 700; color: var(--text-color);">0</h3>
+            <p style="margin: 0; color: var(--text-light); font-size: 0.9rem;">Abandoned (Last 7 Days)</p>
+        </div>
+    </div>
+
     <div class="filter-bar">
         <div class="filter-group">
             <label>Worker</label>
@@ -119,6 +131,23 @@
         <div class="filter-group">
             <label>Duration (minutes)</label>
             <input type="number" id="duration-filter" placeholder="Greater than" onchange="applyFilters()">
+        </div>
+        <!-- 3.6.3: Add sort options -->
+        <div class="filter-group">
+            <label>Sort By</label>
+            <select id="sort-by" onchange="applyFilters()">
+                <option value="last_activity">Last Activity</option>
+                <option value="duration">Duration</option>
+                <option value="invoice_number">Invoice Number</option>
+                <option value="worker">Worker</option>
+            </select>
+        </div>
+        <div class="filter-group">
+            <label>Order</label>
+            <select id="sort-order" onchange="applyFilters()">
+                <option value="desc">Descending</option>
+                <option value="asc">Ascending</option>
+            </select>
         </div>
     </div>
 
@@ -157,6 +186,52 @@
             <div class="modal-actions">
                 <button type="button" class="btn-back" onclick="closeForceCompleteModal()">Cancel</button>
                 <button type="submit" class="btn-force-complete">Force Complete</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 3.6.4 & 3.6.5: JSON Editor Modal with Validation Warning -->
+<div class="modal-overlay" id="json-editor-modal">
+    <div class="modal-content" style="max-width: 800px;">
+        <h3><i class="fas fa-code"></i> Edit Session Data (JSON)</h3>
+        <!-- 3.6.5: Validation warning modal -->
+        <div id="json-warning-banner" style="background: #fef3c7; border: 2px solid #f59e0b; border-radius: 8px; padding: 1rem; margin-bottom: 1rem;">
+            <div style="display: flex; align-items: start; gap: 0.75rem;">
+                <i class="fas fa-exclamation-triangle" style="color: #f59e0b; font-size: 1.5rem; margin-top: 0.25rem;"></i>
+                <div>
+                    <strong style="color: #92400e; display: block; margin-bottom: 0.5rem;">⚠️ Warning: This bypasses normal validation. Use with caution.</strong>
+                    <p style="margin: 0; color: #78350f; font-size: 0.875rem;">
+                        Manual JSON edits will not be validated through the normal scanning pipeline. 
+                        Only modify session data if you understand the structure and implications.
+                    </p>
+                </div>
+            </div>
+        </div>
+        <form id="json-editor-form">
+            <div class="form-group">
+                <label>Session ID</label>
+                <input type="text" id="json-session-id" readonly style="background: #f3f4f6; cursor: not-allowed;">
+            </div>
+            <div class="form-group">
+                <label>Currently Locked Packages (JSON) *</label>
+                <textarea id="json-locked-packages" required rows="8" style="font-family: 'Courier New', monospace; font-size: 0.875rem;" placeholder='["1A40E0100000067000001234", "1A40E0100000067000001235"]'></textarea>
+                <small style="color: var(--text-light); font-size: 0.75rem; margin-top: 0.25rem; display: block;">
+                    Enter a valid JSON array of package labels (24 alphanumeric characters each)
+                </small>
+            </div>
+            <div class="form-group">
+                <label>Reason for Adjustment *</label>
+                <textarea id="json-adjustment-reason" required rows="3" placeholder="Enter reason for this manual adjustment..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-back" onclick="closeJsonEditorModal()">Cancel</button>
+                <button type="button" class="btn-action" style="background: #6b7280; color: white;" onclick="validateJsonEditor()">
+                    <i class="fas fa-check-circle"></i> Validate JSON
+                </button>
+                <button type="submit" class="btn-action" style="background: #8b5cf6; color: white;">
+                    <i class="fas fa-save"></i> Save Changes
+                </button>
             </div>
         </form>
     </div>

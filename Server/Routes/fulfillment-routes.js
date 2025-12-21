@@ -64,6 +64,13 @@ router.get('/scanning/progress/:invoiceId', requireAuth, requireRole('Fulfillmen
     fulfillmentController.getScanningProgress.bind(fulfillmentController));
 
 /**
+ * Section 10.3.1: GET /api/v1/fulfillment/scanning/locked-packages?invoice_id=123
+ * Get locked packages for an invoice (for fetching missed events on reconnect)
+ */
+router.get('/scanning/locked-packages', requireAuth, requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Administrator'), 
+    fulfillmentController.getLockedPackages.bind(fulfillmentController));
+
+/**
  * POST /api/v1/fulfillment/scanning/verify-rejected
  * Verify rejected package is OK to use
  */
@@ -122,6 +129,13 @@ router.get('/manifest/preview/:invoiceId', requireAuth, requireRole('Fulfillment
  */
 router.get('/manifest/payload-preview/:invoiceId', requireAuth, requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Administrator'), 
     fulfillmentController.getManifestPayloadPreview.bind(fulfillmentController));
+
+/**
+ * POST /api/v1/fulfillment/manifest/validate-dry-run
+ * Section 17.2.2: Perform dry run validation before manifest creation
+ */
+router.post('/manifest/validate-dry-run', requireAuth, requireRole('Fulfillment Team', 'fulfillment_worker', 'fulfillment_admin', 'Sales Admin', 'Administrator'), 
+    fulfillmentController.validateDryRun.bind(fulfillmentController));
 
 /**
  * POST /api/v1/fulfillment/manifest/create

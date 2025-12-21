@@ -9,6 +9,9 @@ let currentFilters = {
     location: '',
     customer: '',
     deliveryZone: '',
+    dateFrom: '',
+    dateTo: '',
+    myOrders: false,
     sortBy: 'age',
     sortOrder: 'asc'
 };
@@ -56,6 +59,15 @@ function getButtonFromEvent(event, selector) {
 }
 
 
+// WebSocket connection management
+let ws = null;
+let wsReconnectAttempts = 0;
+let wsReconnectTimeout = null;
+const MAX_RECONNECT_ATTEMPTS = 5;
+const RECONNECT_DELAY = 3000; // 3 seconds
+let isUsingPolling = false;
+let pollingInterval = null;
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     loadDeliveryZones();
@@ -69,11 +81,184 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial load: show loading state, no need to preserve scroll
     loadQueue({ showLoading: true, preserveScroll: false });
     
-    // Set up auto-refresh every 30 seconds
-    setInterval(() => {
-        // Auto-refresh: do NOT show loading overlay, and preserve scroll
-        loadQueue({ showLoading: false, preserveScroll: true });
+    // Initialize WebSocket connection
+    initWebSocket();
+    
+    // Set up HTTP polling fallback (runs every 30 seconds if WebSocket is unavailable)
+    pollingInterval = setInterval(() => {
+        if (isUsingPolling) {
+            // Auto-refresh: do NOT show loading overlay, and preserve scroll
+            loadQueue({ showLoading: false, preserveScroll: true });
+        }
     }, 30000);
+});
+
+/**
+ * Initialize WebSocket connection
+ */
+function initWebSocket() {
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsHost = window.location.hostname;
+    const wsPort = window.location.port || (window.location.protocol === 'https:' ? '443' : '80');
+    const wsUrl = `${wsProtocol}//${wsHost}:8080`; // WebSocket runs on port 8080
+    
+    try {
+        ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+            console.log('✅ WebSocket connected');
+            wsReconnectAttempts = 0;
+            isUsingPolling = false;
+            hidePollingNotification();
+        };
+        
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            } catch (error) {
+                console.error('Error parsing WebSocket message:', error);
+            }
+        };
+        
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+        
+        ws.onclose = () => {
+            console.log('WebSocket disconnected');
+            ws = null;
+            
+            // Attempt to reconnect
+            if (wsReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                wsReconnectAttempts++;
+                const delay = RECONNECT_DELAY * wsReconnectAttempts;
+                console.log(`Attempting to reconnect in ${delay}ms (attempt ${wsReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+                
+                wsReconnectTimeout = setTimeout(() => {
+                    initWebSocket();
+                }, delay);
+            } else {
+                // Max reconnection attempts reached, fall back to HTTP polling
+                console.log('Max reconnection attempts reached. Falling back to HTTP polling.');
+                fallbackToPolling();
+            }
+        };
+        
+    } catch (error) {
+        console.error('Failed to initialize WebSocket:', error);
+        fallbackToPolling();
+    }
+}
+
+/**
+ * Handle WebSocket messages
+ */
+function handleWebSocketMessage(data) {
+    switch (data.type) {
+        case 'order:approved':
+            // New order approved - refresh queue
+            console.log('Order approved:', data.invoice_number);
+            loadQueue({ showLoading: false, preserveScroll: true });
+            break;
+            
+        case 'order:claimed':
+            // Order claimed by worker - refresh queue
+            console.log('Order claimed:', data.invoice_number);
+            loadQueue({ showLoading: false, preserveScroll: true });
+            break;
+            
+        case 'order:released':
+            // Order released - refresh queue
+            console.log('Order released:', data.invoice_number);
+            loadQueue({ showLoading: false, preserveScroll: true });
+            break;
+            
+        case 'order:reassigned':
+            // Order reassigned - refresh queue
+            console.log('Order reassigned:', data.invoice_number);
+            loadQueue({ showLoading: false, preserveScroll: true });
+            break;
+            
+        default:
+            // Ignore unknown message types
+            break;
+    }
+}
+
+/**
+ * Fall back to HTTP polling when WebSocket is unavailable
+ */
+function fallbackToPolling() {
+    if (isUsingPolling) return; // Already using polling
+    
+    isUsingPolling = true;
+    showPollingNotification();
+    
+    // Clear any pending reconnection attempts
+    if (wsReconnectTimeout) {
+        clearTimeout(wsReconnectTimeout);
+        wsReconnectTimeout = null;
+    }
+    
+    // Start polling immediately
+    loadQueue({ showLoading: false, preserveScroll: true });
+}
+
+/**
+ * Show notification that real-time updates are unavailable
+ */
+function showPollingNotification() {
+    // Remove existing notification if any
+    hidePollingNotification();
+    
+    const notification = document.createElement('div');
+    notification.id = 'polling-notification';
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #f59e0b;
+        color: white;
+        padding: 1rem 1.5rem;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        z-index: 10000;
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        font-size: 0.875rem;
+        max-width: 400px;
+    `;
+    notification.innerHTML = `
+        <i class="fas fa-exclamation-triangle"></i>
+        <span>Real-time updates unavailable, refreshing every 30s</span>
+    `;
+    
+    document.body.appendChild(notification);
+}
+
+/**
+ * Hide polling notification
+ */
+function hidePollingNotification() {
+    const notification = document.getElementById('polling-notification');
+    if (notification) {
+        notification.remove();
+    }
+}
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    if (ws) {
+        ws.close();
+    }
+    if (pollingInterval) {
+        clearInterval(pollingInterval);
+    }
+    if (wsReconnectTimeout) {
+        clearTimeout(wsReconnectTimeout);
+    }
 });
 
 /**
@@ -136,8 +321,19 @@ async function loadQueue(options = {}) {
     try {
         const params = new URLSearchParams({
             page: currentPage,
-            limit: pageSize,
-            ...currentFilters
+            limit: pageSize
+        });
+        
+        // Add filters, excluding empty values
+        Object.keys(currentFilters).forEach(key => {
+            const value = currentFilters[key];
+            if (value !== '' && value !== null && value !== undefined && value !== false) {
+                if (key === 'myOrders') {
+                    params.append('myOrders', 'true');
+                } else {
+                    params.append(key, value);
+                }
+            }
         });
 
         const response = await fetch(`/api/v1/fulfillment/queue?${params}`);
@@ -357,6 +553,9 @@ function applyFilters() {
         location: document.getElementById('location-filter').value,
         customer: document.getElementById('customer-filter').value,
         deliveryZone: document.getElementById('delivery-zone-filter')?.value || '',
+        dateFrom: document.getElementById('date-from-filter')?.value || '',
+        dateTo: document.getElementById('date-to-filter')?.value || '',
+        myOrders: document.getElementById('my-orders-filter')?.checked || false,
         sortBy: document.getElementById('sort-by').value,
         sortOrder: 'asc'
     };

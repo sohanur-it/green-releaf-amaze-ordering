@@ -10,10 +10,18 @@ class AdminSessionService {
      * GET /api/v1/admin/fulfillment/sessions
      */
     async getAllActiveSessions(filters = {}) {
-        const { worker_id, duration_min } = filters;
+        const { worker_id, duration_min, sortBy = 'last_activity', sortOrder = 'desc' } = filters;
         const client = await pool.connect();
 
         try {
+            // 3.4.3: Get count of abandoned sessions for dashboard
+            const abandonedCount = await client.query(`
+                SELECT COUNT(*) as count
+                FROM "ORDERS-scanning-sessions"
+                WHERE session_status = 'abandoned'
+                    AND abandoned_at >= NOW() - INTERVAL '7 days'
+            `);
+            
             let sql = `
                 SELECT 
                     ss.id,
@@ -25,11 +33,12 @@ class AdminSessionService {
                     ss.started_at,
                     ss.completed_at,
                     ss.cancelled_at,
+                    ss.abandoned_at,
                     ss.websocket_connection_id,
                     i.invoice_number,
                     i.status as invoice_status,
                     u.first_name || ' ' || u.last_name as worker_name,
-                    EXTRACT(EPOCH FROM (NOW() - ss.started_at)) / 60 as duration_minutes,
+                    EXTRACT(EPOCH FROM (NOW() - ss.started_at)) / 60 as session_duration_minutes,
                     EXTRACT(EPOCH FROM (NOW() - ss.last_activity)) / 60 as inactivity_minutes
                 FROM "ORDERS-scanning-sessions" ss
                 JOIN "ORDERS-invoices" i ON ss.fk_invoice_id = i.id
@@ -50,7 +59,17 @@ class AdminSessionService {
                 params.push(duration_min);
             }
 
-            sql += ` ORDER BY ss.last_activity DESC`;
+            // 3.6.3: Add sort options
+            const sortColumnMap = {
+                'last_activity': 'ss.last_activity',
+                'duration': 'session_duration_minutes',
+                'invoice_number': 'i.invoice_number',
+                'worker': 'worker_name'
+            };
+            
+            const sortColumn = sortColumnMap[sortBy] || 'ss.last_activity';
+            const sortDirection = sortOrder.toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+            sql += ` ORDER BY ${sortColumn} ${sortDirection}`;
 
             const sessions = await client.query(sql, params);
 
@@ -59,8 +78,18 @@ class AdminSessionService {
                 sessions.rows.map(async (session) => {
                     const progress = await this.getSessionProgress(session.fk_invoice_id, client);
                     return {
-                        ...session,
-                        progress: progress
+                        id: session.id,
+                        session_id: session.id, // Alias for compatibility
+                        invoice_id: session.fk_invoice_id,
+                        invoice_number: session.invoice_number,
+                        worker_name: session.worker_name,
+                        session_duration_minutes: session.session_duration_minutes,
+                        duration_minutes: session.session_duration_minutes, // Alias
+                        last_activity: session.last_activity,
+                        total_packages_scanned: progress.total_packages_scanned,
+                        total_packages_needed: progress.total_packages_needed,
+                        currently_locked_packages: session.currently_locked_packages,
+                        session_status: session.session_status
                     };
                 })
             );
@@ -68,7 +97,8 @@ class AdminSessionService {
             return {
                 success: true,
                 sessions: sessionsWithProgress,
-                total: sessionsWithProgress.length
+                total: sessionsWithProgress.length,
+                abandoned_sessions_count: parseInt(abandonedCount.rows[0]?.count || 0) // 3.4.3
             };
 
         } finally {

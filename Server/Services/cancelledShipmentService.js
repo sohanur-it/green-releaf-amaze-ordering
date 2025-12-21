@@ -33,7 +33,12 @@ class CancelledShipmentService {
 
             const inv = invoice.rows[0];
 
+            // Section 9.1: Add explicit check: Cannot transition from Delivered status
             // Verify status allows cancellation
+            if (inv.status === 'Delivered') {
+                throw new Error(`Cannot cancel shipment - invoice status is Delivered. Cannot cancel after delivery.`);
+            }
+            
             if (inv.status !== 'Shipped' && inv.status !== 'Manifested') {
                 throw new Error(`Cannot cancel shipment - invoice status is ${inv.status}. Only Shipped or Manifested invoices can be cancelled.`);
             }
@@ -531,6 +536,50 @@ class CancelledShipmentService {
                             inventory_was_finalized: inventoryWasFinalized
                         })
                     ]);
+                    
+                    // Section 9.3: Add accounting team notification when packages are destroyed
+                    const invoice = await client.query(`
+                        SELECT invoice_number
+                        FROM "ORDERS-invoices"
+                        WHERE id = $1
+                    `, [invoiceId]);
+                    
+                    if (invoice.rows.length > 0) {
+                        const notificationStore = require('./notificationStoreService');
+                        const accountingUsers = await client.query(`
+                            SELECT DISTINCT u.id
+                            FROM users u
+                            JOIN user_roles ur ON u.id = ur.user_id
+                            JOIN roles r ON ur.role_id = r.id
+                            WHERE (LOWER(r.name) IN ('accounting', 'administrator', 'accounting_admin')
+                               OR LOWER(r.role_name) IN ('accounting', 'administrator', 'accounting_admin'))
+                               AND u.status = 'active'
+                        `);
+                        
+                        for (const accountingUser of accountingUsers.rows) {
+                            await notificationStore.createNotification({
+                                userId: accountingUser.id,
+                                type: 'package_destroyed',
+                                title: `Packages Destroyed: ${invoice.rows[0].invoice_number}`,
+                                message: `${updates.packages.length} package(s) destroyed for invoice ${invoice.rows[0].invoice_number}. Batch ${batchId} quantity reduced by ${updates.quantity}.`,
+                                payload: {
+                                    invoice_id: invoiceId,
+                                    invoice_number: invoice.rows[0].invoice_number,
+                                    batch_id: batchId,
+                                    packages_destroyed: updates.packages.map(p => ({
+                                        label: p.package.package_label,
+                                        quantity: p.quantity,
+                                        reason: p.reason
+                                    })),
+                                    quantity_reduced: updates.quantity
+                                },
+                                priority: 'medium',
+                                requiresAck: false
+                            });
+                        }
+                        
+                        console.log(`[Cancelled Shipment] ✓ Notified ${accountingUsers.rows.length} accounting user(s) of package destruction for invoice ${invoice.rows[0].invoice_number}`);
+                    }
                 }
 
                 // Release allocations

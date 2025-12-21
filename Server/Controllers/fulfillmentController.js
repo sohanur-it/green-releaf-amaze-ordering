@@ -27,6 +27,10 @@ class FulfillmentController {
                 deliveryZone: req.query.deliveryZone || req.query.delivery_zone || null, // Support both naming conventions
                 minTotal: req.query.minTotal ? parseFloat(req.query.minTotal) : null,
                 maxTotal: req.query.maxTotal ? parseFloat(req.query.maxTotal) : null,
+                dateFrom: req.query.dateFrom || req.query.date_from || null,
+                dateTo: req.query.dateTo || req.query.date_to || null,
+                myOrders: req.query.myOrders === 'true' || req.query.my_orders === 'true',
+                userId: req.user?.id || req.session?.userId || null,
                 sortBy: req.query.sortBy || 'age',
                 sortOrder: req.query.sortOrder || 'asc',
                 page: parseInt(req.query.page) || 1,
@@ -166,6 +170,73 @@ class FulfillmentController {
             res.json(result);
         } catch (error) {
             console.error('[Fulfillment] Error getting scanning progress:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Section 10.3.1: Get locked packages for an invoice (for fetching missed events on reconnect)
+     * GET /api/v1/fulfillment/scanning/locked-packages?invoice_id=123
+     */
+    async getLockedPackages(req, res) {
+        try {
+            const invoiceId = parseInt(req.query.invoice_id);
+            
+            if (!invoiceId) {
+                return res.status(400).json({ error: 'invoice_id is required' });
+            }
+
+            const { pool } = require('../config/database');
+            const client = await pool.connect();
+
+            try {
+                // Get all active scanning sessions for this invoice with locked packages
+                const sessions = await client.query(`
+                    SELECT 
+                        ss.id,
+                        ss.fk_user_id,
+                        ss.currently_locked_packages,
+                        u.first_name,
+                        u.last_name
+                    FROM "ORDERS-scanning-sessions" ss
+                    LEFT JOIN users u ON ss.fk_user_id = u.id
+                    WHERE ss.fk_invoice_id = $1
+                        AND ss.session_status = 'active'
+                        AND ss.currently_locked_packages IS NOT NULL
+                        AND jsonb_array_length(ss.currently_locked_packages::jsonb) > 0
+                `, [invoiceId]);
+
+                const lockedPackages = [];
+                
+                for (const session of sessions.rows) {
+                    const packages = Array.isArray(session.currently_locked_packages)
+                        ? session.currently_locked_packages
+                        : JSON.parse(session.currently_locked_packages || '[]');
+                    
+                    const userName = session.first_name && session.last_name
+                        ? `${session.first_name} ${session.last_name}`
+                        : 'Unknown';
+                    
+                    packages.forEach(packageLabel => {
+                        lockedPackages.push({
+                            package_label: packageLabel,
+                            locked_by_user_id: session.fk_user_id,
+                            locked_by_user_name: userName,
+                            session_id: session.id,
+                            locked_at: new Date().toISOString() // Approximate, could be enhanced with actual timestamp
+                        });
+                    });
+                }
+
+                res.json({
+                    success: true,
+                    locked_packages: lockedPackages
+                });
+            } finally {
+                client.release();
+            }
+        } catch (error) {
+            console.error('[Fulfillment] Error getting locked packages:', error);
             res.status(500).json({ error: error.message });
         }
     }
@@ -799,6 +870,83 @@ class FulfillmentController {
     }
 
     /**
+     * Section 17.2.2: Perform dry run validation
+     * POST /api/v1/fulfillment/manifest/validate-dry-run
+     */
+    async validateDryRun(req, res) {
+        try {
+            const { invoice_id } = req.body;
+            const userId = req.user.id;
+
+            if (!invoice_id) {
+                return res.status(400).json({ error: 'invoice_id is required' });
+            }
+
+            console.log(`[Fulfillment] Dry run validation request: invoice_id=${invoice_id}, user_id=${userId}`);
+
+            // Get manifest preview to build payloads
+            const preview = await manifestCreationService.getManifestPayloadPreview(invoice_id, userId);
+            
+            if (!preview || !preview.payloads || preview.payloads.length === 0) {
+                return res.status(400).json({ 
+                    success: false,
+                    error: 'Failed to generate manifest preview for validation' 
+                });
+            }
+
+            // Perform dry run validation for each license
+            const validationResults = [];
+            const payloads = preview.payloads || [];
+            
+            for (const payloadData of payloads) {
+                const { license, payload } = payloadData;
+                
+                try {
+                    const dryRunResult = await manifestCreationService.performDryRunValidation(payload, license);
+                    
+                    validationResults.push({
+                        license: license,
+                        success: dryRunResult.success,
+                        errors: dryRunResult.errors || [],
+                        warnings: dryRunResult.warnings || []
+                    });
+                } catch (error) {
+                    console.error(`[Fulfillment] Dry run validation error for license ${license}:`, error);
+                    validationResults.push({
+                        license: license,
+                        success: false,
+                        errors: [{
+                            message: error.message || 'Unknown error during dry run validation',
+                            package: null
+                        }],
+                        warnings: []
+                    });
+                }
+            }
+
+            // Determine overall success
+            const allPassed = validationResults.every(r => r.success);
+            const hasErrors = validationResults.some(r => r.errors && r.errors.length > 0);
+
+            res.json({
+                success: allPassed,
+                overall_success: allPassed,
+                has_errors: hasErrors,
+                validation_results: validationResults,
+                invoice_id: invoice_id,
+                total_licenses: payloads.length
+            });
+
+        } catch (error) {
+            console.error('[Fulfillment] Error performing dry run validation:', error);
+            res.status(500).json({ 
+                success: false,
+                error: error.message 
+            });
+        }
+    }
+
+    /**
      * Create manifest
      * POST /api/v1/fulfillment/manifest/create
      */
@@ -1204,7 +1352,9 @@ class FulfillmentController {
         try {
             const filters = {
                 worker_id: req.query.worker_id ? parseInt(req.query.worker_id) : null,
-                duration_min: req.query.duration_min ? parseInt(req.query.duration_min) : null
+                duration_min: req.query.duration_min ? parseInt(req.query.duration_min) : null,
+                sortBy: req.query.sortBy || 'last_activity', // 3.6.3: Add sort options
+                sortOrder: req.query.sortOrder || 'desc'
             };
 
             const result = await adminSessionService.getAllActiveSessions(filters);

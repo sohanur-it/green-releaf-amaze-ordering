@@ -33,7 +33,8 @@ class FulfillmentIssueService {
 
             const inv = invoice.rows[0];
 
-            if (!['Fulfillment_Accepted', 'Approved'].includes(inv.status)) {
+            // Section 4.2: Allow both Fulfillment_Accepted AND Fulfillment_Issue status
+            if (!['Fulfillment_Accepted', 'Fulfillment_Issue', 'Approved'].includes(inv.status)) {
                 throw new Error(`Cannot report issue - invoice status is ${inv.status}`);
             }
 
@@ -45,13 +46,22 @@ class FulfillmentIssueService {
             const issueNote = this.formatIssueReport(issues);
 
             // Transition to Fulfillment_Issue state
+            // Section 5.1.6: Add auto-clear: Clear transportation_details when invoice transitions to Fulfillment_Issue if manifest_created_at IS NULL
+            const invoiceCheck = await client.query(`
+                SELECT manifest_created_at
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [invoiceId]);
+            
+            const shouldClearTransportation = !invoiceCheck.rows[0]?.manifest_created_at;
+            
             await client.query(`
                 UPDATE "ORDERS-invoices"
                 SET 
                     status = 'Fulfillment_Issue',
                     fulfillment_issue_reported_at = NOW(),
                     fulfillment_issue_note = $1,
-                    status_updated_at = NOW()
+                    status_updated_at = NOW${shouldClearTransportation ? ', transportation_details = NULL' : ''}
                 WHERE id = $2
             `, [issueNote, invoiceId]);
 
@@ -71,8 +81,27 @@ class FulfillmentIssueService {
                 WHERE fk_invoice_id = $1
             `, [invoiceId]);
 
-            // Log each specific issue
+            // Section 4.1: Update line items with issue information
+            // Log each specific issue and update line items
             for (const issue of issues) {
+                // Update line item if line_item_id is provided
+                if (issue.line_item_id) {
+                    await client.query(`
+                        UPDATE "ORDERS-invoice-line-items"
+                        SET 
+                            has_fulfillment_issue = true,
+                            fulfillment_issue_type = $1,
+                            issue_photo_urls = COALESCE($2::jsonb, '[]'::jsonb)
+                        WHERE id = $3 AND fk_invoice_id = $4
+                    `, [
+                        issue.type,
+                        issue.photo_urls ? JSON.stringify(issue.photo_urls) : '[]',
+                        issue.line_item_id,
+                        invoiceId
+                    ]);
+                }
+
+                // Log to invoice history
                 await client.query(`
                     INSERT INTO "ORDERS-invoice-history" (
                         fk_invoice_id,
@@ -183,7 +212,8 @@ class FulfillmentIssueService {
 
             const inv = invoice.rows[0];
 
-            if (inv.status !== 'Fulfillment_Accepted') {
+            // Section 4.2: Allow both Fulfillment_Accepted AND Fulfillment_Issue status
+            if (!['Fulfillment_Accepted', 'Fulfillment_Issue'].includes(inv.status)) {
                 throw new Error(`Cannot request return - invoice status is ${inv.status}`);
             }
 
@@ -379,6 +409,40 @@ class FulfillmentIssueService {
             console.log(`✅ Notified ${adminUsers.rows.length} admin(s) of fulfillment issue for invoice ${invoiceNumber}`);
         } catch (error) {
             console.error('Error notifying admins of issue:', error);
+        }
+    }
+
+    /**
+     * Section 4.4.2: Notify sales rep when issue is cancelled
+     */
+    async notifySalesRepOfIssueCancellation(salesRepId, invoiceId, invoiceNumber, reason) {
+        try {
+            await notificationStore.createNotification({
+                userId: salesRepId,
+                type: 'issue_cancelled',
+                title: `Issue Cancelled: ${invoiceNumber}`,
+                message: `Fulfillment worker cancelled the issue report: ${reason}`,
+                payload: {
+                    invoice_id: invoiceId,
+                    invoice_number: invoiceNumber,
+                    reason: reason
+                },
+                priority: 'medium',
+                requiresAck: false
+            });
+
+            await websocketService.sendPersistentNotification(salesRepId, {
+                type: 'issue_cancelled',
+                title: `Issue Cancelled: ${invoiceNumber}`,
+                message: `Fulfillment worker cancelled the issue report: ${reason}`,
+                payload: {
+                    invoice_id: invoiceId,
+                    invoice_number: invoiceNumber,
+                    reason: reason
+                }
+            });
+        } catch (error) {
+            console.error('Error notifying sales rep of issue cancellation:', error);
         }
     }
 
@@ -593,7 +657,8 @@ class FulfillmentIssueService {
                 SELECT 
                     status,
                     fulfillment_accepted_by,
-                    invoice_number
+                    invoice_number,
+                    assigned_sales_rep_id
                 FROM "ORDERS-invoices"
                 WHERE id = $1
                 FOR UPDATE
@@ -603,11 +668,13 @@ class FulfillmentIssueService {
                 throw new Error('Invoice not found');
             }
 
-            if (invoice.rows[0].status !== 'Fulfillment_Issue') {
+            const inv = invoice.rows[0];
+
+            if (inv.status !== 'Fulfillment_Issue') {
                 throw new Error('Cannot cancel issue - invoice is not in Fulfillment_Issue status');
             }
 
-            if (invoice.rows[0].fulfillment_accepted_by !== userId) {
+            if (inv.fulfillment_accepted_by !== userId) {
                 throw new Error('You are not assigned to this order');
             }
 
@@ -634,6 +701,16 @@ class FulfillmentIssueService {
 
             await client.query('COMMIT');
 
+            // Section 4.4.2: Add sales rep notification when issue is cancelled
+            if (inv.assigned_sales_rep_id) {
+                await this.notifySalesRepOfIssueCancellation(
+                    inv.assigned_sales_rep_id,
+                    invoiceId,
+                    inv.invoice_number,
+                    reason || 'Issue cancelled by fulfillment worker'
+                );
+            }
+
             return {
                 success: true,
                 message: 'Issue cancelled. Order returned to Fulfillment_Accepted status.'
@@ -650,9 +727,23 @@ class FulfillmentIssueService {
     /**
      * Get all issues for bulk management
      * GET /api/v1/admin/fulfillment/issues
+     * Section 4.4: Enhanced with filtering, sorting, and pagination
      */
     async getAllIssues(filters = {}) {
-        const { issue_type, date_from, date_to, sales_rep_id, status } = filters;
+        const { 
+            issue_type, 
+            date_from, 
+            date_to, 
+            sales_rep_id, 
+            status,
+            product_id,
+            batch_id,
+            sort_by = 'date',
+            sort_order = 'DESC',
+            page = 1,
+            limit = 50
+        } = filters;
+        
         const client = await pool.connect();
 
         try {
@@ -669,8 +760,16 @@ class FulfillmentIssueService {
                 FROM "ORDERS-invoices" i
                 LEFT JOIN "ORDERS-buyers" b ON i.fk_buyer_id = b.entry_id
                 LEFT JOIN users u ON i.assigned_sales_rep_id = u.id
-                WHERE i.status = 'Fulfillment_Issue'
             `;
+
+            // Section 4.4.3: Add filter by product/batch
+            if (product_id || batch_id) {
+                sql += `
+                    LEFT JOIN "ORDERS-invoice-line-items" li ON i.id = li.fk_invoice_id
+                `;
+            }
+
+            sql += ` WHERE i.status = 'Fulfillment_Issue'`;
 
             const params = [];
             let paramCount = 1;
@@ -690,19 +789,93 @@ class FulfillmentIssueService {
                 params.push(sales_rep_id);
             }
 
-            if (issue_type && i.fulfillment_issue_note) {
+            if (issue_type) {
                 sql += ` AND i.fulfillment_issue_note LIKE $${paramCount++}`;
                 params.push(`%[${issue_type}]%`);
             }
 
-            sql += ` ORDER BY i.fulfillment_issue_reported_at DESC`;
+            // Section 4.4.3: Filter by product/batch
+            if (product_id) {
+                sql += ` AND li.fk_master_product_id = $${paramCount++}`;
+                params.push(product_id);
+            }
+
+            if (batch_id) {
+                sql += ` AND li.fk_batch_id = $${paramCount++}`;
+                params.push(batch_id);
+            }
+
+            // Section 4.4.4: Add sort options
+            const sortColumnMap = {
+                'date': 'i.fulfillment_issue_reported_at',
+                'customer': 'b.name',
+                'issue_type': 'i.fulfillment_issue_note',
+                'invoice_number': 'i.invoice_number'
+            };
+
+            const sortColumn = sortColumnMap[sort_by] || sortColumnMap['date'];
+            const sortDirection = sort_order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+            sql += ` ORDER BY ${sortColumn} ${sortDirection}`;
+
+            // Section 4.4.5: Add pagination support
+            const offset = (page - 1) * limit;
+            sql += ` LIMIT $${paramCount++} OFFSET $${paramCount++}`;
+            params.push(limit, offset);
 
             const issues = await client.query(sql, params);
+
+            // Get total count for pagination
+            let countSql = `
+                SELECT COUNT(DISTINCT i.id) as total
+                FROM "ORDERS-invoices" i
+            `;
+            
+            if (product_id || batch_id) {
+                countSql += `
+                    LEFT JOIN "ORDERS-invoice-line-items" li ON i.id = li.fk_invoice_id
+                `;
+            }
+            
+            countSql += ` WHERE i.status = 'Fulfillment_Issue'`;
+            
+            const countParams = [];
+            let countParamCount = 1;
+            
+            if (date_from) {
+                countSql += ` AND i.fulfillment_issue_reported_at >= $${countParamCount++}`;
+                countParams.push(date_from);
+            }
+            if (date_to) {
+                countSql += ` AND i.fulfillment_issue_reported_at <= $${countParamCount++}`;
+                countParams.push(date_to);
+            }
+            if (sales_rep_id) {
+                countSql += ` AND i.assigned_sales_rep_id = $${countParamCount++}`;
+                countParams.push(sales_rep_id);
+            }
+            if (issue_type) {
+                countSql += ` AND i.fulfillment_issue_note LIKE $${countParamCount++}`;
+                countParams.push(`%[${issue_type}]%`);
+            }
+            if (product_id) {
+                countSql += ` AND li.fk_master_product_id = $${countParamCount++}`;
+                countParams.push(product_id);
+            }
+            if (batch_id) {
+                countSql += ` AND li.fk_batch_id = $${countParamCount++}`;
+                countParams.push(batch_id);
+            }
+
+            const countResult = await client.query(countSql, countParams);
+            const total = parseInt(countResult.rows[0]?.total || 0);
 
             return {
                 success: true,
                 issues: issues.rows,
-                total: issues.rows.length
+                total: total,
+                page: page,
+                limit: limit,
+                total_pages: Math.ceil(total / limit)
             };
 
         } finally {
@@ -838,7 +1011,8 @@ class FulfillmentIssueService {
                 SELECT 
                     status,
                     assigned_sales_rep_id,
-                    invoice_number
+                    invoice_number,
+                    manifest_created_at
                 FROM "ORDERS-invoices"
                 WHERE id = $1
                 FOR UPDATE
@@ -849,6 +1023,11 @@ class FulfillmentIssueService {
             }
 
             const inv = invoice.rows[0];
+
+            // Section 4.3: Post-Manifest Modification Protection
+            if (inv.manifest_created_at) {
+                throw new Error('Cannot modify invoice after manifest created');
+            }
 
             if (inv.status !== 'Fulfillment_Issue') {
                 throw new Error('Invoice not in Fulfillment_Issue state');
@@ -866,10 +1045,21 @@ class FulfillmentIssueService {
 
             // Remove line items
             for (const mod of modifications.remove_items || []) {
+                // Section 17.3.2: Remove generic default reasons
+                if (!mod.reason || mod.reason.trim().length === 0) {
+                    throw new Error('Reason is required when removing line items');
+                }
+                
+                // Validate reason is not a generic default
+                const genericReasons = ['removed', 'deleted', 'Removed to resolve fulfillment issue'];
+                if (genericReasons.some(generic => mod.reason.toLowerCase().trim() === generic.toLowerCase())) {
+                    throw new Error('Please provide a specific reason for removing this line item. Generic reasons are not allowed.');
+                }
+                
                 await this.removeLineItemWithHistory(
                     invoiceId,
                     mod.line_item_id,
-                    mod.reason || 'Removed to resolve fulfillment issue',
+                    mod.reason.trim(),
                     userId,
                     client
                 );
@@ -898,11 +1088,22 @@ class FulfillmentIssueService {
 
             // Modify line item quantities
             for (const mod of modifications.quantity_changes || []) {
+                // Section 17.3.2: Remove generic default reasons, require explicit user-provided reasons
+                if (!mod.reason || mod.reason.trim().length === 0) {
+                    throw new Error('Modification reason is required for each line item modification');
+                }
+                
+                // Validate reason is not a generic default
+                const genericReasons = ['modified', 'changed', 'updated', 'adjusted', 'N/A', 'n/a', 'none', 'Quantity modified to resolve fulfillment issue'];
+                if (genericReasons.some(generic => mod.reason.toLowerCase().trim() === generic.toLowerCase())) {
+                    throw new Error('Please provide a specific reason for this modification. Generic reasons are not allowed.');
+                }
+                
                 await this.modifyLineItemQuantity(
                     invoiceId,
                     mod.line_item_id,
                     mod.new_quantity,
-                    mod.reason || 'Quantity modified to resolve fulfillment issue',
+                    mod.reason.trim(),
                     userId,
                     client
                 );
@@ -968,12 +1169,15 @@ class FulfillmentIssueService {
             }
 
             // Update status manually (since we're in our own transaction)
+            // Section 4.3: Clear fulfillment_accepted_by to NULL on issue resolve
             await client.query(`
                 UPDATE "ORDERS-invoices"
                 SET 
                     status = 'Approved',
                     status_updated_at = NOW(),
-                    updated_at = NOW()
+                    updated_at = NOW(),
+                    fulfillment_accepted_by = NULL,
+                    fulfillment_accepted_at = NULL
                 WHERE id = $1
             `, [invoiceId]);
 
@@ -1110,6 +1314,18 @@ class FulfillmentIssueService {
         // Calculate new line total
         const newLineTotal = (parseFloat(item.unit_price) * newQuantity) - parseFloat(item.line_discount_amount || 0);
 
+        // Section 17.3: Traceability Requirements
+        // Section 17.3.2: Remove generic default reasons, require explicit user-provided reasons
+        if (!reason || reason.trim().length === 0) {
+            throw new Error('Modification reason is required. Please provide a specific reason for this change.');
+        }
+        
+        // Section 17.3.2: Validate reason is not a generic default
+        const genericReasons = ['modified', 'changed', 'updated', 'adjusted', 'N/A', 'n/a', 'none'];
+        if (genericReasons.some(generic => reason.toLowerCase().trim() === generic)) {
+            throw new Error('Please provide a specific reason for this modification. Generic reasons like "modified" or "updated" are not allowed.');
+        }
+        
         // Update line item
         await client.query(`
             UPDATE "ORDERS-invoice-line-items"
@@ -1124,7 +1340,7 @@ class FulfillmentIssueService {
                 line_total = $5,
                 updated_at = NOW()
             WHERE id = $6
-        `, [newQuantity, originalQty, reason, userId, newLineTotal, lineItemId]);
+        `, [newQuantity, originalQty, reason.trim(), userId, newLineTotal, lineItemId]);
 
         // Log modification
         await client.query(`
@@ -1232,6 +1448,17 @@ class FulfillmentIssueService {
             client
         );
 
+        // Section 17.3.2: Remove generic default reasons, require explicit user-provided reasons
+        if (!itemData.reason || itemData.reason.trim().length === 0) {
+            throw new Error('Reason is required when adding line items after fulfillment issue. Please provide a specific reason.');
+        }
+        
+        // Validate reason is not a generic default
+        const genericReasons = ['added', 'modified', 'changed', 'updated', 'adjusted', 'N/A', 'n/a', 'none', 'Added after fulfillment issue'];
+        if (genericReasons.some(generic => itemData.reason.toLowerCase().trim() === generic.toLowerCase())) {
+            throw new Error('Please provide a specific reason for adding this line item. Generic reasons are not allowed.');
+        }
+        
         // Update modification flags
         await client.query(`
             UPDATE "ORDERS-invoice-line-items"
@@ -1242,7 +1469,7 @@ class FulfillmentIssueService {
                 modified_by = $2
             WHERE id = $3
         `, [
-            itemData.reason || 'Added after fulfillment issue',
+            itemData.reason.trim(),
             userId,
             lineItemId
         ]);
@@ -1262,7 +1489,8 @@ class FulfillmentIssueService {
             invoiceId,
             `line_item_${lineItemId}`,
             itemData.quantity.toString(),
-            itemData.reason || 'Added after fulfillment issue',
+            // Section 17.3.2: Remove generic default reasons - validated above
+            itemData.reason.trim(),
             userId
         ]);
 

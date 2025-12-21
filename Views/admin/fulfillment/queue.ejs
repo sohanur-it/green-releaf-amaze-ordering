@@ -576,6 +576,20 @@
             </select>
         </div>
         <div class="filter-group">
+            <label>Date From</label>
+            <input type="date" id="date-from-filter" onchange="applyFilters()">
+        </div>
+        <div class="filter-group">
+            <label>Date To</label>
+            <input type="date" id="date-to-filter" onchange="applyFilters()">
+        </div>
+        <div class="filter-group">
+            <label style="display: flex; align-items: center; gap: 0.5rem;">
+                <input type="checkbox" id="my-orders-filter" onchange="applyFilters()" style="width: auto; min-width: auto;">
+                My Orders Only
+            </label>
+        </div>
+        <div class="filter-group">
             <label>Sort By</label>
             <select id="sort-by" onchange="applyFilters()">
                 <option value="age">Age (Oldest First)</option>

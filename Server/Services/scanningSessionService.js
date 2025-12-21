@@ -73,6 +73,132 @@ class ScanningSessionService {
                 throw new Error('You are not assigned to this order');
             }
 
+            // Section 6.3.1: Add pre-scan allocation requirement: startScanningSession should check and re-allocate line items with quantity_allocated = 0 before allowing scanning
+            // Section 6.3.3: Add explicit validation: Ensure previous scan data is cleared before allowing rescan
+            const lineItemsCheck = await client.query(`
+                SELECT 
+                    id,
+                    quantity_allocated,
+                    assigned_package_labels,
+                    quantity_ordered
+                FROM "ORDERS-invoice-line-items"
+                WHERE fk_invoice_id = $1
+            `, [invoiceId]);
+
+            const needsAllocation = lineItemsCheck.rows.some(li => li.quantity_allocated === 0 && li.quantity_ordered > 0);
+            const hasPreviousScanData = lineItemsCheck.rows.some(li => {
+                try {
+                    const labels = li.assigned_package_labels ? JSON.parse(li.assigned_package_labels) : [];
+                    return Array.isArray(labels) && labels.length > 0;
+                } catch {
+                    return false;
+                }
+            });
+
+            // Section 6.3.3: Clear previous scan data if exists
+            if (hasPreviousScanData) {
+                console.log(`[Scanning] Clearing previous scan data for invoice ${invoiceId}`);
+                await client.query(`
+                    UPDATE "ORDERS-invoice-line-items"
+                    SET assigned_package_labels = NULL
+                    WHERE fk_invoice_id = $1
+                `, [invoiceId]);
+            }
+
+            // Section 6.3.1: Re-allocate if needed
+            if (needsAllocation) {
+                console.log(`[Scanning] Re-allocating inventory for invoice ${invoiceId} (some line items have quantity_allocated = 0)`);
+                const allocationService = require('./allocationService');
+                
+                // Get sales rep ID before potential rollback
+                const salesRepCheck = await client.query(`
+                    SELECT assigned_sales_rep_id
+                    FROM "ORDERS-invoices"
+                    WHERE id = $1
+                `, [invoiceId]);
+                const salesRepId = salesRepCheck.rows[0]?.assigned_sales_rep_id;
+                
+                try {
+                    // Re-allocate all line items that need allocation
+                    for (const lineItem of lineItemsCheck.rows) {
+                        if (lineItem.quantity_allocated === 0 && lineItem.quantity_ordered > 0) {
+                            // Get batch ID for this line item
+                            const batchInfo = await client.query(`
+                                SELECT fk_batch_id, quantity_ordered
+                                FROM "ORDERS-invoice-line-items"
+                                WHERE id = $1
+                            `, [lineItem.id]);
+                            
+                            if (batchInfo.rows.length === 0) {
+                                throw new Error(`Line item ${lineItem.id} not found`);
+                            }
+                            
+                            const batchId = batchInfo.rows[0].fk_batch_id;
+                            const quantityNeeded = batchInfo.rows[0].quantity_ordered;
+                            
+                            // Use allocation service to allocate
+                            const allocationResult = await allocationService.allocateBatchToInvoice(
+                                batchId,
+                                quantityNeeded,
+                                invoiceId,
+                                lineItem.id,
+                                client  // Use existing transaction client
+                            );
+                            
+                            // Section 6.3.2: Add re-allocation failure handling
+                            if (!allocationResult || !allocationResult.success) {
+                                const errorMsg = allocationResult?.error || 'Unknown allocation error';
+                                
+                                await client.query('ROLLBACK');
+                                
+                                // Send sales rep notification (outside transaction)
+                                if (salesRepId) {
+                                    const notificationStore = require('./notificationStoreService');
+                                    await notificationStore.createNotification({
+                                        userId: salesRepId,
+                                        type: 'allocation_failed',
+                                        title: `Allocation Failed: ${inv.invoice_number}`,
+                                        message: `Cannot start scanning - insufficient inventory: ${errorMsg}`,
+                                        payload: {
+                                            invoice_id: invoiceId,
+                                            invoice_number: inv.invoice_number,
+                                            line_item_id: lineItem.id
+                                        },
+                                        priority: 'high',
+                                        requiresAck: false
+                                    });
+                                }
+                                
+                                // Transition invoice back to Fulfillment_Issue (outside transaction)
+                                const updateClient = await pool.connect();
+                                try {
+                                    await updateClient.query(`
+                                        UPDATE "ORDERS-invoices"
+                                        SET 
+                                            status = 'Fulfillment_Issue',
+                                            fulfillment_issue_reported_at = NOW(),
+                                            fulfillment_issue_note = $1,
+                                            status_updated_at = NOW()
+                                        WHERE id = $2
+                                    `, [
+                                        `Cannot start scanning - insufficient inventory for line item ${lineItem.id}: ${errorMsg}`,
+                                        invoiceId
+                                    ]);
+                                } finally {
+                                    updateClient.release();
+                                }
+                                
+                                throw new Error(`Cannot start scanning - insufficient inventory: ${errorMsg}`);
+                            }
+                        }
+                    }
+                    console.log(`[Scanning] ✓ Re-allocation completed for invoice ${invoiceId}`);
+                } catch (allocationError) {
+                    await client.query('ROLLBACK');
+                    throw allocationError;
+                }
+            }
+
             // Check for existing active session
             const existing = await client.query(`
                 SELECT id, fk_user_id, started_at, last_activity
@@ -276,11 +402,12 @@ class ScanningSessionService {
         const client = await pool.connect();
 
         try {
+            // 3.4.2: Fix abandoned_at timestamp - set abandoned_at instead of cancelled_at
             const abandoned = await client.query(`
                 UPDATE "ORDERS-scanning-sessions"
                 SET 
                     session_status = 'abandoned',
-                    cancelled_at = NOW()
+                    abandoned_at = NOW()
                 WHERE session_status = 'active'
                     AND last_activity < NOW() - INTERVAL '30 minutes'
                 RETURNING id, fk_invoice_id, fk_user_id, currently_locked_packages

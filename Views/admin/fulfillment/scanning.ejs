@@ -224,6 +224,22 @@
     gap: 0.5rem;
 }
 
+/* Section 10.1: Locked package styling */
+.package-tag.package-locked {
+    background: #f3f4f6;
+    color: #6b7280;
+    opacity: 0.6;
+    pointer-events: none;
+    cursor: not-allowed;
+    border: 1px solid #d1d5db;
+    position: relative;
+}
+
+.package-tag.package-locked .lock-icon {
+    color: #ef4444;
+    margin-right: 4px;
+}
+
 .package-tag .remove-btn {
     background: none;
     border: none;
@@ -236,6 +252,12 @@
 
 .package-tag .remove-btn:hover {
     color: #4f46e5;
+}
+
+/* Disable buttons for locked packages */
+.package-tag.package-locked .remove-btn,
+.package-tag.package-locked .edit-btn {
+    display: none;
 }
 
 .action-buttons {

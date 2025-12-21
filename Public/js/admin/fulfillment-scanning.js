@@ -206,20 +206,144 @@ function setupWebSocket() {
 /**
  * Handle WebSocket messages
  */
+// Section 10.1: Track locked packages for UI updates
+const lockedPackages = new Map(); // packageLabel -> { userId, userName, timestamp }
+
+/**
+ * Handle WebSocket messages
+ * Section 10.1: Enhanced package lock handling with UI updates
+ */
 function handleWebSocketMessage(message) {
     switch (message.type) {
         case 'package:locked':
-            // Another worker locked a package
-            console.log('Package locked by another worker:', message);
+            // Section 10.1: Another worker locked a package - update UI
+            handlePackageLocked(message);
             break;
         case 'package:released':
-            // Package released
-            console.log('Package released:', message);
+            // Section 10.1: Package released - update UI
+            handlePackageReleased(message);
             break;
         case 'order:claimed':
         case 'order:released':
             // Queue updates
             break;
+        case 'notification:acknowledged':
+            // Section 10.2: Notification acknowledgment via WebSocket
+            handleNotificationAcknowledged(message);
+            break;
+    }
+}
+
+/**
+ * Section 10.1: Handle package locked event - update UI
+ */
+function handlePackageLocked(message) {
+    const { package_label, locked_by_user_id, locked_by_user_name, invoice_id } = message;
+    
+    // Only update UI if this is for the current invoice
+    if (invoice_id && window.invoiceId && parseInt(invoice_id) !== parseInt(window.invoiceId)) {
+        return; // Different invoice, ignore
+    }
+    
+    // Store lock information
+    lockedPackages.set(package_label, {
+        userId: locked_by_user_id,
+        userName: locked_by_user_name || 'Another worker',
+        timestamp: message.timestamp || new Date().toISOString()
+    });
+    
+    // Update UI to show locked state
+    updatePackageLockUI(package_label, true, locked_by_user_name || 'Another worker');
+    
+    console.log(`[WebSocket] Package ${package_label} locked by ${locked_by_user_name || 'another worker'}`);
+}
+
+/**
+ * Section 10.1: Handle package released event - update UI
+ */
+function handlePackageReleased(message) {
+    const { package_labels, invoice_id } = message;
+    
+    // Only update UI if this is for the current invoice
+    if (invoice_id && window.invoiceId && parseInt(invoice_id) !== parseInt(window.invoiceId)) {
+        return; // Different invoice, ignore
+    }
+    
+    const labels = Array.isArray(package_labels) ? package_labels : [package_labels];
+    
+    labels.forEach(packageLabel => {
+        // Remove from locked packages
+        lockedPackages.delete(packageLabel);
+        
+        // Update UI to remove locked state
+        updatePackageLockUI(packageLabel, false);
+        
+        console.log(`[WebSocket] Package ${packageLabel} released`);
+    });
+}
+
+/**
+ * Section 10.1: Update package lock UI - show lock icon, grayed out styling, tooltip
+ */
+function updatePackageLockUI(packageLabel, isLocked, lockedBy = null) {
+    // Find all package tags with this label
+    const packageTags = document.querySelectorAll('.package-tag');
+    
+    packageTags.forEach(tag => {
+        const tagText = tag.textContent.trim();
+        // Check if this tag contains the package label
+        if (tagText.includes(packageLabel)) {
+            if (isLocked) {
+                // Add locked styling
+                tag.classList.add('package-locked');
+                tag.style.opacity = '0.6';
+                tag.style.pointerEvents = 'none';
+                tag.style.cursor = 'not-allowed';
+                
+                // Add lock icon if not already present
+                if (!tag.querySelector('.lock-icon')) {
+                    const lockIcon = document.createElement('i');
+                    lockIcon.className = 'fas fa-lock lock-icon';
+                    lockIcon.style.marginLeft = '4px';
+                    lockIcon.style.color = '#ef4444';
+                    tag.insertBefore(lockIcon, tag.firstChild.nextSibling);
+                }
+                
+                // Add tooltip
+                tag.title = `Locked by ${lockedBy || 'Another worker'}`;
+                tag.setAttribute('data-locked-by', lockedBy || 'Another worker');
+            } else {
+                // Remove locked styling
+                tag.classList.remove('package-locked');
+                tag.style.opacity = '';
+                tag.style.pointerEvents = '';
+                tag.style.cursor = '';
+                
+                // Remove lock icon
+                const lockIcon = tag.querySelector('.lock-icon');
+                if (lockIcon) {
+                    lockIcon.remove();
+                }
+                
+                // Remove tooltip
+                tag.title = '';
+                tag.removeAttribute('data-locked-by');
+            }
+        }
+    });
+}
+
+/**
+ * Section 10.2: Handle notification acknowledgment via WebSocket
+ */
+function handleNotificationAcknowledged(message) {
+    const { notification_id, success } = message;
+    
+    if (success) {
+        console.log(`[WebSocket] Notification ${notification_id} acknowledged successfully`);
+        // Update UI if needed (e.g., remove notification from list)
+    } else {
+        console.warn(`[WebSocket] Failed to acknowledge notification ${notification_id}:`, message.error);
     }
 }
 
@@ -233,9 +357,12 @@ function setupScannerInput() {
     scannerInput.addEventListener('input', (e) => {
         clearTimeout(scanTimeout);
         
+        // Convert to uppercase for input sanitization (3.1.1)
+        e.target.value = e.target.value.toUpperCase();
+        
         // Wait for user to finish typing (barcode scanners send data quickly)
         scanTimeout = setTimeout(() => {
-            const packageLabel = e.target.value.trim();
+            const packageLabel = e.target.value.trim().toUpperCase();
             if (packageLabel.length > 0) {
                 scanPackage(packageLabel);
                 e.target.value = ''; // Clear input
@@ -246,7 +373,7 @@ function setupScannerInput() {
     scannerInput.addEventListener('keypress', (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
-            const packageLabel = e.target.value.trim();
+            const packageLabel = e.target.value.trim().toUpperCase();
             if (packageLabel.length > 0) {
                 scanPackage(packageLabel);
                 e.target.value = '';
@@ -290,6 +417,7 @@ async function scanPackage(packageLabel) {
 
         if (data.requiresRemovalConfirmation) {
             // Show package removal confirmation modal
+            playErrorBeep(); // 3.2.3: Sound when scanning incorrect package
             showPackageRemovalConfirmation(data.alert, packageLabel);
             return;
         }
@@ -299,15 +427,18 @@ async function scanPackage(packageLabel) {
         }
 
         if (data.duplicate) {
-            showScannerStatus('warning', 'Package already scanned (ignored)');
+            showScannerStatus('warning', 'Package already scanned (ignored)', true);
+            playErrorBeep(); // 3.5.2: Error beep for duplicate scans
         } else {
             showScannerStatus('success', `Package ${packageLabel} scanned successfully!`);
+            playSuccessBeep(); // 3.2.1: Success beep on successful scan
             loadProgress(); // Refresh progress
         }
 
     } catch (error) {
         console.error('Error scanning package:', error);
         showScannerStatus('error', error.message);
+        playErrorBeep(); // 3.2.2: Error beep on rejected scan
     } finally {
         scannerInput.disabled = false;
         scannerInput.focus();
@@ -316,16 +447,82 @@ async function scanPackage(packageLabel) {
 
 /**
  * Show scanner status message
+ * @param {string} type - 'success', 'error', 'warning', 'info'
+ * @param {string} message - Status message
+ * @param {boolean} isDuplicate - Whether this is a duplicate scan (for visual indication)
  */
-function showScannerStatus(type, message) {
+function showScannerStatus(type, message, isDuplicate = false) {
     const statusEl = document.getElementById('scanner-status');
     statusEl.className = `scanner-status ${type}`;
     statusEl.textContent = message;
     statusEl.style.display = 'block';
+    
+    // 3.5.1: Add yellow highlight for duplicate scans
+    if (isDuplicate) {
+        statusEl.style.background = '#fef3c7';
+        statusEl.style.color = '#92400e';
+        statusEl.style.border = '2px solid #f59e0b';
+    }
 
     setTimeout(() => {
         statusEl.style.display = 'none';
+        // Reset styles
+        statusEl.style.background = '';
+        statusEl.style.color = '';
+        statusEl.style.border = '';
     }, 3000);
+}
+
+/**
+ * Play success beep sound (3.2.1)
+ */
+function playSuccessBeep() {
+    try {
+        // Create audio context for beep
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        oscillator.frequency.value = 800; // Higher pitch for success
+        oscillator.type = 'sine';
+        
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+        
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.1);
+    } catch (error) {
+        console.warn('Could not play success beep:', error);
+    }
+}
+
+/**
+ * Play error beep sound (3.2.2, 3.2.3, 3.5.2)
+ */
+function playErrorBeep() {
+    try {
+        // Create audio context for beep
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        oscillator.frequency.value = 400; // Lower pitch for error
+        oscillator.type = 'sawtooth';
+        
+        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+        
+        oscillator.start(audioContext.currentTime);
+        oscillator.stop(audioContext.currentTime + 0.2);
+    } catch (error) {
+        console.warn('Could not play error beep:', error);
+    }
 }
 
 /**
@@ -393,17 +590,29 @@ function renderProgress(data) {
                     <div class="scanned-packages">
                         <h5>Scanned Packages</h5>
                         <div class="package-tags">
-                            ${item.scanned_packages.map(pkg => `
-                                <span class="package-tag">
+                            ${item.scanned_packages.map(pkg => {
+                                // Section 10.1: Check if package is locked
+                                const lockInfo = lockedPackages.get(pkg);
+                                const isLocked = lockInfo !== undefined;
+                                const lockedBy = lockInfo ? lockInfo.userName : null;
+                                
+                                return `
+                                <span class="package-tag ${isLocked ? 'package-locked' : ''}" 
+                                      ${isLocked ? `style="opacity: 0.6; pointer-events: none; cursor: not-allowed;" title="Locked by ${lockedBy || 'Another worker'}"` : ''}
+                                      ${isLocked ? `data-locked-by="${lockedBy || 'Another worker'}"` : ''}>
+                                    ${isLocked ? '<i class="fas fa-lock lock-icon" style="margin-right: 4px; color: #ef4444;"></i>' : ''}
                                     ${pkg}
+                                    ${!isLocked ? `
                                     <button class="remove-btn" onclick="removePackage(${item.line_item_id}, '${pkg}')" title="Remove">
                                         <i class="fas fa-times"></i>
                                     </button>
                                     <button class="edit-btn" onclick="editPackage(${item.line_item_id}, '${pkg}')" title="Edit" style="margin-left: 4px; background: #3b82f6; color: white; border: none; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-size: 0.75rem;">
                                         <i class="fas fa-edit"></i>
                                     </button>
+                                    ` : ''}
                                 </span>
-                            `).join('')}
+                            `;
+                            }).join('')}
                         </div>
                     </div>
                 ` : ''}
@@ -677,14 +886,109 @@ async function removePackage(lineItemId, packageLabel) {
 }
 
 /**
- * Edit package label
+ * Edit package label (3.6.1: Replace prompt() with proper modal)
  */
 async function editPackage(lineItemId, oldPackageLabel) {
-    const newPackageLabel = prompt(`Enter new package label for ${oldPackageLabel}:`, oldPackageLabel);
-    if (!newPackageLabel || newPackageLabel === oldPackageLabel) {
-        return;
-    }
+    // 3.6.1: Show modal instead of prompt
+    showEditPackageModal(lineItemId, oldPackageLabel);
+}
 
+/**
+ * Show edit package modal (3.6.1)
+ */
+function showEditPackageModal(lineItemId, oldPackageLabel) {
+    // Remove existing modal if any
+    const existingModal = document.getElementById('edit-package-modal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+    
+    const modal = document.createElement('div');
+    modal.id = 'edit-package-modal';
+    modal.className = 'rejection-alert-modal';
+    modal.innerHTML = `
+        <div class="rejection-alert-content">
+            <h3><i class="fas fa-edit"></i> Edit Package Label</h3>
+            <p style="margin-bottom: 1rem; color: var(--text-light);">
+                Current package label: <strong>${oldPackageLabel}</strong>
+            </p>
+            <form id="edit-package-form">
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">
+                        New Package Label <span style="color: #ef4444;">*</span>
+                    </label>
+                    <input 
+                        type="text" 
+                        id="new-package-label" 
+                        value="${oldPackageLabel}" 
+                        required 
+                        pattern="[A-Z0-9]{24}" 
+                        title="Package label must be 24 alphanumeric characters"
+                        style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; font-family: 'Courier New', monospace; text-transform: uppercase;"
+                        oninput="this.value = this.value.toUpperCase()"
+                    >
+                    <small style="color: var(--text-light); font-size: 0.75rem; margin-top: 0.25rem; display: block;">
+                        Package label must be exactly 24 alphanumeric characters
+                    </small>
+                </div>
+                <div class="alert-actions">
+                    <button type="button" class="btn-skip" onclick="closeEditPackageModal()">Cancel</button>
+                    <button type="submit" class="btn-verify">Update Package</button>
+                </div>
+            </form>
+        </div>
+    `;
+    document.body.appendChild(modal);
+    modal.classList.add('active');
+    
+    // Focus on input
+    setTimeout(() => {
+        const input = document.getElementById('new-package-label');
+        if (input) {
+            input.focus();
+            input.select();
+        }
+    }, 100);
+    
+    // Handle form submission
+    document.getElementById('edit-package-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const newPackageLabel = document.getElementById('new-package-label').value.trim().toUpperCase();
+        
+        if (!newPackageLabel || newPackageLabel === oldPackageLabel) {
+            return;
+        }
+        
+        // 3.6.6: Package label format validation
+        if (!/^[A-Z0-9]{24}$/.test(newPackageLabel)) {
+            alert('Package label must be exactly 24 alphanumeric characters');
+            return;
+        }
+        
+        await handleEditPackage(lineItemId, oldPackageLabel, newPackageLabel);
+    });
+}
+
+/**
+ * Close edit package modal
+ */
+function closeEditPackageModal() {
+    const modal = document.getElementById('edit-package-modal');
+    if (modal) {
+        modal.classList.remove('active');
+        setTimeout(() => modal.remove(), 300);
+    }
+}
+
+/**
+ * Handle edit package submission (3.6.2: Add full validation pipeline re-run after edit)
+ */
+async function handleEditPackage(lineItemId, oldPackageLabel, newPackageLabel) {
+    const button = document.querySelector('#edit-package-form button[type="submit"]');
+    if (button) {
+        setButtonLoading(button, true);
+    }
+    
     try {
         const response = await fetch('/api/v1/fulfillment/admin/sessions/edit-package', {
             method: 'POST',
@@ -705,12 +1009,20 @@ async function editPackage(lineItemId, oldPackageLabel) {
             throw new Error(data.error || 'Failed to edit package');
         }
 
-        alert('Package label updated successfully');
+        closeEditPackageModal();
+        alert('Package label updated successfully. Re-running validation...');
+        
+        // 3.6.2: Full validation pipeline re-run after edit
+        // Re-scan the new package label to ensure it passes all validations
+        await scanPackage(newPackageLabel);
         loadProgress();
 
     } catch (error) {
         console.error('Error editing package:', error);
         alert(`Error: ${error.message}`);
+        if (button) {
+            setButtonLoading(button, false);
+        }
     }
 }
 

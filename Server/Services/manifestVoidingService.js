@@ -216,22 +216,31 @@ class ManifestVoidingService {
             const remainingNumbers = remainingManifests.map(m => m.number);
             const voidedNumbers = voidedManifests.map(m => m.number);
 
+            // Section 6.2.2: Fix invoice status: Should be Fulfillment_Issue after void, not Manifest_Voided
             // Determine new status based on void results
             let newStatus = inv.status;
             if (remainingManifests.length === 0) {
-                // All manifests voided - set to Manifest_Voided to allow rescanning
-                newStatus = 'Manifest_Voided';
+                // All manifests voided - set to Fulfillment_Issue to allow sales to fix and rescan
+                newStatus = 'Fulfillment_Issue';
             } else if (voidedManifests.length > 0 && remainingManifests.length > 0) {
-                // Partial void
+                // Partial void - keep current status or set to Partially_Voided
                 newStatus = 'Partially_Voided';
             }
 
+            // Section 6.2.1: Fix clearing manifest fields: When all manifests voided, set metrc_manifest_number = NULL, manifest_metrc_id = NULL, manifest_created_at = NULL
+            const allVoided = remainingManifests.length === 0;
+            
             // Update manifest-related fields first (before status transition)
+            // Section 6.2.1: Fix clearing manifest fields: When all manifests voided, set manifest_created_at = NULL
+            const manifestNumbersParam = allVoided ? '[]' : JSON.stringify(remainingNumbers);
+            const manifestIdsParam = allVoided ? '[]' : JSON.stringify(remainingManifests);
+            
             await client.query(`
                 UPDATE "ORDERS-invoices"
                 SET 
                     metrc_manifest_numbers = $1::jsonb,
                     manifest_metrc_ids = $2::jsonb,
+                    ${allVoided ? 'manifest_created_at = NULL,' : ''}
                     voided_manifest_number = CASE 
                         WHEN voided_manifest_number IS NULL THEN $3
                         ELSE voided_manifest_number || ', ' || $3
@@ -252,13 +261,13 @@ class ManifestVoidingService {
                     END
                 WHERE id = $8
             `, [
-                JSON.stringify(remainingNumbers),
-                JSON.stringify(remainingManifests),
+                manifestNumbersParam,
+                manifestIdsParam,
                 voidedNumbers.join(', '),
                 reason,
                 userId,
-                remainingManifests.length === 0, // All voided
-                remainingManifests.length === 0 ? `All manifests voided: ${reason}` : `Partial void: ${voidedNumbers.join(', ')} - ${reason}`,
+                allVoided, // All voided
+                allVoided ? `All manifests voided: ${reason}` : `Partial void: ${voidedNumbers.join(', ')} - ${reason}`,
                 invoiceId
             ]);
 
@@ -273,8 +282,45 @@ class ManifestVoidingService {
                     WHERE fk_invoice_id = $1
                 `, [invoiceId]);
 
+                // Section 6.2.4: Fix scanning session cleanup: Clear currently_locked_packages to [] when voiding
+                await client.query(`
+                    UPDATE "ORDERS-scanning-sessions"
+                    SET 
+                        session_status = 'cancelled',
+                        cancelled_at = NOW(),
+                        currently_locked_packages = '[]'::jsonb
+                    WHERE fk_invoice_id = $1 AND session_status = 'active'
+                `, [invoiceId]);
+
                 // Release allocations
                 await this.releaseAllocationsForInvoice(invoiceId, client);
+                
+                // Section 6.2.3: Add allocation release verification: Query to verify SUM(quantity_allocated) = 0 after release
+                const verificationResult = await client.query(`
+                    SELECT SUM(quantity_allocated) as total_allocated
+                    FROM "ORDERS-invoice-line-items"
+                    WHERE fk_invoice_id = $1
+                `, [invoiceId]);
+                
+                const totalAllocated = parseInt(verificationResult.rows[0]?.total_allocated || 0);
+                if (totalAllocated !== 0) {
+                    console.error(`[Void] ⚠️ WARNING: Allocation release verification failed for invoice ${invoiceId}. Total allocated: ${totalAllocated} (expected 0)`);
+                    // Log to audit but don't fail the void operation
+                    await client.query(`
+                        INSERT INTO "ORDERS-invoice-history" (
+                            fk_invoice_id,
+                            modification_type,
+                            reason,
+                            changed_by_user_id
+                        ) VALUES ($1, 'allocation_release_verification_failed', $2, $3)
+                    `, [
+                        invoiceId,
+                        `Allocation release verification failed: Total allocated = ${totalAllocated} (expected 0). Manual review required.`,
+                        userId
+                    ]);
+                } else {
+                    console.log(`[Void] ✓ Allocation release verification passed: All allocations released`);
+                }
             }
 
             // Update manifest packages table - mark voided packages
@@ -526,6 +572,44 @@ class ManifestVoidingService {
                 ? JSON.parse(inv.transportation_details)
                 : inv.transportation_details;
 
+            // Section 7.3: Add arrival-after-departure validation in edit form
+            if (updates.estimatedDeparture && updates.estimatedArrival) {
+                const departure = new Date(updates.estimatedDeparture);
+                const arrival = new Date(updates.estimatedArrival);
+                if (departure >= arrival) {
+                    throw new Error('Estimated arrival must be after estimated departure');
+                }
+            } else if (updates.estimatedArrival) {
+                // If only arrival is updated, check against current departure
+                const departure = currentDetails.estimatedDeparture 
+                    ? new Date(currentDetails.estimatedDeparture)
+                    : null;
+                if (departure) {
+                    const arrival = new Date(updates.estimatedArrival);
+                    if (departure >= arrival) {
+                        throw new Error('Estimated arrival must be after estimated departure');
+                    }
+                }
+            } else if (updates.estimatedDeparture) {
+                // If only departure is updated, check against current arrival
+                const arrival = currentDetails.estimatedArrival 
+                    ? new Date(currentDetails.estimatedArrival)
+                    : null;
+                if (arrival) {
+                    const departure = new Date(updates.estimatedDeparture);
+                    if (departure >= arrival) {
+                        throw new Error('Estimated arrival must be after estimated departure');
+                    }
+                }
+            }
+
+            // Section 7.5: Add warning for manifests in transit
+            let transitWarning = null;
+            if (statusCheck && (statusCheck.status === 'InTransit' || statusCheck.status === 'accepted')) {
+                transitWarning = 'Manifest is in transit or accepted - Update may not be reflected in METRC until delivery';
+                console.warn(`[Manifest Update] ⚠️ ${transitWarning}`);
+            }
+
             const updatedDetails = {
                 ...currentDetails,
                 ...updates,
@@ -563,28 +647,46 @@ class ManifestVoidingService {
 
             console.log(`[Manifest Update] ✓ Manifest updated in METRC`);
 
+            // Section 7.4: Fix audit logging: Add field_changed, old_value, new_value for transportation_details
+            const oldValue = JSON.stringify(currentDetails);
+            const newValue = JSON.stringify(updatedDetails);
+
             // Update transportation details in our DB
             await client.query(`
                 UPDATE "ORDERS-invoices"
                 SET transportation_details = $1, updated_at = NOW()
                 WHERE id = $2
-            `, [JSON.stringify(updatedDetails), invoiceId]);
+            `, [newValue, invoiceId]);
 
-            // Log update
+            // Section 7.4: Log update with proper field tracking
             await client.query(`
                 INSERT INTO "ORDERS-invoice-history" (
                     fk_invoice_id,
                     modification_type,
+                    field_name,
+                    field_changed,
+                    old_value,
+                    new_value,
                     change_details,
                     changed_by_user_id
-                ) VALUES ($1, 'manifest_updated', $2, $3)
-            `, [invoiceId, JSON.stringify(updates), userId]);
+                ) VALUES ($1, 'manifest_updated', 'transportation_details', 'transportation_details', $2, $3, $4, $5)
+            `, [
+                invoiceId, 
+                oldValue, 
+                newValue, 
+                JSON.stringify({
+                    updates: updates,
+                    updated_fields: Object.keys(updates)
+                }), 
+                userId
+            ]);
 
             await client.query('COMMIT');
 
             return {
                 success: true,
-                message: 'Manifest updated successfully'
+                message: 'Manifest updated successfully',
+                warning: transitWarning || null  // Section 7.5: Include warning if manifest is in transit
             };
 
         } catch (error) {
@@ -596,41 +698,54 @@ class ManifestVoidingService {
     }
 
     /**
-     * Dry run void manifest in METRC (validation only)
+     * Section 6.1: Dry run void manifest in METRC (validation only)
+     * Uses DELETE /transfers/v2/external/incoming/{id}?dryRun=true
      */
     async voidManifestDryRun(manifestMetrcId, license) {
         try {
-            // METRC T3 API doesn't have a separate dry run endpoint for voiding
-            // We'll check the transfer status first to validate it can be voided
+            // Section 6.1.1: Fix API endpoint: Use DELETE /transfers/v2/external/incoming/{id}?dryRun=true
             const response = await metrcAuth.makeAuthenticatedRequest({
-                method: 'GET',
+                method: 'DELETE',
                 url: `${metrcAuth.apiBaseUrl}/transfers/v2/external/incoming/${manifestMetrcId}`,
                 params: {
-                    licenseNumber: license
+                    licenseNumber: license,
+                    dryRun: true  // Critical: This enables dry run mode
                 },
-                timeout: 15000
+                timeout: 30000  // 30 seconds for dry run
             });
 
-            const transfer = response.data;
-            
-            // Check if transfer can be voided
-            if (transfer.status === 'Delivered') {
-                return { success: false, error: 'Cannot void manifest - already delivered' };
-            }
-            if (transfer.status === 'Voided') {
-                return { success: false, error: 'Cannot void manifest - already voided' };
-            }
-            if (transfer.status === 'InTransit') {
-                // May or may not be voidable depending on METRC rules
-                return { success: true, warning: 'Manifest is in transit - void may not be allowed by METRC' };
+            // If dry run succeeds (200 OK), the manifest can be voided
+            if (response.status === 200) {
+                return { success: true };
             }
 
-            return { success: true };
+            // If we get here, something unexpected happened
+            return { success: false, error: 'Dry run validation returned unexpected response' };
         } catch (error) {
-            if (error.response && error.response.status === 404) {
-                return { success: false, error: 'Manifest not found in METRC' };
+            // Extract error details from response
+            if (error.response) {
+                const status = error.response.status;
+                const data = error.response.data;
+                
+                if (status === 404) {
+                    return { success: false, error: 'Manifest not found in METRC' };
+                }
+                
+                if (status === 400) {
+                    // Validation error - manifest cannot be voided
+                    const errorMessage = data?.message || data?.error || JSON.stringify(data);
+                    return { 
+                        success: false, 
+                        error: `Cannot void manifest: ${errorMessage}` 
+                    };
+                }
+                
+                // Other errors
+                const errorMessage = data?.message || data?.error || error.message;
+                return { success: false, error: errorMessage };
             }
-            return { success: false, error: error.message };
+            
+            return { success: false, error: error.message || 'Unknown error during dry run validation' };
         }
     }
 

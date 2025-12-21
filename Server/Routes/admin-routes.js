@@ -10,6 +10,7 @@ const invoiceController = require('../Controllers/invoiceController');
 const settingsController = require('../Controllers/settingsController');
 const creditUiController = require('../Controllers/creditUiController');
 const discountUiController = require('../Controllers/discountUiController');
+const complianceReportingController = require('../Controllers/complianceReportingController');
 const UserModel = require('../Models/userModel');
 const { requireAuth, requirePermission, requireRole } = require('../Middleware/auth');
 const syncFailureTracker = require('../Services/syncFailureTracker');
@@ -725,5 +726,33 @@ router.get('/fulfillment/issues', requireRole('fulfillment_admin', 'Sales Admin'
         res.status(500).send('Error loading issues dashboard');
     }
 });
+
+// =====================================================
+// Section 17.4: METRC Compliance - Regulatory Reporting
+// =====================================================
+
+/**
+ * GET /api/v1/admin/compliance/reports/rejected-packages
+ * Generate rejected package report
+ * Query params: date_from, date_to, format (json|csv)
+ */
+router.get('/compliance/reports/rejected-packages', requireRole('Administrator', 'fulfillment_admin'), 
+    complianceReportingController.getRejectedPackagesReport.bind(complianceReportingController));
+
+/**
+ * GET /api/v1/admin/compliance/reports/voided-manifests
+ * Generate voided manifest report
+ * Query params: date_from, date_to, format (json|csv)
+ */
+router.get('/compliance/reports/voided-manifests', requireRole('Administrator', 'fulfillment_admin'), 
+    complianceReportingController.getVoidedManifestsReport.bind(complianceReportingController));
+
+/**
+ * GET /api/v1/admin/compliance/reports/destroyed-packages
+ * Generate destroyed package report
+ * Query params: date_from, date_to, format (json|csv)
+ */
+router.get('/compliance/reports/destroyed-packages', requireRole('Administrator', 'fulfillment_admin'), 
+    complianceReportingController.getDestroyedPackagesReport.bind(complianceReportingController));
 
 module.exports = router;

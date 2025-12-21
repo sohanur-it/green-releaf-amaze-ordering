@@ -250,6 +250,26 @@ class InvoiceStateMachineService {
                 `, [userId, invoiceId]);
             }
             
+            // Section 5.1.6: Auto-clear transportation_details when transitioning to Fulfillment_Issue if manifest_created_at IS NULL
+            if (to === 'Fulfillment_Issue') {
+                const invoiceCheck = await client.query(`
+                    SELECT manifest_created_at
+                    FROM "ORDERS-invoices"
+                    WHERE id = $1
+                `, [invoiceId]);
+                
+                const shouldClearTransportation = !invoiceCheck.rows[0]?.manifest_created_at;
+                
+                if (shouldClearTransportation) {
+                    await client.query(`
+                        UPDATE "ORDERS-invoices"
+                        SET transportation_details = NULL
+                        WHERE id = $1
+                    `, [invoiceId]);
+                    console.log(`[StateMachine] Cleared transportation_details for invoice ${invoiceId} (transitioning to Fulfillment_Issue, manifest not created)`);
+                }
+            }
+            
             // -> Cancelled (before shipping)
             if (to === 'Cancelled') {
                 const releaseResult = await this.releaseAllAllocations(invoiceId, client);
@@ -467,6 +487,16 @@ class InvoiceStateMachineService {
                 console.log(`[StateMachine] ${from} → Approved: Notifying fulfillment team for invoice ${invoiceId}`);
                 await this.notifyFulfillment(invoiceId);
                 
+                // Broadcast order approved event via WebSocket
+                const websocketService = require('./websocketService');
+                const invoiceResult = await this.pool.query(
+                    'SELECT invoice_number FROM "ORDERS-invoices" WHERE id = $1', 
+                    [invoiceId]
+                );
+                if (invoiceResult.rows.length > 0) {
+                    await websocketService.broadcastOrderApproved(invoiceId, invoiceResult.rows[0].invoice_number);
+                }
+                
                 // Notify customer if external order
                 const invoice = await this.pool.query(
                     'SELECT source FROM "ORDERS-invoices" WHERE id = $1', 
@@ -482,6 +512,16 @@ class InvoiceStateMachineService {
             if (from === 'Fulfillment_Issue' && to === 'Approved') {
                 console.log(`[StateMachine] Fulfillment_Issue → Approved: Notifying fulfillment team for invoice ${invoiceId}`);
                 await this.notifyFulfillment(invoiceId);
+                
+                // Broadcast order approved event via WebSocket
+                const websocketService = require('./websocketService');
+                const invoiceResult = await this.pool.query(
+                    'SELECT invoice_number FROM "ORDERS-invoices" WHERE id = $1', 
+                    [invoiceId]
+                );
+                if (invoiceResult.rows.length > 0) {
+                    await websocketService.broadcastOrderApproved(invoiceId, invoiceResult.rows[0].invoice_number);
+                }
             }
             
             // Fulfillment_Accepted: Notify fulfillment team

@@ -17,6 +17,9 @@ class FulfillmentQueueService {
             deliveryZone,
             minTotal,
             maxTotal,
+            dateFrom,
+            dateTo,
+            myOrders,
             sortBy = 'age',
             sortOrder = 'asc',
             page = 1,
@@ -115,6 +118,26 @@ class FulfillmentQueueService {
             paramCount++;
         }
 
+        // Date range filter (approved_at)
+        if (dateFrom) {
+            sql += ` AND i.approved_at >= $${paramCount}`;
+            params.push(dateFrom);
+            paramCount++;
+        }
+
+        if (dateTo) {
+            sql += ` AND i.approved_at <= $${paramCount}`;
+            params.push(dateTo);
+            paramCount++;
+        }
+
+        // My Orders filter (fulfillment_accepted_by = current_user_id)
+        if (myOrders && filters.userId) {
+            sql += ` AND i.fulfillment_accepted_by = $${paramCount}`;
+            params.push(filters.userId);
+            paramCount++;
+        }
+
         // Build count query BEFORE adding GROUP BY, ORDER BY, LIMIT
         // This ensures we get the correct total count of distinct invoices
         let countSql = `
@@ -170,6 +193,24 @@ class FulfillmentQueueService {
         if (maxTotal) {
             countSql += ` AND i.total <= $${countParamCount}`;
             countParams.push(maxTotal);
+            countParamCount++;
+        }
+
+        if (dateFrom) {
+            countSql += ` AND i.approved_at >= $${countParamCount}`;
+            countParams.push(dateFrom);
+            countParamCount++;
+        }
+
+        if (dateTo) {
+            countSql += ` AND i.approved_at <= $${countParamCount}`;
+            countParams.push(dateTo);
+            countParamCount++;
+        }
+
+        if (myOrders && filters.userId) {
+            countSql += ` AND i.fulfillment_accepted_by = $${countParamCount}`;
+            countParams.push(filters.userId);
             countParamCount++;
         }
 
