@@ -471,12 +471,27 @@ router.post('/products/master/:id/link-items/confirm', async (req, res) => {
 
         await client.query('COMMIT');
 
+        // CRITICAL: Automatically refresh batches from METRC after linking
+        // This ensures batch quantities and inventory are immediately up-to-date
+        let refreshResult = null;
+        try {
+            console.log(`🔄 Auto-refreshing batches for linked METRC items: ${metrc_item_names.join(', ')}`);
+            refreshResult = await batchSyncService.refreshBatchesForItems(metrc_item_names);
+            console.log(`✅ Auto-refresh completed: ${refreshResult.updated || 0} batch(es) updated`);
+        } catch (refreshError) {
+            console.error('⚠️ Warning: Failed to auto-refresh batches after linking:', refreshError.message);
+            // Don't fail the entire operation if refresh fails - batches will sync on next scheduled sync
+        }
+
         // Build response message
         let message = `Successfully linked ${metrc_item_names.length} METRC items to ${productName}`;
         if (result.rowCount > 0) {
             message += ` (${result.rowCount} batch(es) linked immediately)`;
         } else {
             message += `. No existing batches found - batches will appear after the next sync.`;
+        }
+        if (refreshResult && refreshResult.updated > 0) {
+            message += ` Refreshed ${refreshResult.updated} batch(es) with latest METRC data.`;
         }
         if (batchesWithWarnings.length > 0) {
             message += ` Note: ${batchesWithWarnings.length} batch(es) have missing source packages but were still linked.`;
@@ -486,6 +501,7 @@ router.post('/products/master/:id/link-items/confirm', async (req, res) => {
             success: true,
             batches_updated: result.rowCount,
             batches_linked: result.rowCount,
+            batches_refreshed: refreshResult ? refreshResult.updated : 0,
             batches_with_warnings: batchesWithWarnings.length,
             batches_with_warnings_details: batchesWithWarnings.length > 0 ? batchesWithWarnings : undefined,
             message: message,
@@ -572,6 +588,7 @@ router.post('/products/master/:id/link-items/confirm', async (req, res) => {
 router.post('/products/master/:id/refresh-batches', auth, async (req, res) => {
     try {
         const { metrc_item_names } = req.body || {};
+        const productId = parseInt(req.params.id);
 
         if (!Array.isArray(metrc_item_names) || metrc_item_names.length === 0) {
             return res.status(400).json({
@@ -580,7 +597,15 @@ router.post('/products/master/:id/refresh-batches', auth, async (req, res) => {
             });
         }
 
-        const result = await batchSyncService.refreshBatchesForItems(metrc_item_names);
+        if (isNaN(productId)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid product ID'
+            });
+        }
+
+        // Pass productId to ensure batches are linked to this product
+        const result = await batchSyncService.refreshBatchesForItems(metrc_item_names, productId);
 
         res.json({
             success: true,
@@ -594,6 +619,260 @@ router.post('/products/master/:id/refresh-batches', auth, async (req, res) => {
             error: 'Failed to refresh batches for specified METRC items',
             message: error.message
         });
+    }
+});
+
+/**
+ * @swagger
+ * /api/v1/products/refresh-all-batches:
+ *   post:
+ *     summary: Refresh batches for all products with linked METRC items
+ *     description: >
+ *       Refreshes batches from METRC for all products that have metrc_linked_items.
+ *       This ensures all product batches are up-to-date without requiring manual refresh per product.
+ *     tags: [Module 3 - Products]
+ *     security:
+ *       - sessionAuth: []
+ *     responses:
+ *       200:
+ *         description: Batch refresh completed for all products
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 products_processed:
+ *                   type: integer
+ *                 total_batches_refreshed:
+ *                   type: integer
+ *                 duration_ms:
+ *                   type: integer
+ */
+router.post('/products/refresh-all-batches', auth, async (req, res) => {
+    const startTime = Date.now();
+    const client = await pool.connect();
+    const userId = req.user?.id || req.session?.userId;
+    
+    // Get WebSocket service for real-time updates
+    let websocketService;
+    try {
+        websocketService = require('../Services/websocketService');
+    } catch (err) {
+        console.warn('⚠️ WebSocket service not available for real-time updates');
+    }
+    
+    // Helper function to send progress update to specific user
+    const sendProgress = (progress) => {
+        if (websocketService && websocketService.getServer() && userId) {
+            try {
+                const wss = websocketService.getServer();
+                const message = JSON.stringify({
+                    type: 'batch_refresh_progress',
+                    user_id: userId,
+                    ...progress
+                });
+                
+                // Send only to the user who initiated the refresh
+                wss.clients.forEach(client => {
+                    if (client.readyState === require('ws').OPEN && client.userId === userId) {
+                        client.send(message);
+                    }
+                });
+            } catch (err) {
+                console.warn('⚠️ Failed to send WebSocket progress update:', err.message);
+            }
+        }
+    };
+    
+    try {
+        // Get all products with linked METRC items
+        const productsResult = await client.query(`
+            SELECT entry_id, name, metrc_linked_items
+            FROM "ORDERS-products"
+            WHERE metrc_linked_items IS NOT NULL
+              AND metrc_linked_items::text != '[]'
+              AND (is_archived = FALSE OR is_archived IS NULL)
+            ORDER BY entry_id
+        `);
+        
+        if (productsResult.rows.length === 0) {
+            sendProgress({
+                status: 'completed',
+                products_processed: 0,
+                total_batches_refreshed: 0,
+                message: 'No products with linked METRC items found'
+            });
+            return res.json({
+                success: true,
+                products_processed: 0,
+                total_batches_refreshed: 0,
+                duration_ms: Date.now() - startTime,
+                message: 'No products with linked METRC items found'
+            });
+        }
+        
+        console.log(`🔄 Refreshing batches for ${productsResult.rows.length} products...`);
+        
+        // Send initial progress
+        sendProgress({
+            status: 'started',
+            total_products: productsResult.rows.length,
+            products_processed: 0,
+            total_batches_refreshed: 0,
+            message: `Starting refresh for ${productsResult.rows.length} products...`
+        });
+        
+        let totalBatchesRefreshed = 0;
+        let productsProcessed = 0;
+        const results = [];
+        
+        // Process products ONE AT A TIME to send real-time updates
+        for (let i = 0; i < productsResult.rows.length; i++) {
+            const product = productsResult.rows[i];
+            
+            try {
+                const linkedItems = Array.isArray(product.metrc_linked_items) 
+                    ? product.metrc_linked_items 
+                    : JSON.parse(product.metrc_linked_items || '[]');
+                
+                if (linkedItems.length > 0) {
+                    console.log(`   🔄 [${i + 1}/${productsResult.rows.length}] Refreshing batches for product ${product.entry_id} (${product.name}) with ${linkedItems.length} linked METRC item(s)...`);
+                    
+                    // Send "processing" update before starting
+                    sendProgress({
+                        status: 'progress',
+                        products_processed: productsProcessed,
+                        total_products: productsResult.rows.length,
+                        total_batches_refreshed: totalBatchesRefreshed,
+                        current_product: {
+                            id: product.entry_id,
+                            name: product.name,
+                            status: 'processing'
+                        },
+                        message: `Processing ${product.name}... (${i + 1}/${productsResult.rows.length} products)`
+                    });
+                    
+                    // Small delay to ensure UI updates
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                    const result = await batchSyncService.refreshBatchesForItems(linkedItems, product.entry_id);
+                    // Use 'updated' which now includes both created and modified batches
+                    const batchesRefreshed = result.updated || 0;
+                    totalBatchesRefreshed += batchesRefreshed;
+                    productsProcessed++;
+                    
+                    console.log(`   ✅ [${i + 1}/${productsResult.rows.length}] Product ${product.entry_id}: ${batchesRefreshed} batch(es) refreshed (${result.created || 0} new, ${result.modified || 0} updated, ${result.total || 0} total)`);
+                    
+                    results.push({
+                        product_id: product.entry_id,
+                        product_name: product.name,
+                        batches_refreshed: batchesRefreshed,
+                        batches_created: result.created || 0,
+                        batches_modified: result.modified || 0,
+                        batches_total: result.total || 0,
+                        success: true
+                    });
+                    
+                    // Send real-time progress update AFTER processing
+                    sendProgress({
+                        status: 'progress',
+                        products_processed: productsProcessed,
+                        total_products: productsResult.rows.length,
+                        total_batches_refreshed: totalBatchesRefreshed,
+                        current_product: {
+                            id: product.entry_id,
+                            name: product.name,
+                            batches_refreshed: batchesRefreshed,
+                            batches_created: result.created || 0,
+                            batches_modified: result.modified || 0,
+                            status: 'completed'
+                        },
+                        message: `✅ Updated ${batchesRefreshed} batch(es) for ${product.name} (${productsProcessed}/${productsResult.rows.length} products)`
+                    });
+                    
+                    // Log to console for debugging
+                    console.log(`   📊 Progress: ${productsProcessed}/${productsResult.rows.length} products, ${totalBatchesRefreshed} total batches`);
+                    
+                    // Small delay between products to allow UI to update
+                    await new Promise(resolve => setTimeout(resolve, 200));
+                } else {
+                    console.log(`   ⚠️ [${i + 1}/${productsResult.rows.length}] Product ${product.entry_id} (${product.name}) has no linked METRC items, skipping...`);
+                    productsProcessed++;
+                }
+            } catch (error) {
+                console.error(`⚠️ [${i + 1}/${productsResult.rows.length}] Failed to refresh batches for product ${product.entry_id} (${product.name}):`, error.message);
+                productsProcessed++;
+                results.push({
+                    product_id: product.entry_id,
+                    product_name: product.name,
+                    batches_refreshed: 0,
+                    success: false,
+                    error: error.message
+                });
+                
+                // Send error progress update
+                sendProgress({
+                    status: 'progress',
+                    products_processed: productsProcessed,
+                    total_products: productsResult.rows.length,
+                    total_batches_refreshed: totalBatchesRefreshed,
+                    current_product: {
+                        id: product.entry_id,
+                        name: product.name,
+                        error: error.message,
+                        status: 'error'
+                    },
+                    message: `❌ Failed to refresh ${product.name}: ${error.message}`
+                });
+            }
+        }
+        
+        const duration = Date.now() - startTime;
+        const successful = results.filter(r => r.success).length;
+        const failed = results.filter(r => !r.success).length;
+        
+        console.log(`✅ Refreshed batches for ${successful} products (${failed} failed), ${totalBatchesRefreshed} total batches refreshed in ${duration}ms`);
+        
+        // Send completion update
+        sendProgress({
+            status: 'completed',
+            products_processed: productsProcessed,
+            total_products: productsResult.rows.length,
+            products_successful: successful,
+            products_failed: failed,
+            total_batches_refreshed: totalBatchesRefreshed,
+            duration_ms: duration,
+            message: `Completed: ${successful} products successful, ${totalBatchesRefreshed} batches refreshed`
+        });
+        
+        res.json({
+            success: true,
+            products_processed: productsResult.rows.length,
+            products_successful: successful,
+            products_failed: failed,
+            total_batches_refreshed: totalBatchesRefreshed,
+            duration_ms: duration,
+            results: results
+        });
+    } catch (error) {
+        console.error('❌ Error refreshing batches for all products:', error.message);
+        
+        // Send error update
+        sendProgress({
+            status: 'error',
+            error: error.message,
+            message: `Error: ${error.message}`
+        });
+        
+        res.status(500).json({
+            success: false,
+            error: 'Failed to refresh batches for all products',
+            message: error.message
+        });
+    } finally {
+        client.release();
     }
 });
 

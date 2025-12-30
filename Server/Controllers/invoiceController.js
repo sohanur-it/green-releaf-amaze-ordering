@@ -1061,6 +1061,7 @@ class InvoiceController {
                 history: history.rows,
                 user: req.session.user,
                 isAdmin: isAdmin,
+                isSuperuser: isSuperuser,
                 isSalesAdmin: isSalesAdmin,
                 isSalesRep: isSalesRep,
                 isFulfillmentUser: isFulfillmentUser, // Pass fulfillment flag for read-only mode
@@ -1152,6 +1153,12 @@ class InvoiceController {
                     error: 'productId and location_id are required' 
                 });
             }
+            
+            // NOTE: Batch sync is now handled via:
+            // 1. Scheduled jobs (automatic sync)
+            // 2. "Refresh All Batches" button (manual bulk refresh)
+            // 3. "Refresh from METRC" button on product details page (manual single product refresh)
+            // This prevents slow API responses on every request
             
             const batches = await query(`
                 SELECT 

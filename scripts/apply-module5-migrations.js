@@ -59,6 +59,16 @@ const MIGRATION_SCRIPTS = [
         name: '17.3.1 Allocation Timestamp Tracking',
         file: 'add-allocation-timestamp-field.sql',
         description: 'Adds allocated_at field to ORDERS-invoice-line-items for allocation timestamp tracking'
+    },
+    {
+        name: '11.5 Security Audit Log Table',
+        file: 'add-security-audit-table.sql',
+        description: 'Creates security audit log table for tracking failed admin override attempts'
+    },
+    {
+        name: '22.0 Performance Considerations - Database Indexes',
+        file: 'add-module22-performance-indexes.sql',
+        description: 'Adds critical performance indexes for fulfillment queue, package lookups, and session cleanup'
     }
 ];
 

@@ -395,7 +395,35 @@ exports.getProductById = async (req, res) => {
             return res.status(404).send('Product not found');
         }
 
-        // Get batches for this product
+        const product = productResult.rows[0];
+        
+        // OPTIONAL: Only refresh batches if explicitly requested via query parameter
+        // This prevents slow page loads on every view
+        // Users can click "Refresh from METRC" button for manual refresh
+        const refreshBatches = req.query.refresh === 'true';
+        
+        if (refreshBatches && product.metrc_linked_items && product.metrc_linked_items.length > 0) {
+            try {
+                const BatchSyncService = require('../Services/BatchSyncService');
+                const batchSyncService = new BatchSyncService();
+                const linkedItems = Array.isArray(product.metrc_linked_items) 
+                    ? product.metrc_linked_items 
+                    : JSON.parse(product.metrc_linked_items || '[]');
+                
+                if (linkedItems.length > 0) {
+                    console.log(`🔄 Refreshing batches for product ${productId} (explicitly requested)...`);
+                    // Pass productId to ensure batches are linked to this product
+                    await batchSyncService.refreshBatchesForItems(linkedItems, productId);
+                    console.log(`✅ Batches refreshed for product ${productId}`);
+                    await batchSyncService.close();
+                }
+            } catch (refreshError) {
+                console.warn(`⚠️ Failed to refresh batches for product ${productId}:`, refreshError.message);
+                // Continue even if refresh fails - will show current DB state
+            }
+        }
+
+        // Get batches for this product (after refresh)
         const batchesResult = await pool.query(`
             SELECT * FROM "ORDERS-batches" 
             WHERE fk_master_product_id = $1
@@ -413,8 +441,6 @@ exports.getProductById = async (req, res) => {
                 .replace(/&#39;/g, "'");
         }
 
-        const product = productResult.rows[0];
-        
         // Decode HTML entities in description and lineage if they exist
         if (product.description) {
             product.description = decodeHtmlEntities(product.description);

@@ -249,6 +249,69 @@ class MasterScheduler {
         scheduledCount++;
         console.log('📅 Scheduled manifest status tracking job (every 15 minutes)');
 
+        // Module 20.4: Schedule archive jobs
+        const archiveService = require('./archiveService');
+
+        // Archive scanning sessions - Daily at 2 AM
+        const archiveSessionsJob = cron.schedule('0 2 * * *', async () => {
+            try {
+                console.log('📦 Running scanning sessions archive job...');
+                const result = await archiveService.archiveScanningSessions();
+                if (result.success) {
+                    console.log(`✅ Scanning sessions archive completed: ${result.archived_count} archived, ${result.remaining_count} remaining`);
+                }
+            } catch (error) {
+                console.error('❌ Scanning sessions archive job error:', error.message);
+            }
+        }, {
+            scheduled: true,
+            timezone: process.env.SYNC_TIMEZONE || 'America/Chicago'
+        });
+
+        this.jobs.set('archiveScanningSessions', archiveSessionsJob);
+        scheduledCount++;
+        console.log('📅 Scheduled scanning sessions archive job (daily at 2 AM)');
+
+        // Archive manifest packages - Monthly, 1st of month at 2 AM
+        const archiveManifestsJob = cron.schedule('0 2 1 * *', async () => {
+            try {
+                console.log('📦 Running manifest packages archive job...');
+                const result = await archiveService.archiveManifestPackages();
+                if (result.success) {
+                    console.log(`✅ Manifest packages archive completed: ${result.archived_count} archived, ${result.remaining_count} remaining`);
+                }
+            } catch (error) {
+                console.error('❌ Manifest packages archive job error:', error.message);
+            }
+        }, {
+            scheduled: true,
+            timezone: process.env.SYNC_TIMEZONE || 'America/Chicago'
+        });
+
+        this.jobs.set('archiveManifestPackages', archiveManifestsJob);
+        scheduledCount++;
+        console.log('📅 Scheduled manifest packages archive job (monthly, 1st at 2 AM)');
+
+        // Archive cancelled shipments - Weekly, Sunday at 3 AM
+        const archiveCancelledJob = cron.schedule('0 3 * * 0', async () => {
+            try {
+                console.log('📦 Running cancelled shipment packages archive job...');
+                const result = await archiveService.archiveCancelledShipments();
+                if (result.success) {
+                    console.log(`✅ Cancelled shipment packages archive completed: ${result.archived_count} archived, ${result.remaining_count} remaining`);
+                }
+            } catch (error) {
+                console.error('❌ Cancelled shipment packages archive job error:', error.message);
+            }
+        }, {
+            scheduled: true,
+            timezone: process.env.SYNC_TIMEZONE || 'America/Chicago'
+        });
+
+        this.jobs.set('archiveCancelledShipments', archiveCancelledJob);
+        scheduledCount++;
+        console.log('📅 Scheduled cancelled shipment packages archive job (weekly, Sunday at 3 AM)');
+
         // Run batch promotion immediately on startup
         try {
             console.log('🚀 [SCHEDULER] Running initial batch promotion check on startup...');

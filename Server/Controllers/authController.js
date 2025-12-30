@@ -62,6 +62,21 @@ class AuthController {
             
             if (!user) {
                 console.log(`[AUTH] Login failed: User not found: ${username}`);
+                // Module 14.4: Log failed login attempt
+                try {
+                    const auditLogger = require('../Services/auditLogger');
+                    await auditLogger.logAction({
+                        userId: null,
+                        action: 'login_failed',
+                        resourceType: 'Authentication',
+                        resourceId: username,
+                        details: { reason: 'user_not_found', username },
+                        status: 'failure',
+                        sourceIp: req.ip || req.connection.remoteAddress
+                    });
+                } catch (error) {
+                    console.error('Error logging failed login:', error);
+                }
                 return res.redirect('/auth/login?error=Invalid username/email or password');
             }
 
@@ -79,6 +94,21 @@ class AuthController {
             
             if (!isPasswordValid) {
                 console.log(`[AUTH] Login failed: Invalid password for user: ${user.username}`);
+                // Module 14.4: Log failed login attempt
+                try {
+                    const auditLogger = require('../Services/auditLogger');
+                    await auditLogger.logAction({
+                        userId: user.id,
+                        action: 'login_failed',
+                        resourceType: 'Authentication',
+                        resourceId: user.id.toString(),
+                        details: { reason: 'invalid_password', username: user.username },
+                        status: 'failure',
+                        sourceIp: req.ip || req.connection.remoteAddress
+                    });
+                } catch (error) {
+                    console.error('Error logging failed login:', error);
+                }
                 return res.redirect('/auth/login?error=Invalid username/email or password');
             }
 

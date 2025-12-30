@@ -179,6 +179,27 @@ const requireRole = (...roles) => {
                 console.log(`[AUTH] Role check failed for user ${req.session.userId}`);
                 console.log(`[AUTH] User roles: ${JSON.stringify(userRoleNames)}`);
                 console.log(`[AUTH] Required roles: ${JSON.stringify(roles)}`);
+                
+                // Module 14.4: Log unauthorized access attempt
+                try {
+                    const auditLogger = require('../Services/auditLogger');
+                    auditLogger.logAction({
+                        userId: req.session.userId,
+                        action: 'unauthorized_access_attempt',
+                        resourceType: 'Route',
+                        resourceId: req.path,
+                        details: { 
+                            required_roles: roles,
+                            user_roles: userRoleNames,
+                            method: req.method
+                        },
+                        status: 'failure',
+                        sourceIp: req.ip || req.connection.remoteAddress
+                    }).catch(err => console.error('Error logging unauthorized access:', err));
+                } catch (error) {
+                    console.error('Error logging unauthorized access:', error);
+                }
+                
                 return res.status(403).json({ 
                     error: 'Forbidden',
                     message: `Required role: ${roles.join(' or ')}`

@@ -4,7 +4,7 @@
 const express = require('express');
 const router = express.Router();
 const fulfillmentController = require('../Controllers/fulfillmentController');
-const { requireAuth, requireRole } = require('../Middleware/auth');
+const { requireAuth, requireRole, requireSuperuser } = require('../Middleware/auth');
 
 // =====================================================
 // Fulfillment Queue Routes
@@ -298,6 +298,41 @@ router.post('/admin/issues/bulk-assign', requireAuth, requireRole('fulfillment_a
     fulfillmentController.bulkAssignIssues.bind(fulfillmentController));
 
 /**
+ * Module 21.2: POST /api/v1/admin/fulfillment/sessions/bulk-abandon
+ * Bulk abandon scanning sessions
+ */
+router.post('/admin/sessions/bulk-abandon', requireAuth, requireRole('fulfillment_admin', 'Administrator'),
+    fulfillmentController.bulkAbandonSessions.bind(fulfillmentController));
+
+/**
+ * Module 21.2: POST /api/v1/admin/fulfillment/sessions/bulk-reassign
+ * Bulk reassign scanning sessions
+ */
+router.post('/admin/sessions/bulk-reassign', requireAuth, requireRole('fulfillment_admin', 'Administrator'),
+    fulfillmentController.bulkReassignSessions.bind(fulfillmentController));
+
+/**
+ * Module 21.3: POST /api/v1/admin/manifests/bulk-sync-status
+ * Bulk sync manifest statuses
+ */
+router.post('/admin/manifests/bulk-sync-status', requireAuth, requireRole('fulfillment_admin', 'Administrator'),
+    fulfillmentController.bulkSyncManifestStatuses.bind(fulfillmentController));
+
+/**
+ * Module 21.3: POST /api/v1/admin/manifests/bulk-void
+ * Bulk void manifests (super_admin only)
+ */
+router.post('/admin/manifests/bulk-void', requireAuth, requireSuperuser,
+    fulfillmentController.bulkVoidManifests.bind(fulfillmentController));
+
+/**
+ * Module 21.4: POST /api/v1/admin/fulfillment/issues/bulk-resolve
+ * Bulk mark issues as resolved
+ */
+router.post('/admin/issues/bulk-resolve', requireAuth, requireRole('Sales Admin', 'Sales Representative', 'Administrator'),
+    fulfillmentController.bulkMarkIssuesResolved.bind(fulfillmentController));
+
+/**
  * GET /api/v1/admin/cancelled-shipments/unverified-packages
  * Get unverified packages for admin dashboard
  */
@@ -331,6 +366,20 @@ router.post('/admin/cancelled-shipments/bulk-verify', requireAuth, requireRole('
  */
 router.post('/admin/cancelled-shipments/bulk-mark-missing', requireAuth, requireRole('fulfillment_admin', 'Sales Admin', 'Administrator'),
     fulfillmentController.bulkMarkPackagesMissing.bind(fulfillmentController));
+
+/**
+ * Module 21.1: POST /api/v1/admin/cancelled-shipments/bulk-mark-destroyed
+ * Bulk mark packages as destroyed
+ */
+router.post('/admin/cancelled-shipments/bulk-mark-destroyed', requireAuth, requireRole('fulfillment_admin', 'Sales Admin', 'Administrator'),
+    fulfillmentController.bulkMarkPackagesDestroyed.bind(fulfillmentController));
+
+/**
+ * Module 21.1: GET /api/v1/admin/cancelled-shipments/bulk-export
+ * Bulk export packages to CSV
+ */
+router.get('/admin/cancelled-shipments/bulk-export', requireAuth, requireRole('fulfillment_admin', 'Sales Admin', 'Administrator'),
+    fulfillmentController.bulkExportPackages.bind(fulfillmentController));
 
 /**
  * POST /api/v1/admin/cancelled-shipments/:invoiceId/finalize-destroyed

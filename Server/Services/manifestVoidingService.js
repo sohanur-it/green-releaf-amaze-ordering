@@ -31,6 +31,108 @@ const getMetrcSubmitValue = () => {
 
 class ManifestVoidingService {
     /**
+     * Module 21.3: Bulk void manifests
+     * Requires super_admin role
+     * All manifests must succeed or all fail (transaction rollback)
+     */
+    async bulkVoidManifests(invoiceIds, userId, bulkReason) {
+        const client = await pool.connect();
+        const voidedManifests = [];
+        const failedManifests = [];
+
+        try {
+            await client.query('BEGIN');
+
+            // Module 21.5: Enforce batch size limit
+            if (invoiceIds.length > 100) {
+                throw new Error('Cannot process more than 100 manifests at once');
+            }
+
+            // Get all invoices with manifests
+            const invoices = await client.query(`
+                SELECT 
+                    id,
+                    invoice_number,
+                    status,
+                    manifest_metrc_ids,
+                    metrc_manifest_numbers
+                FROM "ORDERS-invoices"
+                WHERE id = ANY($1)
+                    AND manifest_metrc_ids IS NOT NULL
+                    AND jsonb_array_length(manifest_metrc_ids::jsonb) > 0
+            `, [invoiceIds]);
+
+            if (invoices.rows.length === 0) {
+                throw new Error('No invoices with manifests found');
+            }
+
+            // Validate all invoices can be voided before starting
+            for (const invoice of invoices.rows) {
+                // Check delivery status
+                const deliveryCheck = await client.query(`
+                    SELECT delivered_at
+                    FROM "ORDERS-invoices"
+                    WHERE id = $1
+                `, [invoice.id]);
+
+                if (deliveryCheck.rows[0]?.delivered_at) {
+                    throw new Error(`Cannot void manifest for invoice ${invoice.invoice_number} - already delivered`);
+                }
+            }
+
+            // Void each manifest
+            for (const invoice of invoices.rows) {
+                try {
+                    // Use existing void logic
+                    const result = await this.voidManifest(invoice.id, userId, bulkReason);
+                    voidedManifests.push({
+                        invoice_id: invoice.id,
+                        invoice_number: invoice.invoice_number,
+                        manifest_numbers: invoice.metrc_manifest_numbers
+                    });
+                } catch (error) {
+                    // If ANY fails, rollback all
+                    await client.query('ROLLBACK');
+                    throw new Error(`Bulk void failed at invoice ${invoice.invoice_number}: ${error.message}`);
+                }
+            }
+
+            // Log bulk operation
+            await client.query(`
+                INSERT INTO "ORDERS-audit_log" (
+                    user_id,
+                    action,
+                    resource_type,
+                    resource_id,
+                    details,
+                    status
+                ) VALUES ($1, 'bulk_void_manifests', 'Invoice', NULL, $2, 'success')
+            `, [userId, JSON.stringify({
+                bulk_operation: true,
+                operation_type: 'bulk_void_manifests',
+                record_count: voidedManifests.length,
+                affected_invoice_ids: invoiceIds,
+                bulk_reason: bulkReason,
+                voided_manifests: voidedManifests
+            })]);
+
+            await client.query('COMMIT');
+
+            return {
+                success: true,
+                voided_count: voidedManifests.length,
+                manifests: voidedManifests
+            };
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
      * Void a manifest that was created but not yet shipped
      * Supports multi-license manifests
      */

@@ -9,6 +9,107 @@ const batchStatusService = require('./batchStatusService');
 
 class ManifestStatusTrackingService {
     /**
+     * Module 21.3: Bulk sync manifest statuses
+     * Admin can select multiple invoices and force sync their manifest statuses
+     */
+    async bulkSyncManifestStatuses(invoiceIds, adminUserId) {
+        const client = await pool.connect();
+        const results = {
+            synced: [],
+            failed: [],
+            total: invoiceIds.length
+        };
+
+        try {
+            // Module 21.5: Enforce batch size limit
+            if (invoiceIds.length > 100) {
+                throw new Error('Cannot process more than 100 invoices at once');
+            }
+
+            // Get invoices with manifests
+            const invoices = await client.query(`
+                SELECT 
+                    id,
+                    invoice_number,
+                    status,
+                    manifest_metrc_ids
+                FROM "ORDERS-invoices"
+                WHERE id = ANY($1)
+                    AND manifest_metrc_ids IS NOT NULL
+                    AND jsonb_array_length(manifest_metrc_ids::jsonb) > 0
+            `, [invoiceIds]);
+
+            // Sync each invoice
+            for (const invoice of invoices.rows) {
+                try {
+                    // Get manifest METRC IDs
+                    const manifestMetrcIds = Array.isArray(invoice.manifest_metrc_ids)
+                        ? invoice.manifest_metrc_ids
+                        : JSON.parse(invoice.manifest_metrc_ids || '[]');
+
+                    if (manifestMetrcIds.length === 0) {
+                        throw new Error('No manifest METRC IDs found');
+                    }
+
+                    // Fetch status from METRC for each manifest
+                    const statusResults = [];
+                    for (const manifest of manifestMetrcIds) {
+                        const statusCheck = await this.checkManifestStatus(manifest.id, manifest.license);
+                        if (statusCheck.success) {
+                            statusResults.push({
+                                manifest: manifest,
+                                status: statusCheck
+                            });
+                        } else {
+                            throw new Error(`Failed to check manifest ${manifest.number}: ${statusCheck.error}`);
+                        }
+                    }
+
+                    // Process status updates
+                    await this.processStatusUpdates(invoice.id, invoice.status, statusResults, client);
+                    
+                    results.synced.push({
+                        invoice_id: invoice.id,
+                        invoice_number: invoice.invoice_number
+                    });
+                } catch (error) {
+                    results.failed.push({
+                        invoice_id: invoice.id,
+                        invoice_number: invoice.invoice_number,
+                        error: error.message
+                    });
+                }
+            }
+
+            // Log bulk operation
+            await client.query(`
+                INSERT INTO "ORDERS-audit_log" (
+                    user_id,
+                    action,
+                    resource_type,
+                    resource_id,
+                    details,
+                    status
+                ) VALUES ($1, 'bulk_sync_manifest_statuses', 'Invoice', NULL, $2, $3)
+            `, [adminUserId, JSON.stringify({
+                bulk_operation: true,
+                operation_type: 'bulk_sync_manifest_statuses',
+                record_count: invoiceIds.length,
+                affected_invoice_ids: invoiceIds,
+                synced_count: results.synced.length,
+                failed_count: results.failed.length
+            }), results.failed.length === 0 ? 'success' : 'partial']);
+
+            return results;
+
+        } catch (error) {
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
      * Sync manifest statuses from METRC
      * Called by scheduled job every 15 minutes
      * Section 8.1: Make LIMIT configurable

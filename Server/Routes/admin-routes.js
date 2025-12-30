@@ -2,6 +2,7 @@
 
 const express = require('express');
 const router = express.Router();
+const archiveController = require('../Controllers/archiveController');
 const buyerController = require('../Controllers/crm/buyerController');
 const salesRepController = require('../Controllers/crm/salesRepController');
 const productController = require('../Controllers/productController');
@@ -11,8 +12,9 @@ const settingsController = require('../Controllers/settingsController');
 const creditUiController = require('../Controllers/creditUiController');
 const discountUiController = require('../Controllers/discountUiController');
 const complianceReportingController = require('../Controllers/complianceReportingController');
+const adminOverrideController = require('../Controllers/adminOverrideController');
 const UserModel = require('../Models/userModel');
-const { requireAuth, requirePermission, requireRole } = require('../Middleware/auth');
+const { requireAuth, requirePermission, requireRole, requireSuperuser } = require('../Middleware/auth');
 const syncFailureTracker = require('../Services/syncFailureTracker');
 
 // Apply authentication to all admin routes
@@ -754,5 +756,293 @@ router.get('/compliance/reports/voided-manifests', requireRole('Administrator', 
  */
 router.get('/compliance/reports/destroyed-packages', requireRole('Administrator', 'fulfillment_admin'), 
     complianceReportingController.getDestroyedPackagesReport.bind(complianceReportingController));
+
+// =====================================================
+// Module 11: Admin Tools & Overrides
+// =====================================================
+
+/**
+ * GET /api/v1/admin/override/invoice/:id/preview
+ * Get invoice state for override preview (superuser only)
+ */
+router.get('/override/invoice/:id/preview', requireSuperuser,
+    adminOverrideController.getInvoicePreview.bind(adminOverrideController));
+
+/**
+ * POST /api/v1/admin/override/invoice/:id
+ * Direct invoice field edit (superuser only)
+ */
+router.post('/override/invoice/:id', requireSuperuser,
+    adminOverrideController.overrideInvoiceFields.bind(adminOverrideController));
+
+/**
+ * POST /api/v1/admin/override/invoice/:id/manually-add-package
+ * Manually add scanned package (superuser only)
+ */
+router.post('/override/invoice/:id/manually-add-package', requireSuperuser,
+    adminOverrideController.manuallyAddPackage.bind(adminOverrideController));
+
+/**
+ * POST /api/v1/admin/override/force-release-allocation
+ * Force release allocation (superuser only)
+ */
+router.post('/override/force-release-allocation', requireSuperuser,
+    adminOverrideController.forceReleaseAllocation.bind(adminOverrideController));
+
+// =====================================================
+// Module 12: Data Validation & Integrity
+// =====================================================
+
+const dataValidationService = require('../Services/dataValidationService');
+
+/**
+ * GET /api/v1/admin/validation/run-all
+ * Run all data validation checks
+ */
+router.get('/validation/run-all', requireRole('Administrator', 'fulfillment_admin'),
+    async (req, res) => {
+        try {
+            const result = await dataValidationService.runAllValidations();
+            res.json(result);
+        } catch (error) {
+            console.error('Validation error:', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    });
+
+// =====================================================
+// Module 19: Monitoring & Alerts
+// =====================================================
+
+const metricsService = require('../Services/metricsService');
+
+/**
+ * GET /api/v1/admin/metrics
+ * Get critical metrics for dashboard
+ */
+router.get('/metrics', requireRole('Administrator', 'fulfillment_admin'),
+    async (req, res) => {
+        try {
+            const result = await metricsService.getCriticalMetrics();
+            res.json(result);
+        } catch (error) {
+            console.error('Metrics error:', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    });
+
+// =====================================================
+// Module 13: Performance & Monitoring
+// =====================================================
+
+const performanceMonitoringService = require('../Services/performanceMonitoringService');
+const websocketPerformanceService = require('../Services/websocketPerformanceService');
+const metrcRateLimiter = require('../Services/metrcRateLimiter');
+
+/**
+ * GET /api/v1/admin/performance/metrics
+ * Get performance metrics
+ */
+router.get('/performance/metrics', requireRole('Administrator', 'fulfillment_admin'),
+    async (req, res) => {
+        try {
+            const [dbMetrics, wsMetrics, rateLimitStatus] = await Promise.all([
+                performanceMonitoringService.getAllMetrics(),
+                Promise.resolve(websocketPerformanceService.getBroadcastMetrics()),
+                Promise.resolve(metrcRateLimiter.getStatus())
+            ]);
+            
+            res.json({
+                success: true,
+                database: dbMetrics.metrics,
+                websocket: wsMetrics,
+                rate_limiter: rateLimitStatus,
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            console.error('Performance metrics error:', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    });
+
+/**
+ * POST /api/v1/admin/performance/explain-analyze
+ * Run EXPLAIN ANALYZE on a query (admin only)
+ */
+router.post('/performance/explain-analyze', requireSuperuser,
+    async (req, res) => {
+        try {
+            const { query, params } = req.body;
+            
+            if (!query) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Query is required'
+                });
+            }
+            
+            const result = await performanceMonitoringService.explainAnalyze(query, params || []);
+            res.json(result);
+        } catch (error) {
+            console.error('EXPLAIN ANALYZE error:', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    });
+
+// =====================================================
+// Module 15: Error Handling & Recovery
+// =====================================================
+
+const gracefulDegradationService = require('../Services/gracefulDegradationService');
+const recoveryToolsService = require('../Services/recoveryToolsService');
+
+/**
+ * GET /api/v1/admin/recovery/metrc-status
+ * Check METRC API availability
+ */
+router.get('/recovery/metrc-status', requireRole('Administrator', 'fulfillment_admin'),
+    async (req, res) => {
+        try {
+            const isAvailable = await gracefulDegradationService.checkMetrcAvailability();
+            res.json({
+                success: true,
+                metrc_available: isAvailable,
+                message: isAvailable 
+                    ? 'METRC API is available' 
+                    : gracefulDegradationService.getMaintenanceMessage().message
+            });
+        } catch (error) {
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    });
+
+/**
+ * POST /api/v1/admin/recovery/recover-stuck-sessions
+ * Recover stuck scanning sessions
+ */
+router.post('/recovery/recover-stuck-sessions', requireSuperuser,
+    async (req, res) => {
+        try {
+            const result = await recoveryToolsService.recoverStuckScanningSessions();
+            res.json(result);
+        } catch (error) {
+            console.error('Recovery error:', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    });
+
+/**
+ * POST /api/v1/admin/recovery/recover-orphaned-locks
+ * Recover orphaned package locks
+ */
+router.post('/recovery/recover-orphaned-locks', requireSuperuser,
+    async (req, res) => {
+        try {
+            const result = await recoveryToolsService.recoverOrphanedLocks();
+            res.json(result);
+        } catch (error) {
+            console.error('Recovery error:', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    });
+
+/**
+ * GET /api/v1/admin/recovery/validate-data
+ * Validate and report data inconsistencies
+ */
+router.get('/recovery/validate-data', requireSuperuser,
+    async (req, res) => {
+        try {
+            const result = await recoveryToolsService.validateAndFixData();
+            res.json(result);
+        } catch (error) {
+            console.error('Validation error:', error);
+            res.status(500).json({
+                success: false,
+                error: error.message
+            });
+        }
+    });
+
+// Module 20: Archive Management Routes
+/**
+ * GET /api/v1/admin/archive/stats
+ * Get archive statistics
+ */
+router.get('/archive/stats', requireAuth, requireRole('fulfillment_admin', 'Administrator'),
+    archiveController.getArchiveStats.bind(archiveController));
+
+/**
+ * POST /api/v1/admin/archive/restore/scanning-sessions
+ * Restore scanning sessions from archive
+ */
+router.post('/archive/restore/scanning-sessions', requireAuth, requireRole('fulfillment_admin', 'Administrator'),
+    archiveController.restoreScanningSessions.bind(archiveController));
+
+/**
+ * POST /api/v1/admin/archive/restore/manifest-packages
+ * Restore manifest packages from archive
+ */
+router.post('/archive/restore/manifest-packages', requireAuth, requireRole('fulfillment_admin', 'Administrator'),
+    archiveController.restoreManifestPackages.bind(archiveController));
+
+/**
+ * POST /api/v1/admin/archive/restore/cancelled-shipments
+ * Restore cancelled shipment packages from archive
+ */
+router.post('/archive/restore/cancelled-shipments', requireAuth, requireRole('fulfillment_admin', 'Administrator'),
+    archiveController.restoreCancelledShipments.bind(archiveController));
+
+/**
+ * GET /api/v1/admin/archive/search
+ * Search archived records
+ */
+router.get('/archive/search', requireAuth, requireRole('fulfillment_admin', 'Administrator'),
+    archiveController.searchArchive.bind(archiveController));
+
+// Module 20: Purge Archive Routes (super_admin only)
+const purgeArchiveController = require('../Controllers/purgeArchiveController');
+
+/**
+ * POST /api/v1/admin/archive/purge/scanning-sessions
+ * Purge scanning sessions from archive (super_admin only)
+ */
+router.post('/archive/purge/scanning-sessions', requireAuth, requireSuperuser,
+    purgeArchiveController.purgeScanningSessions.bind(purgeArchiveController));
+
+/**
+ * POST /api/v1/admin/archive/purge/cancelled-shipments
+ * Purge cancelled shipment packages from archive (super_admin only)
+ */
+router.post('/archive/purge/cancelled-shipments', requireAuth, requireSuperuser,
+    purgeArchiveController.purgeCancelledShipments.bind(purgeArchiveController));
+
+/**
+ * GET /api/v1/admin/archive/purge-log
+ * Get purge log history
+ */
+router.get('/archive/purge-log', requireAuth, requireRole('fulfillment_admin', 'Administrator'),
+    purgeArchiveController.getPurgeLog.bind(purgeArchiveController));
 
 module.exports = router;

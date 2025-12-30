@@ -388,6 +388,7 @@ class WebSocketService {
     async broadcastToFulfillmentTeam(notification) {
         if (!this.wss) return;
         
+        const startTime = Date.now();
         const message = JSON.stringify({
             type: 'fulfillment_notification',
             notification: notification,
@@ -399,6 +400,16 @@ class WebSocketService {
                 client.send(message);
             }
         });
+        
+        // Module 13.3: Record broadcast latency
+        const latency = Date.now() - startTime;
+        try {
+            const websocketPerformanceService = require('./websocketPerformanceService');
+            websocketPerformanceService.recordBroadcast('fulfillment_notification', latency);
+        } catch (error) {
+            // Non-critical, don't fail broadcast
+            console.error('Error recording WebSocket performance:', error);
+        }
     }
 
     /**
@@ -538,6 +549,7 @@ class WebSocketService {
             return;
         }
 
+        const startTime = Date.now();
         const message = JSON.stringify(payload);
         let sentCount = 0;
         let skippedCount = 0;
@@ -555,8 +567,18 @@ class WebSocketService {
             }
         });
 
+        // Module 13.3: Record broadcast latency
+        const latency = Date.now() - startTime;
+        try {
+            const websocketPerformanceService = require('./websocketPerformanceService');
+            websocketPerformanceService.recordBroadcast(payload.type || 'unknown', latency);
+        } catch (error) {
+            // Non-critical, don't fail broadcast
+            console.error('Error recording WebSocket performance:', error);
+        }
+
         if (excludeSessionId) {
-            console.log(`📡 Broadcasted to ${sentCount} clients (skipped ${skippedCount} self-broadcast)`);
+            console.log(`📡 Broadcasted to ${sentCount} clients (skipped ${skippedCount} self-broadcast) in ${latency}ms`);
         }
     }
 
@@ -654,6 +676,7 @@ class WebSocketService {
     async broadcastPackageLocked(packageLabel, invoiceId, userId) {
         if (!this.wss) return;
 
+        const startTime = Date.now();
         try {
             // Get user name
             const client = await pool.connect();
@@ -686,6 +709,16 @@ class WebSocketService {
             };
 
             this.broadcastJson(payload);
+            
+            // Module 13.3: Record broadcast latency
+            const latency = Date.now() - startTime;
+            try {
+                const websocketPerformanceService = require('./websocketPerformanceService');
+                websocketPerformanceService.recordBroadcast('package:locked', latency);
+            } catch (error) {
+                // Non-critical
+                console.error('Error recording WebSocket performance:', error);
+            }
         } catch (error) {
             console.error('Error broadcasting package locked:', error);
         }

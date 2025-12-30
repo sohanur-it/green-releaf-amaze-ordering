@@ -395,6 +395,280 @@ class ScanningSessionService {
     }
 
     /**
+     * Module 21.2: Bulk abandon scanning sessions
+     * Admin can select multiple stale sessions and abandon them
+     */
+    async bulkAbandonSessions(sessionIds, adminUserId) {
+        const client = await pool.connect();
+
+        try {
+            await client.query('BEGIN');
+
+            // Module 21.5: Enforce batch size limit
+            if (sessionIds.length > 100) {
+                throw new Error('Cannot process more than 100 sessions at once');
+            }
+
+            // Get all sessions
+            const sessions = await client.query(`
+                SELECT 
+                    ss.id,
+                    ss.fk_invoice_id,
+                    ss.fk_user_id,
+                    ss.currently_locked_packages,
+                    i.invoice_number,
+                    u.first_name || ' ' || u.last_name as user_name
+                FROM "ORDERS-scanning-sessions" ss
+                JOIN "ORDERS-invoices" i ON ss.fk_invoice_id = i.id
+                LEFT JOIN users u ON ss.fk_user_id = u.id
+                WHERE ss.id = ANY($1)
+                    AND ss.session_status = 'active'
+            `, [sessionIds]);
+
+            if (sessions.rows.length === 0) {
+                throw new Error('No active sessions found');
+            }
+
+            const abandonedSessions = [];
+            const releasedPackages = [];
+
+            // Abandon each session
+            for (const session of sessions.rows) {
+                // Release locked packages
+                const lockedPackages = Array.isArray(session.currently_locked_packages)
+                    ? session.currently_locked_packages
+                    : JSON.parse(session.currently_locked_packages || '[]');
+
+                if (lockedPackages.length > 0) {
+                    releasedPackages.push(...lockedPackages);
+
+                    // Clear locked packages from invoice
+                    await client.query(`
+                        UPDATE "ORDERS-invoices"
+                        SET currently_locked_packages = '[]'::jsonb
+                        WHERE id = $1
+                    `, [session.fk_invoice_id]);
+                }
+
+                // Mark session as abandoned
+                await client.query(`
+                    UPDATE "ORDERS-scanning-sessions"
+                    SET 
+                        session_status = 'abandoned',
+                        abandoned_at = NOW()
+                    WHERE id = $1
+                `, [session.id]);
+
+                abandonedSessions.push({
+                    session_id: session.id,
+                    invoice_id: session.fk_invoice_id,
+                    invoice_number: session.invoice_number,
+                    user_name: session.user_name
+                });
+            }
+
+            // Broadcast package releases
+            if (releasedPackages.length > 0) {
+                const uniquePackages = [...new Set(releasedPackages)];
+                for (const packageLabel of uniquePackages) {
+                    websocketService.broadcastPackageReleased(packageLabel, null);
+                }
+            }
+
+            // Log bulk operation
+            await client.query(`
+                INSERT INTO "ORDERS-audit_log" (
+                    user_id,
+                    action,
+                    resource_type,
+                    resource_id,
+                    details,
+                    status
+                ) VALUES ($1, 'bulk_abandon_sessions', 'ScanningSession', NULL, $2, 'success')
+            `, [adminUserId, JSON.stringify({
+                bulk_operation: true,
+                operation_type: 'bulk_abandon_sessions',
+                record_count: abandonedSessions.length,
+                affected_session_ids: sessionIds,
+                sessions: abandonedSessions,
+                packages_released: releasedPackages.length
+            })]);
+
+            await client.query('COMMIT');
+
+            return {
+                success: true,
+                abandoned_count: abandonedSessions.length,
+                packages_released: releasedPackages.length,
+                sessions: abandonedSessions
+            };
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Module 21.2: Bulk reassign scanning sessions
+     */
+    async bulkReassignSessions(sessionIds, newUserId, adminUserId) {
+        const client = await pool.connect();
+
+        try {
+            await client.query('BEGIN');
+
+            // Module 21.5: Enforce batch size limit
+            if (sessionIds.length > 100) {
+                throw new Error('Cannot process more than 100 sessions at once');
+            }
+
+            // Get all sessions
+            const sessions = await client.query(`
+                SELECT 
+                    ss.id,
+                    ss.fk_invoice_id,
+                    ss.fk_user_id,
+                    i.invoice_number,
+                    u.first_name || ' ' || u.last_name as old_user_name
+                FROM "ORDERS-scanning-sessions" ss
+                JOIN "ORDERS-invoices" i ON ss.fk_invoice_id = i.id
+                LEFT JOIN users u ON ss.fk_user_id = u.id
+                WHERE ss.id = ANY($1)
+                    AND ss.session_status = 'active'
+            `, [sessionIds]);
+
+            if (sessions.rows.length === 0) {
+                throw new Error('No active sessions found');
+            }
+
+            // Check if any session has scanned packages (cannot reassign)
+            for (const session of sessions.rows) {
+                const lineItems = await client.query(`
+                    SELECT COUNT(*) as scanned_count
+                    FROM "ORDERS-invoice-line-items"
+                    WHERE fk_invoice_id = $1
+                        AND assigned_package_labels IS NOT NULL
+                        AND jsonb_array_length(assigned_package_labels) > 0
+                `, [session.fk_invoice_id]);
+
+                if (parseInt(lineItems.rows[0].scanned_count) > 0) {
+                    throw new Error(`Cannot reassign session for invoice ${session.invoice_number} - packages already scanned`);
+                }
+            }
+
+            // Get new user name
+            const newUser = await client.query(`
+                SELECT first_name || ' ' || last_name as user_name
+                FROM users
+                WHERE id = $1
+            `, [newUserId]);
+
+            if (newUser.rows.length === 0) {
+                throw new Error('New user not found');
+            }
+
+            const newUserName = newUser.rows[0].user_name;
+            const reassignedSessions = [];
+
+            // Reassign each session
+            for (const session of sessions.rows) {
+                // Update session user
+                await client.query(`
+                    UPDATE "ORDERS-scanning-sessions"
+                    SET fk_user_id = $1
+                    WHERE id = $2
+                `, [newUserId, session.id]);
+
+                // Update invoice fulfillment_accepted_by
+                await client.query(`
+                    UPDATE "ORDERS-invoices"
+                    SET fulfillment_accepted_by = $1
+                    WHERE id = $2
+                `, [newUserId, session.fk_invoice_id]);
+
+                // Log to invoice history
+                await client.query(`
+                    INSERT INTO "ORDERS-invoice-history" (
+                        fk_invoice_id,
+                        modification_type,
+                        field_name,
+                        old_value,
+                        new_value,
+                        reason,
+                        changed_by_user_id
+                    ) VALUES ($1, 'session_reassigned', 'fulfillment_accepted_by', $2, $3, $4, $5)
+                `, [
+                    session.fk_invoice_id,
+                    session.fk_user_id.toString(),
+                    newUserId.toString(),
+                    `Session reassigned from ${session.old_user_name} to ${newUserName}`,
+                    adminUserId
+                ]);
+
+                reassignedSessions.push({
+                    session_id: session.id,
+                    invoice_id: session.fk_invoice_id,
+                    invoice_number: session.invoice_number,
+                    old_user_id: session.fk_user_id,
+                    old_user_name: session.old_user_name,
+                    new_user_id: newUserId,
+                    new_user_name: newUserName
+                });
+            }
+
+            // Log bulk operation
+            await client.query(`
+                INSERT INTO "ORDERS-audit_log" (
+                    user_id,
+                    action,
+                    resource_type,
+                    resource_id,
+                    details,
+                    status
+                ) VALUES ($1, 'bulk_reassign_sessions', 'ScanningSession', NULL, $2, 'success')
+            `, [adminUserId, JSON.stringify({
+                bulk_operation: true,
+                operation_type: 'bulk_reassign_sessions',
+                record_count: reassignedSessions.length,
+                affected_session_ids: sessionIds,
+                new_user_id: newUserId,
+                new_user_name: newUserName,
+                sessions: reassignedSessions
+            })]);
+
+            await client.query('COMMIT');
+
+            // Broadcast notifications
+            for (const session of reassignedSessions) {
+                await websocketService.broadcastToFulfillmentTeam({
+                    type: 'session_reassigned',
+                    invoice_id: session.invoice_id,
+                    invoice_number: session.invoice_number,
+                    old_user_id: session.old_user_id,
+                    new_user_id: newUserId,
+                    message: `Session for invoice ${session.invoice_number} reassigned to ${newUserName}`
+                });
+            }
+
+            return {
+                success: true,
+                reassigned_count: reassignedSessions.length,
+                new_user_name: newUserName,
+                sessions: reassignedSessions
+            };
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
      * Auto-abandon sessions after 30 minutes of inactivity
      * Runs as scheduled job
      */

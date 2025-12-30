@@ -257,7 +257,25 @@ async function confirmMarkMissing() {
 async function bulkVerify() {
     if (selectedPackages.size === 0) return;
 
-    if (!confirm(`Verify ${selectedPackages.size} package(s)?`)) return;
+    // Module 21.5: Enforce batch size limit
+    if (selectedPackages.size > 100) {
+        alert('Cannot process more than 100 packages at once. Please select fewer packages.');
+        return;
+    }
+
+    // Module 21.1: Enhanced confirmation modal
+    const packageList = Array.from(selectedPackages).slice(0, 10);
+    const moreCount = selectedPackages.size > 10 ? selectedPackages.size - 10 : 0;
+    const packageListText = packageList.map(id => {
+        const pkg = document.querySelector(`[data-package-id="${id}"]`);
+        return pkg ? pkg.dataset.packageLabel : `Package ${id}`;
+    }).join(', ');
+    
+    const confirmMessage = `Verify ${selectedPackages.size} package(s)?\n\n` +
+        `Packages: ${packageListText}${moreCount > 0 ? `\n...and ${moreCount} more` : ''}\n\n` +
+        `This will verify packages in METRC and release allocations.`;
+
+    if (!confirm(confirmMessage)) return;
 
     try {
         const response = await fetch('/api/v1/admin/cancelled-shipments/bulk-verify', {
@@ -269,7 +287,7 @@ async function bulkVerify() {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Failed to verify packages');
 
-        alert(`${data.verified_count || 0} package(s) verified`);
+        alert(`${data.verified_count || 0} package(s) verified, allocations released`);
         selectedPackages.clear();
         loadPackages();
 
@@ -282,8 +300,17 @@ async function bulkVerify() {
 async function bulkMarkMissing() {
     if (selectedPackages.size === 0) return;
 
+    // Module 21.5: Enforce batch size limit
+    if (selectedPackages.size > 100) {
+        alert('Cannot process more than 100 packages at once. Please select fewer packages.');
+        return;
+    }
+
     const reason = prompt('Enter reason for marking packages as missing:');
-    if (!reason) return;
+    if (!reason || reason.trim().length < 10) {
+        alert('Reason is required (minimum 10 characters)');
+        return;
+    }
 
     try {
         const response = await fetch('/api/v1/admin/cancelled-shipments/bulk-mark-missing', {
@@ -301,6 +328,86 @@ async function bulkMarkMissing() {
         alert(`${data.marked_count || 0} package(s) marked as missing`);
         selectedPackages.clear();
         loadPackages();
+
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Module 21.1: Bulk mark as destroyed
+async function bulkMarkDestroyed() {
+    if (selectedPackages.size === 0) return;
+
+    // Module 21.5: Enforce batch size limit
+    if (selectedPackages.size > 100) {
+        alert('Cannot process more than 100 packages at once. Please select fewer packages.');
+        return;
+    }
+
+    // Show destruction modal
+    const destructionReason = prompt('Destruction Reason (Fire, Theft, Accident, Other):');
+    if (!destructionReason) return;
+
+    const detailedDescription = prompt('Detailed Description (minimum 50 characters):');
+    if (!detailedDescription || detailedDescription.trim().length < 50) {
+        alert('Detailed description is required (minimum 50 characters)');
+        return;
+    }
+
+    const confirmMessage = `WARNING: This will permanently destroy ${selectedPackages.size} package(s) and reduce inventory.\n\n` +
+        `Destruction Reason: ${destructionReason}\n` +
+        `This action CANNOT be undone.\n\n` +
+        `Continue?`;
+
+    if (!confirm(confirmMessage)) return;
+
+    try {
+        const response = await fetch('/api/v1/admin/cancelled-shipments/bulk-mark-destroyed', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                package_ids: Array.from(selectedPackages),
+                destruction_reason: destructionReason,
+                detailed_description: detailedDescription
+            })
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Failed to mark packages as destroyed');
+
+        alert(`${data.destroyed_count || 0} package(s) marked as destroyed. ` +
+              `Total value lost: $${(data.total_value_lost || 0).toFixed(2)}. ` +
+              `Accounting team notified.`);
+        selectedPackages.clear();
+        loadPackages();
+
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Module 21.1: Bulk export to CSV
+async function bulkExport() {
+    if (selectedPackages.size === 0) return;
+
+    // Module 21.5: Enforce batch size limit
+    if (selectedPackages.size > 100) {
+        alert('Cannot export more than 100 packages at once. Please select fewer packages.');
+        return;
+    }
+
+    try {
+        const packageIdsParam = Array.from(selectedPackages).join(',');
+        const url = `/api/v1/admin/cancelled-shipments/bulk-export?package_ids=${packageIdsParam}`;
+        
+        // Trigger download
+        window.location.href = url;
+        
+        // Clear selection after a delay
+        setTimeout(() => {
+            selectedPackages.clear();
+            updateBulkActions();
+        }, 1000);
 
     } catch (error) {
         alert('Error: ' + error.message);

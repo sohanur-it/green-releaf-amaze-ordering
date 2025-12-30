@@ -1493,6 +1493,156 @@ class FulfillmentController {
     }
 
     /**
+     * Module 21.2: POST /api/v1/admin/fulfillment/sessions/bulk-abandon
+     * Bulk abandon scanning sessions
+     */
+    async bulkAbandonSessions(req, res) {
+        try {
+            const { session_ids } = req.body;
+            const userId = req.user.id;
+
+            if (!Array.isArray(session_ids) || session_ids.length === 0) {
+                return res.status(400).json({ error: 'session_ids array is required' });
+            }
+
+            // Module 21.5: Enforce batch size limit
+            if (session_ids.length > 100) {
+                return res.status(400).json({ error: 'Cannot process more than 100 sessions at once' });
+            }
+
+            const scanningSessionService = require('../Services/scanningSessionService');
+            const result = await scanningSessionService.bulkAbandonSessions(session_ids, userId);
+            res.json(result);
+        } catch (error) {
+            console.error('Error bulk abandoning sessions:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Module 21.2: POST /api/v1/admin/fulfillment/sessions/bulk-reassign
+     * Bulk reassign scanning sessions
+     */
+    async bulkReassignSessions(req, res) {
+        try {
+            const { session_ids, new_user_id } = req.body;
+            const userId = req.user.id;
+
+            if (!Array.isArray(session_ids) || session_ids.length === 0) {
+                return res.status(400).json({ error: 'session_ids array is required' });
+            }
+
+            if (!new_user_id) {
+                return res.status(400).json({ error: 'new_user_id is required' });
+            }
+
+            // Module 21.5: Enforce batch size limit
+            if (session_ids.length > 100) {
+                return res.status(400).json({ error: 'Cannot process more than 100 sessions at once' });
+            }
+
+            const scanningSessionService = require('../Services/scanningSessionService');
+            const result = await scanningSessionService.bulkReassignSessions(session_ids, new_user_id, userId);
+            res.json(result);
+        } catch (error) {
+            console.error('Error bulk reassigning sessions:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Module 21.3: POST /api/v1/admin/manifests/bulk-sync-status
+     * Bulk sync manifest statuses
+     */
+    async bulkSyncManifestStatuses(req, res) {
+        try {
+            const { invoice_ids } = req.body;
+            const userId = req.user.id;
+
+            if (!Array.isArray(invoice_ids) || invoice_ids.length === 0) {
+                return res.status(400).json({ error: 'invoice_ids array is required' });
+            }
+
+            // Module 21.5: Enforce batch size limit
+            if (invoice_ids.length > 100) {
+                return res.status(400).json({ error: 'Cannot process more than 100 invoices at once' });
+            }
+
+            const manifestStatusTrackingService = require('../Services/manifestStatusTrackingService');
+            const result = await manifestStatusTrackingService.bulkSyncManifestStatuses(invoice_ids, userId);
+            res.json(result);
+        } catch (error) {
+            console.error('Error bulk syncing manifest statuses:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Module 21.3: POST /api/v1/admin/manifests/bulk-void
+     * Bulk void manifests (super_admin only)
+     */
+    async bulkVoidManifests(req, res) {
+        try {
+            const { invoice_ids, bulk_reason } = req.body;
+            const userId = req.user.id;
+
+            // Check superuser
+            const UserModel = require('../Models/userModel');
+            const isSuperuser = await UserModel.isSuperuser(userId);
+            if (!isSuperuser) {
+                return res.status(403).json({ error: 'Only super administrators can bulk void manifests' });
+            }
+
+            if (!Array.isArray(invoice_ids) || invoice_ids.length === 0) {
+                return res.status(400).json({ error: 'invoice_ids array is required' });
+            }
+
+            if (!bulk_reason || bulk_reason.trim().length < 20) {
+                return res.status(400).json({ error: 'bulk_reason is required (minimum 20 characters)' });
+            }
+
+            // Module 21.5: Enforce batch size limit
+            if (invoice_ids.length > 100) {
+                return res.status(400).json({ error: 'Cannot process more than 100 manifests at once' });
+            }
+
+            const manifestVoidingService = require('../Services/manifestVoidingService');
+            const result = await manifestVoidingService.bulkVoidManifests(invoice_ids, userId, bulk_reason);
+            res.json(result);
+        } catch (error) {
+            console.error('Error bulk voiding manifests:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Module 21.4: POST /api/v1/admin/fulfillment/issues/bulk-resolve
+     * Bulk mark issues as resolved
+     */
+    async bulkMarkIssuesResolved(req, res) {
+        try {
+            const { invoice_ids } = req.body;
+            const userId = req.user.id;
+
+            if (!Array.isArray(invoice_ids) || invoice_ids.length === 0) {
+                return res.status(400).json({ error: 'invoice_ids array is required' });
+            }
+
+            // Module 21.5: Enforce batch size limit
+            if (invoice_ids.length > 100) {
+                return res.status(400).json({ error: 'Cannot process more than 100 issues at once' });
+            }
+
+            const fulfillmentIssueService = require('../Services/fulfillmentIssueService');
+            const result = await fulfillmentIssueService.bulkMarkIssuesResolved(invoice_ids, userId);
+            res.json(result);
+        } catch (error) {
+            console.error('Error bulk resolving issues:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
      * Bulk assign issues (admin)
      * POST /api/v1/admin/fulfillment/issues/bulk-assign
      */
@@ -1639,6 +1789,11 @@ class FulfillmentController {
                 return res.status(400).json({ error: 'package_ids array is required' });
             }
 
+            // Module 21.5: Enforce batch size limit
+            if (package_ids.length > 100) {
+                return res.status(400).json({ error: 'Cannot process more than 100 packages at once' });
+            }
+
             if (!reason || reason.trim().length < 10) {
                 return res.status(400).json({ error: 'Reason is required (minimum 10 characters)' });
             }
@@ -1647,6 +1802,81 @@ class FulfillmentController {
             res.json(result);
         } catch (error) {
             console.error('Error bulk marking packages as missing:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Module 21.1: POST /api/v1/admin/cancelled-shipments/bulk-mark-destroyed
+     * Bulk mark packages as destroyed
+     */
+    async bulkMarkPackagesDestroyed(req, res) {
+        try {
+            const { package_ids, destruction_reason, detailed_description } = req.body;
+            const userId = req.user.id;
+
+            if (!Array.isArray(package_ids) || package_ids.length === 0) {
+                return res.status(400).json({ error: 'package_ids array is required' });
+            }
+
+            // Module 21.5: Enforce batch size limit
+            if (package_ids.length > 100) {
+                return res.status(400).json({ error: 'Cannot process more than 100 packages at once' });
+            }
+
+            if (!destruction_reason) {
+                return res.status(400).json({ error: 'Destruction reason is required' });
+            }
+
+            if (!detailed_description || detailed_description.trim().length < 50) {
+                return res.status(400).json({ error: 'Detailed description is required (minimum 50 characters)' });
+            }
+
+            const result = await cancelledShipmentService.bulkMarkPackagesDestroyed(
+                package_ids, 
+                userId, 
+                destruction_reason, 
+                detailed_description
+            );
+            res.json(result);
+        } catch (error) {
+            console.error('Error bulk marking packages as destroyed:', error);
+            res.status(500).json({ error: error.message });
+        }
+    }
+
+    /**
+     * Module 21.1: GET /api/v1/admin/cancelled-shipments/bulk-export
+     * Bulk export packages to CSV
+     */
+    async bulkExportPackages(req, res) {
+        try {
+            const { package_ids } = req.query;
+            const userId = req.user.id;
+
+            if (!package_ids) {
+                return res.status(400).json({ error: 'package_ids query parameter is required (comma-separated)' });
+            }
+
+            const packageIds = package_ids.split(',').map(id => parseInt(id.trim())).filter(id => !isNaN(id));
+
+            if (packageIds.length === 0) {
+                return res.status(400).json({ error: 'No valid package IDs provided' });
+            }
+
+            // Module 21.5: Enforce batch size limit
+            if (packageIds.length > 100) {
+                return res.status(400).json({ error: 'Cannot export more than 100 packages at once' });
+            }
+
+            const csv = await cancelledShipmentService.bulkExportPackages(packageIds);
+
+            const dateStr = new Date().toISOString().split('T')[0];
+            res.setHeader('Content-Type', 'text/csv');
+            res.setHeader('Content-Disposition', `attachment; filename="cancelled-packages-export-${dateStr}.csv"`);
+            res.send(csv);
+        } catch (error) {
+            console.error('Error bulk exporting packages:', error);
             res.status(500).json({ error: error.message });
         }
     }

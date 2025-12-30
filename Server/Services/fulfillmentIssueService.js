@@ -884,6 +884,107 @@ class FulfillmentIssueService {
     }
 
     /**
+     * Module 21.4: Bulk mark issues as resolved
+     * Sales rep can mark multiple resolved issues at once
+     */
+    async bulkMarkIssuesResolved(invoiceIds, userId) {
+        const client = await pool.connect();
+
+        try {
+            await client.query('BEGIN');
+
+            // Module 21.5: Enforce batch size limit
+            if (invoiceIds.length > 100) {
+                throw new Error('Cannot process more than 100 issues at once');
+            }
+
+            // Get all issues
+            const invoices = await client.query(`
+                SELECT 
+                    id,
+                    invoice_number,
+                    status
+                FROM "ORDERS-invoices"
+                WHERE id = ANY($1)
+                    AND status = 'Fulfillment_Issue'
+            `, [invoiceIds]);
+
+            if (invoices.rows.length === 0) {
+                throw new Error('No issues found to resolve');
+            }
+
+            let resolvedCount = 0;
+
+            // Resolve each issue
+            for (const invoice of invoices.rows) {
+                // Update status to Approved
+                await client.query(`
+                    UPDATE "ORDERS-invoices"
+                    SET 
+                        status = 'Approved',
+                        resolved_at = NOW(),
+                        resolved_by = $1,
+                        status_updated_at = NOW()
+                    WHERE id = $2
+                `, [userId, invoice.id]);
+
+                // Log resolution
+                await client.query(`
+                    INSERT INTO "ORDERS-invoice-history" (
+                        fk_invoice_id,
+                        modification_type,
+                        field_name,
+                        old_value,
+                        new_value,
+                        reason,
+                        changed_by_user_id
+                    ) VALUES ($1, 'issue_resolved', 'status', 'Fulfillment_Issue', 'Approved', 'Issue resolved and order returned to queue', $2)
+                `, [invoice.id, userId]);
+
+                resolvedCount++;
+            }
+
+            // Log bulk operation
+            await client.query(`
+                INSERT INTO "ORDERS-audit_log" (
+                    user_id,
+                    action,
+                    resource_type,
+                    resource_id,
+                    details,
+                    status
+                ) VALUES ($1, 'bulk_resolve_issues', 'Invoice', NULL, $2, 'success')
+            `, [userId, JSON.stringify({
+                bulk_operation: true,
+                operation_type: 'bulk_resolve_issues',
+                record_count: resolvedCount,
+                affected_invoice_ids: invoiceIds
+            })]);
+
+            await client.query('COMMIT');
+
+            // Notify fulfillment team
+            const websocketService = require('./websocketService');
+            await websocketService.broadcastToFulfillmentTeam({
+                type: 'issues_resolved',
+                count: resolvedCount,
+                message: `${resolvedCount} issue(s) resolved and returned to fulfillment queue`
+            });
+
+            return {
+                success: true,
+                resolved_count: resolvedCount
+            };
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
      * Bulk assign issues to sales rep
      * POST /api/v1/admin/fulfillment/issues/bulk-assign
      */

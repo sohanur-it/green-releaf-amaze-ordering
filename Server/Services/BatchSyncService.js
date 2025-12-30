@@ -13,6 +13,9 @@ class BatchSyncService {
     constructor() {
         const isDevelopment = process.env.NODE_ENV !== 'production';
         
+        // Cache for license column name (expensive to query repeatedly)
+        this._cachedLicenseColumn = null;
+        
         this.dbConfig = {
             host: process.env.DB_HOST || 'localhost',
             port: process.env.DB_PORT || 5432,
@@ -236,9 +239,10 @@ class BatchSyncService {
      * the full scheduled sync.
      *
      * @param {string[]} metrcItemNames - Array of METRC item names (e.g. "M0000...: V2 Amaze Hashish 1g - Triple Burger")
+     * @param {number} [productId] - Optional product ID to link batches to. If not provided, will auto-link based on metrc_linked_items
      * @returns {Promise<{success: boolean, updated: number, batches: Array}>}
      */
-    async refreshBatchesForItems(metrcItemNames) {
+    async refreshBatchesForItems(metrcItemNames, productId = null) {
         if (!Array.isArray(metrcItemNames) || metrcItemNames.length === 0) {
             return {
                 success: true,
@@ -248,16 +252,24 @@ class BatchSyncService {
         }
 
         console.log('🔄 Refreshing batches for METRC items:', metrcItemNames);
+        console.log(`   📊 Processing ${metrcItemNames.length} METRC item(s)`);
 
         // 1. Execute extraction query and filter to just these item names
         const freshBatchesAll = await this.executeBatchExtractionQuery();
+        console.log(`   📦 Found ${freshBatchesAll.length} total batches in METRC extraction`);
+        
         const freshBatches = freshBatchesAll.filter(b => metrcItemNames.includes(b.name));
+        console.log(`   ✅ Filtered to ${freshBatches.length} batch(es) matching specified METRC items`);
 
         if (freshBatches.length === 0) {
             console.warn('⚠️ No fresh batches found for specified METRC items during refresh');
+            console.warn(`   Available METRC item names in extraction: ${[...new Set(freshBatchesAll.map(b => b.name))].slice(0, 5).join(', ')}...`);
             return {
                 success: true,
                 updated: 0,
+                created: 0,
+                modified: 0,
+                total: 0,
                 batches: []
             };
         }
@@ -265,25 +277,96 @@ class BatchSyncService {
         // 2. Load existing batches and filter by these item names
         const existingBatchesAll = await this.loadExistingBatches();
         const existingBatches = existingBatchesAll.filter(b => metrcItemNames.includes(b.metrc_item_name));
+        console.log(`   📊 Found ${existingBatches.length} existing batch(es) in database for these METRC items`);
 
         // 3. Detect changes only for these items and apply them with full history tracking
         const changes = this.detectChanges(freshBatches, existingBatches);
 
-        // If nothing changed, just return current DB state
+        let batchesUpdated = 0;
+        let batchesCreated = 0;
+
+        // If nothing changed, batches were still refreshed (checked from METRC)
         if (
             changes.new.length === 0 &&
             changes.updated.length === 0 &&
             changes.removed.length === 0 &&
             changes.packageChanges.length === 0
         ) {
-            console.log('ℹ️ No batch changes detected for specified METRC items');
+            console.log('ℹ️ No batch changes detected for specified METRC items (batches are already up-to-date)');
+            // Count existing batches as "refreshed" even if no changes
+            batchesUpdated = existingBatches.length;
         } else {
+            // Use default chunk size of 25 for refresh operations
+            const chunkSize = 25;
             await this.applyChangesWithHistory(changes, chunkSize);
+            batchesUpdated = changes.updated.length + changes.packageChanges.length;
+            batchesCreated = changes.new.length;
+            console.log(`   📊 Changes applied: ${batchesCreated} new, ${batchesUpdated} updated, ${changes.removed.length} removed`);
         }
 
-        // 4. Return the latest batch records for these items
+        // 4. Link batches to products that have these METRC items in their metrc_linked_items
+        // This ensures batches are properly linked after refresh
         const client = await this.pool.connect();
         try {
+            // If productId is provided, use it directly. Otherwise, find products that have these METRC items linked
+            if (productId) {
+                // Link all batches for these METRC items to the specified product
+                const linkResult = await client.query(`
+                    UPDATE "ORDERS-batches"
+                    SET fk_master_product_id = $1
+                    WHERE metrc_item_name = ANY($2)
+                      AND (fk_master_product_id IS NULL OR fk_master_product_id != $1)
+                    RETURNING id, metrc_item_name
+                `, [productId, metrcItemNames]);
+                
+                if (linkResult.rowCount > 0) {
+                    console.log(`   🔗 Linked ${linkResult.rowCount} batch(es) to product ${productId}`);
+                }
+            } else {
+                // Find products that have these METRC items linked
+                const productsResult = await client.query(`
+                    SELECT entry_id, metrc_linked_items
+                    FROM "ORDERS-products"
+                    WHERE metrc_linked_items IS NOT NULL
+                      AND metrc_linked_items::text != '[]'
+                `);
+                
+                // Build a map of metrc_item_name -> product_id
+                const itemToProductMap = new Map();
+                for (const product of productsResult.rows) {
+                    const linkedItems = Array.isArray(product.metrc_linked_items) 
+                        ? product.metrc_linked_items 
+                        : JSON.parse(product.metrc_linked_items || '[]');
+                    
+                    for (const itemName of linkedItems) {
+                        if (metrcItemNames.includes(itemName)) {
+                            // If multiple products have the same item, use the first one found
+                            if (!itemToProductMap.has(itemName)) {
+                                itemToProductMap.set(itemName, product.entry_id);
+                            }
+                        }
+                    }
+                }
+                
+                // Link batches to products
+                if (itemToProductMap.size > 0) {
+                    for (const [itemName, prodId] of itemToProductMap.entries()) {
+                        const linkResult = await client.query(`
+                            UPDATE "ORDERS-batches"
+                            SET fk_master_product_id = $1
+                            WHERE metrc_item_name = $2
+                              AND (fk_master_product_id IS NULL OR fk_master_product_id != $1)
+                            RETURNING id
+                        `, [prodId, itemName]);
+                        
+                        if (linkResult.rowCount > 0) {
+                            console.log(`   🔗 Linked ${linkResult.rowCount} batch(es) for "${itemName}" to product ${prodId}`);
+                        }
+                    }
+                }
+            }
+            
+            // 5. Return the latest batch records for these items
             const result = await client.query(`
                 SELECT 
                     id,
@@ -299,11 +382,16 @@ class BatchSyncService {
                 ORDER BY created_at DESC
             `, [metrcItemNames]);
 
-            console.log(`✅ Refreshed ${result.rowCount} batch(es) for specified METRC items`);
+            // Return count of batches that were actually updated/created, not just total count
+            const totalBatchesAffected = batchesCreated + batchesUpdated;
+            console.log(`✅ Refreshed batches for specified METRC items: ${batchesCreated} new, ${batchesUpdated} updated (${result.rowCount} total batches found)`);
 
             return {
                 success: true,
-                updated: result.rowCount,
+                updated: totalBatchesAffected, // Total batches that were created or updated
+                created: batchesCreated,
+                modified: batchesUpdated,
+                total: result.rowCount, // Total batches that exist for these items
                 batches: result.rows
             };
         } catch (error) {
@@ -786,6 +874,16 @@ class BatchSyncService {
                     }
                 }
                 
+                // Check if batch already exists (race condition protection)
+                const existingCheck = await client.query(`
+                    SELECT id FROM "ORDERS-batches" WHERE batch_name = $1
+                `, [batch.batch_name]);
+                
+                if (existingCheck.rows.length > 0) {
+                    console.log(`   ⚠️ Batch "${batch.batch_name}" already exists (ID: ${existingCheck.rows[0].id}), skipping insert`);
+                    continue; // Skip this batch - it's already in the database
+                }
+                
                 const result = await client.query(`
                     INSERT INTO "ORDERS-batches" (
                         batch_name, metrc_item_name, first_sourcepackage_label,
@@ -798,6 +896,7 @@ class BatchSyncService {
                         unit_weight_grams_missing, unit_count_missing,
                         status
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
+                    ON CONFLICT (batch_name) DO NOTHING
                     RETURNING id
                 `, [
                     batch.batch_name,
@@ -825,6 +924,12 @@ class BatchSyncService {
                     initialStatus
                 ]);
 
+                    // Check if insert was successful (ON CONFLICT DO NOTHING returns no rows if conflict)
+                    if (result.rows.length === 0) {
+                        console.log(`   ⚠️ Batch "${batch.batch_name}" already exists (skipped due to conflict)`);
+                        continue; // Skip to next batch
+                    }
+                    
                     const newBatchId = result.rows[0].id;
                     
                     // AUTO-LINK: Find product that has this metrc_item_name in metrc_linked_items
@@ -1328,6 +1433,19 @@ class BatchSyncService {
             const client = await this.getHealthyClient();
             try {
                 await client.query('BEGIN');
+                
+                // Cache the license column name ONCE per chunk (not per batch) to avoid expensive information_schema queries
+                if (!this._cachedLicenseColumn) {
+                    const licenseColumnCheck = await client.query(`
+                        SELECT column_name 
+                        FROM information_schema.columns 
+                        WHERE table_name = 'activepackages' 
+                        AND column_name IN ('sync_license', 'synclicense')
+                        LIMIT 1
+                    `);
+                    this._cachedLicenseColumn = licenseColumnCheck.rows[0]?.column_name || 'sync_license';
+                }
+                const activepackagesLicenseColumn = this._cachedLicenseColumn;
             
             for (const batch of batches) {
                 const batchId = batch.id || await this.getBatchIdByName(batch.batch_name, client);
@@ -1354,14 +1472,6 @@ class BatchSyncService {
                     // CRITICAL FIX: Check if there are still active packages for this METRC item
                     // If yes, don't unlink - the batch extraction query will update the batch with new source packages
                     // Only unlink if there are truly no packages left for this METRC item
-                    const licenseColumnCheck = await client.query(`
-                        SELECT column_name 
-                        FROM information_schema.columns 
-                        WHERE table_name = 'activepackages' 
-                        AND column_name IN ('sync_license', 'synclicense')
-                        LIMIT 1
-                    `);
-                    const activepackagesLicenseColumn = licenseColumnCheck.rows[0]?.column_name || 'sync_license';
                     
                     const activePackagesCheck = await client.query(`
                         SELECT COUNT(*) as count
@@ -1800,11 +1910,15 @@ class BatchSyncService {
      */
     async close() {
         try {
-            // Set a timeout for pool closing to prevent indefinite hangs
+            // First, drain the pool by waiting for active connections to finish
+            // This gives connections time to complete their work
+            await this.pool.drain();
+            
+            // Then close the pool with a timeout
             await Promise.race([
                 this.pool.end(),
                 new Promise((_, reject) => 
-                    setTimeout(() => reject(new Error('Pool close timeout after 10 seconds')), 10000)
+                    setTimeout(() => reject(new Error('Pool close timeout after 15 seconds')), 15000)
                 )
             ]);
             console.log('✅ BatchSyncService pool closed successfully');

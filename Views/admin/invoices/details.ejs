@@ -247,6 +247,14 @@
         <% if ((typeof isSalesRep === 'undefined' || !isSalesRep) && !isFulfillmentUser) { %>
             <button onclick="cloneInvoice()" class="btn btn-secondary" style="background: #6c757d; color: white; padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer;">Clone Invoice</button>
         <% } %>
+        <% if (typeof isSuperuser !== 'undefined' && isSuperuser) { %>
+            <button onclick="openAdminOverrideModal()" class="btn btn-warning" style="background: #f59e0b; color: white; padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer;">
+                <i class="fas fa-exclamation-triangle"></i> Admin Override
+            </button>
+            <button onclick="openAdminToolsMenu()" class="btn btn-info" style="background: #3b82f6; color: white; padding: 8px 16px; border-radius: 4px; border: none; cursor: pointer;">
+                <i class="fas fa-tools"></i> Admin Tools
+            </button>
+        <% } %>
         <% if (isFulfillmentUser) { %>
             <span style="padding: 8px 16px; background: #e3f2fd; color: #1976d2; border-radius: 4px; font-size: 0.9rem;">
                 <i class="fas fa-lock"></i> Read-Only Mode
@@ -548,7 +556,7 @@
                 </thead>
                 <tbody>
                     <% lineItems.forEach((item, index) => { %>
-                        <tr data-line-item-id="<%= item.id %>">
+                        <tr data-line-item-id="<%= item.id %>" data-batch-id="<%= item.fk_batch_id %>" data-product-name="<%= (item.brand_name || 'AMAZE') + ' ' + item.product_name %>">
                             <td>
                                 <strong style="color: var(--text-color);"><%= item.brand_name || 'AMAZE' %> <%= item.product_name %></strong>
                             </td>
@@ -589,7 +597,7 @@
                 </thead>
                 <tbody id="editable-line-items-tbody">
                     <% lineItems.forEach((item, index) => { %>
-                        <tr data-line-item-id="<%= item.id %>">
+                        <tr data-line-item-id="<%= item.id %>" data-batch-id="<%= item.fk_batch_id %>" data-product-name="<%= (item.brand_name || 'AMAZE') + ' ' + item.product_name %>">
                             <td>
                                 <strong style="color: var(--text-color);"><%= item.brand_name || 'AMAZE' %> <%= item.product_name %></strong>
                             </td>
@@ -2768,6 +2776,602 @@ async function finalizeDestroyedPackages() {
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Failed to finalize destroyed packages');
         alert(`${data.packages_finalized} package(s) finalized. ${data.total_quantity_destroyed} units destroyed.`);
+        window.location.reload();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// =============================================
+// Module 11: Admin Tools & Overrides
+// =============================================
+
+// Admin Override Modal
+function openAdminOverrideModal() {
+    const modal = document.getElementById('admin-override-modal');
+    if (!modal) {
+        createAdminOverrideModal();
+        document.getElementById('admin-override-modal').style.display = 'flex';
+    } else {
+        modal.style.display = 'flex';
+    }
+    loadInvoicePreview();
+}
+
+function createAdminOverrideModal() {
+    const modal = document.createElement('div');
+    modal.id = 'admin-override-modal';
+    modal.className = 'modal-overlay';
+    modal.style.cssText = 'display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center;';
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="background: white; border-radius: 8px; padding: 2rem; max-width: 800px; width: 90%; max-height: 90vh; overflow-y: auto;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2 style="margin: 0; color: #f59e0b;">
+                    <i class="fas fa-exclamation-triangle"></i> Admin Override
+                </h2>
+                <button onclick="closeAdminOverrideModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #666;">&times;</button>
+            </div>
+            
+            <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; padding: 1rem; margin-bottom: 1.5rem;">
+                <p style="margin: 0; color: #92400e;">
+                    <strong>Warning:</strong> This tool allows direct modification of invoice fields. All changes are logged and require approval ticket number.
+                </p>
+            </div>
+            
+            <form id="admin-override-form">
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Status</label>
+                    <select id="override-status" class="form-control" style="width: 100%; padding: 0.5rem;">
+                        <option value="">-- Keep Current --</option>
+                        <option value="Draft">Draft</option>
+                        <option value="Pending_Approval">Pending Approval</option>
+                        <option value="Approved">Approved</option>
+                        <option value="Fulfillment_Accepted">Fulfillment Accepted</option>
+                        <option value="Fulfillment_Issue">Fulfillment Issue</option>
+                        <option value="Manifested">Manifested</option>
+                        <option value="Partially_Manifested">Partially Manifested</option>
+                        <option value="Shipped">Shipped</option>
+                        <option value="Delivered">Delivered</option>
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">METRC Manifest Numbers (JSON Array)</label>
+                    <textarea id="override-manifest-numbers" class="form-control" rows="3" style="width: 100%; padding: 0.5rem; font-family: monospace;" placeholder='["TRF-2025-001234", "TRF-2025-001235"]'></textarea>
+                </div>
+                
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Transportation Details (JSON)</label>
+                    <textarea id="override-transportation" class="form-control" rows="5" style="width: 100%; padding: 0.5rem; font-family: monospace;" placeholder='{"driver_name": "John Doe", "license_plate": "ABC123", ...}'></textarea>
+                </div>
+                
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Fulfillment Accepted At</label>
+                    <input type="datetime-local" id="override-fulfillment-accepted" class="form-control" style="width: 100%; padding: 0.5rem;">
+                </div>
+                
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Fulfillment Issue Requested At</label>
+                    <input type="datetime-local" id="override-fulfillment-issue" class="form-control" style="width: 100%; padding: 0.5rem;">
+                </div>
+                
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Manifest Created At</label>
+                    <input type="datetime-local" id="override-manifest-created" class="form-control" style="width: 100%; padding: 0.5rem;">
+                </div>
+                
+                <hr style="margin: 1.5rem 0;">
+                
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Reason for Override <span style="color: red;">*</span></label>
+                    <textarea id="override-reason" class="form-control" rows="3" style="width: 100%; padding: 0.5rem;" placeholder="Minimum 20 characters" required></textarea>
+                    <small style="color: #666;">Minimum 20 characters required</small>
+                </div>
+                
+                <div style="margin-bottom: 1.5rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Approval Ticket Number <span style="color: red;">*</span></label>
+                    <input type="text" id="override-ticket-number" class="form-control" style="width: 100%; padding: 0.5rem;" placeholder="e.g., TICKET-12345" required>
+                </div>
+                
+                <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                    <button type="button" onclick="closeAdminOverrideModal()" class="btn btn-secondary" style="padding: 0.5rem 1.5rem;">Cancel</button>
+                    <button type="submit" class="btn btn-warning" style="background: #f59e0b; color: white; padding: 0.5rem 1.5rem;">Apply Override</button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    document.getElementById('admin-override-form').addEventListener('submit', handleAdminOverride);
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeAdminOverrideModal();
+        }
+    });
+}
+
+function closeAdminOverrideModal() {
+    const modal = document.getElementById('admin-override-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+async function loadInvoicePreview() {
+    try {
+        const response = await fetch(`/api/v1/admin/override/invoice/${invoiceId}/preview`);
+        const data = await response.json();
+        
+        if (data.success && data.invoice) {
+            const inv = data.invoice;
+            
+            // Populate current values
+            if (inv.status) {
+                document.getElementById('override-status').value = inv.status;
+            }
+            if (inv.metrc_manifest_numbers) {
+                const manifestNums = Array.isArray(inv.metrc_manifest_numbers) 
+                    ? inv.metrc_manifest_numbers 
+                    : JSON.parse(inv.metrc_manifest_numbers || '[]');
+                document.getElementById('override-manifest-numbers').value = JSON.stringify(manifestNums, null, 2);
+            }
+            if (inv.transportation_details) {
+                const trans = typeof inv.transportation_details === 'string'
+                    ? JSON.parse(inv.transportation_details)
+                    : inv.transportation_details;
+                document.getElementById('override-transportation').value = JSON.stringify(trans, null, 2);
+            }
+            if (inv.fulfillment_accepted_at) {
+                const date = new Date(inv.fulfillment_accepted_at);
+                document.getElementById('override-fulfillment-accepted').value = date.toISOString().slice(0, 16);
+            }
+            if (inv.fulfillment_issue_requested_at) {
+                const date = new Date(inv.fulfillment_issue_requested_at);
+                document.getElementById('override-fulfillment-issue').value = date.toISOString().slice(0, 16);
+            }
+            if (inv.manifest_created_at) {
+                const date = new Date(inv.manifest_created_at);
+                document.getElementById('override-manifest-created').value = date.toISOString().slice(0, 16);
+            }
+        }
+    } catch (error) {
+        console.error('Error loading invoice preview:', error);
+        alert('Error loading invoice data: ' + error.message);
+    }
+}
+
+async function handleAdminOverride(e) {
+    e.preventDefault();
+    
+    const status = document.getElementById('override-status').value;
+    const manifestNumbers = document.getElementById('override-manifest-numbers').value;
+    const transportation = document.getElementById('override-transportation').value;
+    const fulfillmentAccepted = document.getElementById('override-fulfillment-accepted').value;
+    const fulfillmentIssue = document.getElementById('override-fulfillment-issue').value;
+    const manifestCreated = document.getElementById('override-manifest-created').value;
+    const reason = document.getElementById('override-reason').value.trim();
+    const ticketNumber = document.getElementById('override-ticket-number').value.trim();
+    
+    // Validation
+    if (reason.length < 20) {
+        alert('Reason must be at least 20 characters');
+        return;
+    }
+    
+    if (!ticketNumber) {
+        alert('Approval ticket number is required');
+        return;
+    }
+    
+    // Parse JSON fields
+    let parsedManifestNumbers = null;
+    if (manifestNumbers) {
+        try {
+            parsedManifestNumbers = JSON.parse(manifestNumbers);
+        } catch (e) {
+            alert('Invalid JSON format for manifest numbers');
+            return;
+        }
+    }
+    
+    let parsedTransportation = null;
+    if (transportation) {
+        try {
+            parsedTransportation = JSON.parse(transportation);
+        } catch (e) {
+            alert('Invalid JSON format for transportation details');
+            return;
+        }
+    }
+    
+    try {
+        const response = await fetch(`/api/v1/admin/override/invoice/${invoiceId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                status: status || undefined,
+                metrc_manifest_numbers: parsedManifestNumbers,
+                transportation_details: parsedTransportation,
+                fulfillment_accepted_at: fulfillmentAccepted || null,
+                fulfillment_issue_requested_at: fulfillmentIssue || null,
+                manifest_created_at: manifestCreated || null,
+                reason: reason,
+                approval_ticket_number: ticketNumber
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to apply override');
+        }
+        
+        alert('Invoice fields updated successfully');
+        window.location.reload();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Admin Tools Menu
+function openAdminToolsMenu() {
+    const menu = document.getElementById('admin-tools-menu');
+    if (!menu) {
+        createAdminToolsMenu();
+        document.getElementById('admin-tools-menu').style.display = 'flex';
+    } else {
+        menu.style.display = 'flex';
+    }
+}
+
+function createAdminToolsMenu() {
+    const menu = document.createElement('div');
+    menu.id = 'admin-tools-menu';
+    menu.className = 'modal-overlay';
+    menu.style.cssText = 'display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center;';
+    
+    menu.innerHTML = `
+        <div class="modal-content" style="background: white; border-radius: 8px; padding: 2rem; max-width: 600px; width: 90%;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2 style="margin: 0; color: #3b82f6;">
+                    <i class="fas fa-tools"></i> Admin Tools
+                </h2>
+                <button onclick="closeAdminToolsMenu()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #666;">&times;</button>
+            </div>
+            
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                <button onclick="openManuallyAddPackageModal()" class="btn btn-primary" style="padding: 1rem; text-align: left; display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fas fa-plus-circle"></i>
+                    <div>
+                        <strong>Manually Add Package</strong>
+                        <div style="font-size: 0.85rem; color: #666;">Add a scanned package manually</div>
+                    </div>
+                </button>
+                
+                <button onclick="openForceReleaseAllocationModal()" class="btn btn-danger" style="padding: 1rem; text-align: left; display: flex; align-items: center; gap: 0.5rem;">
+                    <i class="fas fa-unlock"></i>
+                    <div>
+                        <strong>Force Release Allocation</strong>
+                        <div style="font-size: 0.85rem; color: #666;">Force release batch allocation</div>
+                    </div>
+                </button>
+            </div>
+            
+            <div style="margin-top: 1.5rem; display: flex; justify-content: flex-end;">
+                <button onclick="closeAdminToolsMenu()" class="btn btn-secondary" style="padding: 0.5rem 1.5rem;">Close</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(menu);
+    
+    menu.addEventListener('click', (e) => {
+        if (e.target === menu) {
+            closeAdminToolsMenu();
+        }
+    });
+}
+
+function closeAdminToolsMenu() {
+    const menu = document.getElementById('admin-tools-menu');
+    if (menu) {
+        menu.style.display = 'none';
+    }
+}
+
+// Manually Add Package Modal
+function openManuallyAddPackageModal() {
+    closeAdminToolsMenu();
+    
+    const modal = document.getElementById('manually-add-package-modal');
+    if (!modal) {
+        createManuallyAddPackageModal();
+        document.getElementById('manually-add-package-modal').style.display = 'flex';
+    } else {
+        modal.style.display = 'flex';
+    }
+}
+
+function createManuallyAddPackageModal() {
+    const modal = document.createElement('div');
+    modal.id = 'manually-add-package-modal';
+    modal.className = 'modal-overlay';
+    modal.style.cssText = 'display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 10001; align-items: center; justify-content: center;';
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="background: white; border-radius: 8px; padding: 2rem; max-width: 600px; width: 90%;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2 style="margin: 0;">
+                    <i class="fas fa-plus-circle"></i> Manually Add Package
+                </h2>
+                <button onclick="closeManuallyAddPackageModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #666;">&times;</button>
+            </div>
+            
+            <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 4px; padding: 1rem; margin-bottom: 1.5rem;">
+                <p style="margin: 0; color: #92400e;">
+                    <strong>Warning:</strong> This bypasses normal scanning validation. Package will be validated against METRC active packages.
+                </p>
+            </div>
+            
+            <form id="manually-add-package-form">
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Package Label <span style="color: red;">*</span></label>
+                    <input type="text" id="package-label-input" class="form-control" style="width: 100%; padding: 0.5rem; text-transform: uppercase;" placeholder="1A40E0100000067000001234" maxlength="24" required>
+                    <small style="color: #666;">24 alphanumeric characters</small>
+                </div>
+                
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Line Item <span style="color: red;">*</span></label>
+                    <select id="line-item-select" class="form-control" style="width: 100%; padding: 0.5rem;" required>
+                        <option value="">Select Line Item</option>
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Reason <span style="color: red;">*</span></label>
+                    <textarea id="package-add-reason" class="form-control" rows="3" style="width: 100%; padding: 0.5rem;" placeholder="Minimum 20 characters" required></textarea>
+                    <small style="color: #666;">Minimum 20 characters required</small>
+                </div>
+                
+                <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                    <button type="button" onclick="closeManuallyAddPackageModal()" class="btn btn-secondary" style="padding: 0.5rem 1.5rem;">Cancel</button>
+                    <button type="submit" class="btn btn-primary" style="padding: 0.5rem 1.5rem;">Add Package</button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Populate line items
+    populateLineItemsForManualAdd();
+    
+    document.getElementById('manually-add-package-form').addEventListener('submit', handleManuallyAddPackage);
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeManuallyAddPackageModal();
+        }
+    });
+}
+
+function populateLineItemsForManualAdd() {
+    const select = document.getElementById('line-item-select');
+    if (!select) return;
+    
+    // Get line items from the page
+    const lineItems = document.querySelectorAll('[data-line-item-id]');
+    lineItems.forEach(item => {
+        const option = document.createElement('option');
+        option.value = item.dataset.lineItemId;
+        option.textContent = `Line Item ${item.dataset.lineItemId} - ${item.dataset.productName || 'Product'}`;
+        select.appendChild(option);
+    });
+}
+
+function closeManuallyAddPackageModal() {
+    const modal = document.getElementById('manually-add-package-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+async function handleManuallyAddPackage(e) {
+    e.preventDefault();
+    
+    const packageLabel = document.getElementById('package-label-input').value.trim().toUpperCase();
+    const lineItemId = document.getElementById('line-item-select').value;
+    const reason = document.getElementById('package-add-reason').value.trim();
+    
+    // Validation
+    if (!packageLabel.match(/^[A-Z0-9]{24}$/)) {
+        alert('Package label must be exactly 24 alphanumeric characters');
+        return;
+    }
+    
+    if (!lineItemId) {
+        alert('Please select a line item');
+        return;
+    }
+    
+    if (reason.length < 20) {
+        alert('Reason must be at least 20 characters');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/v1/admin/override/invoice/${invoiceId}/manually-add-package`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                package_label: packageLabel,
+                line_item_id: parseInt(lineItemId),
+                reason: reason
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to add package');
+        }
+        
+        alert('Package added successfully');
+        window.location.reload();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Force Release Allocation Modal
+function openForceReleaseAllocationModal() {
+    closeAdminToolsMenu();
+    
+    const modal = document.getElementById('force-release-allocation-modal');
+    if (!modal) {
+        createForceReleaseAllocationModal();
+        document.getElementById('force-release-allocation-modal').style.display = 'flex';
+    } else {
+        modal.style.display = 'flex';
+    }
+}
+
+function createForceReleaseAllocationModal() {
+    const modal = document.createElement('div');
+    modal.id = 'force-release-allocation-modal';
+    modal.className = 'modal-overlay';
+    modal.style.cssText = 'display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 10001; align-items: center; justify-content: center;';
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="background: white; border-radius: 8px; padding: 2rem; max-width: 600px; width: 90%;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <h2 style="margin: 0; color: #dc3545;">
+                    <i class="fas fa-unlock"></i> Force Release Allocation
+                </h2>
+                <button onclick="closeForceReleaseAllocationModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer; color: #666;">&times;</button>
+            </div>
+            
+            <div style="background: #fee2e2; border: 1px solid #dc3545; border-radius: 4px; padding: 1rem; margin-bottom: 1.5rem;">
+                <p style="margin: 0; color: #991b1b;">
+                    <strong>Warning:</strong> This will forcefully release allocation without normal validation. Use only when absolutely necessary.
+                </p>
+            </div>
+            
+            <form id="force-release-allocation-form">
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Line Item <span style="color: red;">*</span></label>
+                    <select id="release-line-item-select" class="form-control" style="width: 100%; padding: 0.5rem;" required>
+                        <option value="">Select Line Item</option>
+                    </select>
+                </div>
+                
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Batch ID <span style="color: red;">*</span></label>
+                    <input type="number" id="release-batch-id" class="form-control" style="width: 100%; padding: 0.5rem;" required>
+                </div>
+                
+                <div style="margin-bottom: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Reason <span style="color: red;">*</span></label>
+                    <textarea id="release-reason" class="form-control" rows="3" style="width: 100%; padding: 0.5rem;" placeholder="Minimum 20 characters" required></textarea>
+                    <small style="color: #666;">Minimum 20 characters required</small>
+                </div>
+                
+                <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+                    <button type="button" onclick="closeForceReleaseAllocationModal()" class="btn btn-secondary" style="padding: 0.5rem 1.5rem;">Cancel</button>
+                    <button type="submit" class="btn btn-danger" style="padding: 0.5rem 1.5rem;">Force Release</button>
+                </div>
+            </form>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    // Populate line items
+    populateLineItemsForRelease();
+    
+    document.getElementById('force-release-allocation-form').addEventListener('submit', handleForceReleaseAllocation);
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            closeForceReleaseAllocationModal();
+        }
+    });
+}
+
+function populateLineItemsForRelease() {
+    const select = document.getElementById('release-line-item-select');
+    if (!select) return;
+    
+    // Get line items from the page
+    const lineItems = document.querySelectorAll('[data-line-item-id]');
+    lineItems.forEach(item => {
+        const option = document.createElement('option');
+        option.value = item.dataset.lineItemId;
+        option.textContent = `Line Item ${item.dataset.lineItemId} - Batch: ${item.dataset.batchId || 'N/A'}`;
+        option.dataset.batchId = item.dataset.batchId;
+        select.appendChild(option);
+    });
+    
+    // Auto-populate batch ID when line item is selected
+    select.addEventListener('change', function() {
+        const selectedOption = this.options[this.selectedIndex];
+        if (selectedOption && selectedOption.dataset.batchId) {
+            document.getElementById('release-batch-id').value = selectedOption.dataset.batchId;
+        }
+    });
+}
+
+function closeForceReleaseAllocationModal() {
+    const modal = document.getElementById('force-release-allocation-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+}
+
+async function handleForceReleaseAllocation(e) {
+    e.preventDefault();
+    
+    const lineItemId = document.getElementById('release-line-item-select').value;
+    const batchId = document.getElementById('release-batch-id').value;
+    const reason = document.getElementById('release-reason').value.trim();
+    
+    // Validation
+    if (!lineItemId || !batchId) {
+        alert('Line Item ID and Batch ID are required');
+        return;
+    }
+    
+    if (reason.length < 20) {
+        alert('Reason must be at least 20 characters');
+        return;
+    }
+    
+    if (!confirm('Are you sure you want to force release this allocation? This action cannot be undone.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/v1/admin/override/force-release-allocation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                invoice_id: invoiceId,
+                line_item_id: parseInt(lineItemId),
+                batch_id: parseInt(batchId),
+                reason: reason
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to release allocation');
+        }
+        
+        alert('Allocation released successfully');
         window.location.reload();
     } catch (error) {
         alert('Error: ' + error.message);

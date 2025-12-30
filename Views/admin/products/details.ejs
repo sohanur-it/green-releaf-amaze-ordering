@@ -339,7 +339,14 @@ body {
     <div class="dashboard-card">
         <div class="d-flex justify-content-between align-items-center mb-3">
             <h5 class="mb-0"><i class="fas fa-boxes me-2"></i>Batches (<%= totalBatches %>)</h5>
-            <input type="text" id="searchBatches" class="form-control" style="max-width: 300px;" placeholder="Search batches...">
+            <div class="d-flex gap-2 align-items-center">
+                <% if (linkedCount > 0) { %>
+                    <button id="refreshBatchesBtn" class="btn btn-bg btn-outline-primary" title="Refresh batches from METRC">
+                        <i class="fas fa-sync-alt me-1"></i> Refresh from METRC
+                    </button>
+                <% } %>
+                <input type="text" id="searchBatches" class="form-control" style="max-width: 300px;" placeholder="Search batches...">
+            </div>
         </div>
 
         <% if (totalBatches === 0) { %>
@@ -923,6 +930,64 @@ async function toggleArchiveProduct(shouldArchive) {
         notify.error(`Error ${action}ing product: ` + error.message);
     }
 }
+
+// Refresh batches from METRC - then reload page
+window.refreshBatchesFromMETRC = async function() {
+    const refreshProductId = <%= product.entry_id %>;
+    <% 
+    // Safely stringify the linked items array
+    const linkedItemsJson = JSON.stringify(product.metrc_linked_items || []);
+    %>
+    const linkedItems = <%- linkedItemsJson %>;
+    
+    if (!linkedItems || linkedItems.length === 0) {
+        alert('No METRC items linked to this product');
+        return;
+    }
+    
+    const btn = document.getElementById('refreshBatchesBtn');
+    if (!btn) {
+        console.error('Refresh button not found');
+        return;
+    }
+    
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i> Refreshing...';
+    
+    try {
+        const response = await fetch(`/api/v1/products/master/${refreshProductId}/refresh-batches`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ metrc_item_names: linkedItems })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Reload page immediately to show updated batches
+            window.location.reload();
+        } else {
+            if (typeof notify !== 'undefined' && notify.error) {
+                notify.error('Failed to refresh batches: ' + (data.error || 'Unknown error'));
+            } else {
+                alert('Failed to refresh batches: ' + (data.error || 'Unknown error'));
+            }
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    } catch (error) {
+        console.error('Error refreshing batches:', error);
+        if (typeof notify !== 'undefined' && notify.error) {
+            notify.error('Error refreshing batches: ' + error.message);
+        } else {
+            alert('Error refreshing batches: ' + error.message);
+        }
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    }
+};
 </script>
 
 <script>
@@ -946,6 +1011,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             });
         });
+    }
+    
+    // Attach refresh button event listener
+    const refreshBtn = document.getElementById('refreshBatchesBtn');
+    if (refreshBtn && typeof window.refreshBatchesFromMETRC === 'function') {
+        refreshBtn.addEventListener('click', window.refreshBatchesFromMETRC);
+    } else if (refreshBtn) {
+        console.warn('refreshBatchesFromMETRC function not found');
     }
 });
 </script>

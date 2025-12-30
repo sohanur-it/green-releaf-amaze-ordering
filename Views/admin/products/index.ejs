@@ -223,32 +223,35 @@
 </style>
 
 <div class="container-fluid p-4">
-    <!-- Action Buttons -->
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <div class="form-check form-switch">
-            <input 
-                class="form-check-input" 
-                type="checkbox" 
-                id="showArchivedToggle"
-                <%= showArchived ? 'checked' : '' %>
-                onchange="toggleShowArchived(this.checked)"
-            >
-            <label class="form-check-label" for="showArchivedToggle">
-                <i class="fas fa-archive me-1"></i> Show Archived Products
-            </label>
-        </div>
-        <a href="/admin/products/new" class="btn btn-primary">
-            <i class="fas fa-plus me-1"></i> Create Product
-        </a>
-    </div>
-
     <% 
-    // Calculate stats
+    // Calculate stats FIRST (before using in template)
     const totalProducts = products.length;
     const totalBatches = products.reduce((sum, p) => sum + (parseInt(p.batch_count) || 0), 0);
     const totalAvailable = products.reduce((sum, p) => sum + (parseFloat(p.available_quantity) || 0), 0);
     const linkedItems = products.reduce((sum, p) => sum + ((p.metrc_linked_items || []).length), 0);
     %>
+    
+    <!-- Action Buttons -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex align-items-center gap-3">
+            <div class="form-check form-switch">
+                <input 
+                    class="form-check-input" 
+                    type="checkbox" 
+                    id="showArchivedToggle"
+                    <%= showArchived ? 'checked' : '' %>
+                    onchange="toggleShowArchived(this.checked)"
+                >
+                <label class="form-check-label" for="showArchivedToggle">
+                    <i class="fas fa-archive me-1"></i> Show Archived Products
+                </label>
+            </div>
+            <!-- Refresh All Batches button removed - use scheduled sync jobs instead -->
+        </div>
+        <a href="/admin/products/new" class="btn btn-primary">
+            <i class="fas fa-plus me-1"></i> Create Product
+        </a>
+    </div>
 
     <!-- Statistics Cards -->
     <div class="row mb-4">
@@ -445,6 +448,321 @@
 </div>
 
 <script>
+// Refresh batches for all products with linked METRC items
+// DISABLED: Use scheduled sync jobs or individual product refresh buttons instead
+async function refreshAllProductBatches() {
+    alert('Batch refresh for all products has been disabled. Please use:\n1. Scheduled sync jobs (automatic)\n2. "Refresh from METRC" button on individual product pages');
+    return;
+    
+    // Original code below is disabled
+    /*
+    const btn = document.getElementById('refreshAllBatchesBtn');
+    if (!btn) return;
+    
+    const originalHtml = btn.innerHTML;
+    btn.disabled = true;
+    
+    // Create progress modal
+    const progressModal = createProgressModal();
+    document.body.appendChild(progressModal);
+    let modal;
+    try {
+        modal = new bootstrap.Modal(progressModal);
+        modal.show();
+    } catch (e) {
+        // Fallback if bootstrap not available
+        progressModal.style.display = 'block';
+        progressModal.classList.add('show');
+    }
+    
+    const progressText = progressModal.querySelector('#progressText');
+    const progressBar = progressModal.querySelector('#progressBar');
+    const batchesCount = progressModal.querySelector('#batchesCount');
+    
+    // Update UI immediately
+    progressText.textContent = 'Starting refresh...';
+    progressBar.style.width = '0%';
+    batchesCount.textContent = '0 batches';
+    
+    let totalBatchesRefreshed = 0;
+    let productsProcessed = 0;
+    let totalProducts = 0;
+    let ws = null;
+    let wsConnected = false;
+    
+    // Try to connect to WebSocket for real-time updates
+    try {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsHost = window.location.hostname;
+        const wsPort = '8080';
+        ws = new WebSocket(`${wsProtocol}//${wsHost}:${wsPort}`);
+        
+        ws.onopen = () => {
+            console.log('✅ WebSocket connected for batch refresh progress');
+            wsConnected = true;
+        };
+        
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                console.log('📨 WebSocket message received:', data);
+                if (data.type === 'batch_refresh_progress') {
+                    updateProgressUI(data, progressText, progressBar, batchesCount, modal, progressModal, ws);
+                }
+            } catch (err) {
+                console.error('Error parsing WebSocket message:', err);
+            }
+        };
+        
+        ws.onerror = (error) => {
+            console.warn('⚠️ WebSocket error (will use polling fallback):', error);
+            wsConnected = false;
+        };
+        
+        ws.onclose = () => {
+            console.log('WebSocket closed');
+            wsConnected = false;
+        };
+    } catch (err) {
+        console.warn('⚠️ WebSocket not available, using polling fallback:', err);
+        wsConnected = false;
+    }
+    
+    // Make API call - but update UI based on response data directly
+    try {
+        const response = await fetch('/api/v1/products/refresh-all-batches', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include'
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        console.log('📊 API response:', data);
+        
+        // Update UI directly from API response
+        console.log('📊 Processing API response:', data);
+        
+        if (data.success) {
+            const totalProducts = data.products_processed || data.results?.length || 0;
+            const totalBatches = data.total_batches_refreshed || 0;
+            
+            console.log(`📊 Total products: ${totalProducts}, Total batches: ${totalBatches}`);
+            
+            // If we have results array, show progress for each product
+            if (data.results && Array.isArray(data.results) && data.results.length > 0) {
+                let currentIndex = 0;
+                let cumulativeBatches = 0;
+                
+                // Update initial state
+                progressText.textContent = `Starting refresh for ${totalProducts} products...`;
+                progressBar.style.width = '0%';
+                batchesCount.textContent = '0 batches';
+                
+                const updateInterval = setInterval(() => {
+                    if (currentIndex < data.results.length) {
+                        const product = data.results[currentIndex];
+                        const productsProcessed = currentIndex + 1;
+                        const progress = Math.round((productsProcessed / totalProducts) * 100);
+                        
+                        // Add batches for this product
+                        cumulativeBatches += (product.batches_refreshed || 0);
+                        
+                        // Update progress bar
+                        progressBar.style.width = `${progress}%`;
+                        progressBar.setAttribute('aria-valuenow', progress);
+                        
+                        // Update batch count - THIS IS THE KEY FIX
+                        batchesCount.textContent = `${cumulativeBatches} batches`;
+                        console.log(`📊 UI Update: ${productsProcessed}/${totalProducts} products, ${cumulativeBatches} batches`);
+                        
+                        // Update text
+                        if (product.success) {
+                            progressText.textContent = `✅ Updated ${product.batches_refreshed || 0} batch(es) for ${product.product_name} (${productsProcessed}/${totalProducts} products)`;
+                        } else {
+                            progressText.textContent = `❌ Failed to refresh ${product.product_name}: ${product.error || 'Unknown error'} (${productsProcessed}/${totalProducts} products)`;
+                        }
+                        
+                        currentIndex++;
+                    } else {
+                        clearInterval(updateInterval);
+                        // Final update
+                        progressBar.style.width = '100%';
+                        progressBar.setAttribute('aria-valuenow', 100);
+                        batchesCount.textContent = `${totalBatches} batches`;
+                        progressText.textContent = `Completed! Refreshed ${totalBatches} batches for ${totalProducts} products`;
+                        
+                        // Show completion after a short delay
+                        setTimeout(() => {
+                            handleCompletion(data, modal, progressModal, ws);
+                        }, 1000);
+                    }
+                }, 400); // Update every 400ms to show progress
+            } else {
+                // No results array, just show final count
+                console.log('📊 No results array, showing final count directly');
+                progressBar.style.width = '100%';
+                progressBar.setAttribute('aria-valuenow', 100);
+                batchesCount.textContent = `${totalBatches} batches`;
+                progressText.textContent = `Completed! Refreshed ${totalBatches} batches for ${totalProducts} products`;
+                
+                setTimeout(() => {
+                    handleCompletion(data, modal, progressModal, ws);
+                }, 1500);
+            }
+        } else {
+            handleError(data, modal, progressModal, ws);
+        }
+    } catch (error) {
+        console.error('❌ Error refreshing all batches:', error);
+        handleError({ error: error.message }, modal, progressModal, ws);
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
+    }
+}
+
+// Update progress UI from WebSocket or polling data
+function updateProgressUI(data, progressText, progressBar, batchesCount, modal, progressModal, ws) {
+    if (data.status === 'started') {
+        progressText.textContent = data.message || 'Starting refresh...';
+        progressBar.style.width = '0%';
+        batchesCount.textContent = '0 batches';
+    } else if (data.status === 'progress') {
+        const productsProcessed = data.products_processed || 0;
+        const totalProducts = data.total_products || 0;
+        const totalBatchesRefreshed = data.total_batches_refreshed || 0;
+        const progress = totalProducts > 0 ? Math.round((productsProcessed / totalProducts) * 100) : 0;
+        
+        progressBar.style.width = `${progress}%`;
+        progressBar.setAttribute('aria-valuenow', progress);
+        batchesCount.textContent = `${totalBatchesRefreshed} batches`;
+        
+        if (data.current_product) {
+            const productName = data.current_product.name || 'Unknown';
+            const batches = data.current_product.batches_refreshed || 0;
+            progressText.textContent = `Updated ${batches} batch(es) for ${productName} (${productsProcessed}/${totalProducts} products)`;
+        } else {
+            progressText.textContent = data.message || `Processing... (${productsProcessed}/${totalProducts})`;
+        }
+    } else if (data.status === 'completed') {
+        progressBar.style.width = '100%';
+        progressBar.setAttribute('aria-valuenow', 100);
+        batchesCount.textContent = `${data.total_batches_refreshed || 0} batches`;
+        progressText.textContent = data.message || 'Completed!';
+        
+        setTimeout(() => {
+            handleCompletion(data, modal, progressModal, ws);
+        }, 1500);
+    } else if (data.status === 'error') {
+        handleError(data, modal, progressModal, ws);
+    }
+}
+
+// Poll for progress updates (fallback if WebSocket fails)
+async function pollProgress(progressText, progressBar, batchesCount, modal, progressModal, initialData) {
+    // Simulate progress updates since we can't get real-time updates without WebSocket
+    // Just show the final result
+    if (initialData.success) {
+        const totalProducts = initialData.products_processed || 0;
+        let currentProgress = 0;
+        
+        // Animate progress bar
+        const interval = setInterval(() => {
+            currentProgress += 10;
+            if (currentProgress > 90) {
+                currentProgress = 90; // Don't go to 100% until done
+            }
+            progressBar.style.width = `${currentProgress}%`;
+            progressBar.setAttribute('aria-valuenow', currentProgress);
+            progressText.textContent = `Processing ${totalProducts} products...`;
+        }, 500);
+        
+        // Wait a bit then show completion
+        setTimeout(() => {
+            clearInterval(interval);
+            handleCompletion(initialData, modal, progressModal, null);
+        }, Math.max(2000, totalProducts * 500)); // At least 2 seconds, or 500ms per product
+    } else {
+        handleError(initialData, modal, progressModal, null);
+    }
+}
+
+// Handle completion
+function handleCompletion(data, modal, progressModal, ws) {
+    if (ws) ws.close();
+    
+    if (modal && typeof modal.hide === 'function') {
+        modal.hide();
+    }
+    progressModal.remove();
+    
+    const duration = Math.round((data.duration_ms || 0) / 1000);
+    const message = `Refreshed batches for ${data.products_successful || data.products_processed || 0} products (${data.total_batches_refreshed || 0} batches) in ${duration}s`;
+    
+    if (typeof notify !== 'undefined' && notify.success) {
+        notify.success(message, 5000);
+    } else {
+        alert(message);
+    }
+    
+    // Reload page to show updated batches
+    setTimeout(() => window.location.reload(), 1000);
+}
+
+// Handle error
+function handleError(data, modal, progressModal, ws) {
+    if (ws) ws.close();
+    
+    if (modal && typeof modal.hide === 'function') {
+        modal.hide();
+    }
+    progressModal.remove();
+    
+    const errorMsg = data.error || 'Unknown error';
+    if (typeof notify !== 'undefined' && notify.error) {
+        notify.error('Error: ' + errorMsg);
+    } else {
+        alert('Error: ' + errorMsg);
+    }
+}
+
+// Create progress modal HTML
+function createProgressModal() {
+    const modal = document.createElement('div');
+    modal.className = 'modal fade';
+    modal.id = 'refreshProgressModal';
+    modal.setAttribute('tabindex', '-1');
+    modal.setAttribute('aria-labelledby', 'refreshProgressModalLabel');
+    modal.setAttribute('aria-hidden', 'true');
+    modal.innerHTML = `
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="refreshProgressModalLabel">
+                        <i class="fas fa-sync-alt fa-spin me-2"></i>Refreshing Batches
+                    </h5>
+                </div>
+                <div class="modal-body">
+                    <p id="progressText" class="mb-3">Starting refresh...</p>
+                    <div class="progress mb-3" style="height: 25px;">
+                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                        </div>
+                    </div>
+                    <div class="text-center">
+                        <strong id="batchesCount">0 batches</strong> refreshed
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    return modal;
+}
+
 // Store all products data for filtering
 let allProducts = [];
 let currentFilter = 'all';

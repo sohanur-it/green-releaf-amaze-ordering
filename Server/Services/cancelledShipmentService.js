@@ -1113,15 +1113,52 @@ class CancelledShipmentService {
         try {
             await client.query('BEGIN');
 
+            // Module 21.5: Enforce batch size limit
+            if (packageIds.length > 100) {
+                throw new Error('Cannot process more than 100 packages at once');
+            }
+
+            // Module 21.5: Validate all packages before processing
+            const packages = await client.query(`
+                SELECT id, package_label, fk_invoice_id
+                FROM "ORDERS-cancelled-shipment-packages"
+                WHERE id = ANY($1)
+            `, [packageIds]);
+
+            if (packages.rows.length !== packageIds.length) {
+                throw new Error('Some packages not found');
+            }
+
+            // Process all packages
             for (const packageId of packageIds) {
                 try {
                     await this.markPackageMissing(packageId, userId, reason);
                     markedCount++;
                 } catch (error) {
                     console.error(`Error marking package ${packageId} as missing:`, error.message);
-                    // Continue with other packages
+                    // Module 21.5: If ANY fails validation, rollback all
+                    await client.query('ROLLBACK');
+                    throw new Error(`Package marking failed: ${error.message}`);
                 }
             }
+
+            // Module 21.5: Log bulk operation
+            await client.query(`
+                INSERT INTO "ORDERS-audit_log" (
+                    user_id,
+                    action,
+                    resource_type,
+                    resource_id,
+                    details,
+                    status
+                ) VALUES ($1, 'bulk_mark_missing', 'CancelledShipment', NULL, $2, 'success')
+            `, [userId, JSON.stringify({
+                bulk_operation: true,
+                operation_type: 'bulk_mark_missing',
+                record_count: markedCount,
+                affected_package_ids: packageIds,
+                reason: reason
+            })]);
 
             await client.query('COMMIT');
 
@@ -1129,6 +1166,195 @@ class CancelledShipmentService {
 
         } catch (error) {
             await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Module 21.1: Bulk mark packages as destroyed
+     * Requires destruction reason and detailed description
+     */
+    async bulkMarkPackagesDestroyed(packageIds, userId, destructionReason, detailedDescription) {
+        const client = await pool.connect();
+
+        try {
+            await client.query('BEGIN');
+
+            // Module 21.5: Enforce batch size limit
+            if (packageIds.length > 100) {
+                throw new Error('Cannot process more than 100 packages at once. Please select fewer packages.');
+            }
+
+            // Get all package details
+            const packages = await client.query(`
+                SELECT 
+                    csp.id,
+                    csp.package_label,
+                    csp.fk_invoice_id,
+                    csp.batch_id,
+                    i.invoice_number,
+                    b.quantity as batch_quantity,
+                    b.allocated_quantity as batch_allocated,
+                    p.wholesale_price
+                FROM "ORDERS-cancelled-shipment-packages" csp
+                JOIN "ORDERS-invoices" i ON csp.fk_invoice_id = i.id
+                LEFT JOIN "ORDERS-batches" b ON csp.batch_id = b.batch_id
+                LEFT JOIN "ORDERS-products" p ON b.fk_master_product_id = p.entry_id
+                WHERE csp.id = ANY($1)
+            `, [packageIds]);
+
+            if (packages.rows.length !== packageIds.length) {
+                throw new Error('Some packages not found');
+            }
+
+            let destroyedCount = 0;
+            let totalValueLost = 0;
+            const batchUpdates = new Map(); // batch_id -> { count, value }
+
+            // Process each package
+            for (const pkg of packages.rows) {
+                // Mark as destroyed
+                await client.query(`
+                    UPDATE "ORDERS-cancelled-shipment-packages"
+                    SET 
+                        verified_in_metrc = true,
+                        returned_to_inventory = false,
+                        verified_at = NOW(),
+                        verified_by = $1,
+                        admin_notes = $2
+                    WHERE id = $3
+                `, [userId, `Destroyed: ${destructionReason}. ${detailedDescription}`, pkg.id]);
+
+                // Decrease batch quantity if batch exists
+                if (pkg.batch_id) {
+                    const current = batchUpdates.get(pkg.batch_id) || { count: 0, value: 0 };
+                    current.count += 1;
+                    current.value += parseFloat(pkg.wholesale_price || 0);
+                    batchUpdates.set(pkg.batch_id, current);
+
+                    await client.query(`
+                        UPDATE "ORDERS-batches"
+                        SET quantity = GREATEST(0, quantity - 1)
+                        WHERE batch_id = $1
+                    `, [pkg.batch_id]);
+
+                    // Log batch history
+                    await client.query(`
+                        INSERT INTO "ORDERS-batch-history" (
+                            batch_id,
+                            change_type,
+                            field_name,
+                            old_value,
+                            new_value,
+                            reason,
+                            related_invoice_id,
+                            changed_by_system
+                        ) VALUES ($1, 'quantity_decreased', 'quantity', $2, $3, $4, $5, false)
+                    `, [
+                        pkg.batch_id,
+                        pkg.batch_quantity,
+                        pkg.batch_quantity - 1,
+                        `Package ${pkg.package_label} destroyed: ${destructionReason}`,
+                        pkg.fk_invoice_id
+                    ]);
+                }
+
+                destroyedCount++;
+                totalValueLost += parseFloat(pkg.wholesale_price || 0);
+            }
+
+            // Log bulk operation to audit log
+            await client.query(`
+                INSERT INTO "ORDERS-audit_log" (
+                    user_id,
+                    action,
+                    resource_type,
+                    resource_id,
+                    details,
+                    status
+                ) VALUES ($1, 'bulk_destroy_packages', 'CancelledShipment', NULL, $2, 'success')
+            `, [userId, JSON.stringify({
+                bulk_operation: true,
+                operation_type: 'bulk_destroy_packages',
+                record_count: destroyedCount,
+                affected_package_ids: packageIds,
+                destruction_reason: destructionReason,
+                total_value_lost: totalValueLost,
+                batches_affected: Array.from(batchUpdates.entries()).map(([batchId, data]) => ({
+                    batch_id: batchId,
+                    packages_destroyed: data.count,
+                    value_lost: data.value
+                }))
+            })]);
+
+            await client.query('COMMIT');
+
+            // Module 21.1: Notify accounting team (placeholder - implement email service)
+            console.log(`[Bulk Destroy] Accounting notification: ${destroyedCount} packages destroyed, $${totalValueLost.toFixed(2)} value lost`);
+
+            return {
+                success: true,
+                destroyed_count: destroyedCount,
+                total_value_lost: totalValueLost,
+                batches_affected: batchUpdates.size
+            };
+
+        } catch (error) {
+            await client.query('ROLLBACK');
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    /**
+     * Module 21.1: Bulk export packages to CSV
+     */
+    async bulkExportPackages(packageIds) {
+        const client = await pool.connect();
+
+        try {
+            const packages = await client.query(`
+                SELECT 
+                    csp.package_label,
+                    i.invoice_number,
+                    b.batch_name,
+                    CASE 
+                        WHEN csp.verified_in_metrc THEN 'Verified'
+                        WHEN csp.returned_to_inventory THEN 'Returned'
+                        ELSE 'Unverified'
+                    END as verification_status,
+                    CASE WHEN csp.returned_to_inventory THEN 'Y' ELSE 'N' END as returned_to_inventory,
+                    csp.verified_at::text as verified_date,
+                    csp.admin_notes
+                FROM "ORDERS-cancelled-shipment-packages" csp
+                JOIN "ORDERS-invoices" i ON csp.fk_invoice_id = i.id
+                LEFT JOIN "ORDERS-batches" b ON csp.batch_id = b.batch_id
+                WHERE csp.id = ANY($1)
+                ORDER BY csp.package_label
+            `, [packageIds]);
+
+            // Generate CSV
+            const csvRows = [];
+            csvRows.push('Package Label,Invoice Number,Batch Name,Verification Status,Returned to Inventory,Verified Date,Admin Notes');
+
+            packages.rows.forEach(row => {
+                csvRows.push([
+                    row.package_label,
+                    row.invoice_number || 'N/A',
+                    row.batch_name || 'N/A',
+                    row.verification_status,
+                    row.returned_to_inventory,
+                    row.verified_date || 'N/A',
+                    (row.admin_notes || '').replace(/"/g, '""')
+                ].map(v => `"${String(v)}"`).join(','));
+            });
+
+            return csvRows.join('\n');
+
+        } catch (error) {
             throw error;
         } finally {
             client.release();

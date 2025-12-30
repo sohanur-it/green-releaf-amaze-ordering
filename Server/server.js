@@ -38,6 +38,7 @@ const portalRoutes = require('./Routes/portal-routes');
 const invoiceRoutes = require('./Routes/invoice-routes');
 const notificationRoutes = require('./Routes/notification-routes');
 const fulfillmentRoutes = require('./Routes/fulfillment-routes');
+const healthRoutes = require('./Routes/health-routes');
 
 //import services
 const masterScheduler = require('./Services/masterScheduler');
@@ -118,12 +119,18 @@ app.use((req, res, next) => {
         
         // If the session ID from cookie doesn't match req.sessionID, or session is empty
         if (cookieSid !== req.sessionID || (req.session && Object.keys(req.session).length === 1 && req.session.cookie)) {
-            console.log(`[SESSION] Cookie SID (${cookieSid.substring(0, 20)}...) doesn't match session ID (${req.sessionID?.substring(0, 20)}...), attempting to load from store...`);
+            // Only log in development or if SESSION_DEBUG is enabled
+            if (process.env.NODE_ENV !== 'production' || process.env.SESSION_DEBUG === 'true') {
+                console.log(`[SESSION] Cookie SID (${cookieSid.substring(0, 20)}...) doesn't match session ID (${req.sessionID?.substring(0, 20)}...), attempting to load from store...`);
+            }
             
             if (sessionStore && cookieSid) {
                 sessionStore.get(cookieSid, (err, session) => {
                     if (!err && session) {
-                        console.log('[SESSION] Successfully loaded session from store. Keys:', Object.keys(session));
+                        // Only log in development or if SESSION_DEBUG is enabled
+                        if (process.env.NODE_ENV !== 'production' || process.env.SESSION_DEBUG === 'true') {
+                            console.log('[SESSION] Successfully loaded session from store. Keys:', Object.keys(session));
+                        }
                         // Replace the session data
                         const cookie = req.session?.cookie;
                         // Clear existing session data
@@ -139,7 +146,10 @@ app.use((req, res, next) => {
                         }
                         // Update session ID
                         req.sessionID = cookieSid;
-                        console.log('[SESSION] Session after reload. userId:', req.session.userId);
+                        // Only log in development or if SESSION_DEBUG is enabled
+                        if (process.env.NODE_ENV !== 'production' || process.env.SESSION_DEBUG === 'true') {
+                            console.log('[SESSION] Session after reload. userId:', req.session.userId);
+                        }
                     } else if (err) {
                         console.error('[SESSION] Error reloading session:', err);
                     } else {
@@ -154,16 +164,25 @@ app.use((req, res, next) => {
     
     // If session exists but has no data (only cookie), try to reload from store
     if (req.session && Object.keys(req.session).length === 1 && req.session.cookie && req.sessionID) {
-        console.log('[SESSION] Session exists but appears empty, attempting to reload from store...');
+        // Only log in development or if SESSION_DEBUG is enabled
+        if (process.env.NODE_ENV !== 'production' || process.env.SESSION_DEBUG === 'true') {
+            console.log('[SESSION] Session exists but appears empty, attempting to reload from store...');
+        }
         if (sessionStore) {
             sessionStore.get(req.sessionID, (err, session) => {
                 if (!err && session) {
-                    console.log('[SESSION] Reloaded session from store. Keys:', Object.keys(session));
+                    // Only log in development or if SESSION_DEBUG is enabled
+                    if (process.env.NODE_ENV !== 'production' || process.env.SESSION_DEBUG === 'true') {
+                        console.log('[SESSION] Reloaded session from store. Keys:', Object.keys(session));
+                    }
                     // Merge session data (but preserve cookie)
                     const cookie = req.session.cookie;
                     Object.assign(req.session, session);
                     req.session.cookie = cookie; // Preserve cookie settings
-                    console.log('[SESSION] Session after reload. userId:', req.session.userId);
+                    // Only log in development or if SESSION_DEBUG is enabled
+                    if (process.env.NODE_ENV !== 'production' || process.env.SESSION_DEBUG === 'true') {
+                        console.log('[SESSION] Session after reload. userId:', req.session.userId);
+                    }
                 } else if (err) {
                     console.error('[SESSION] Error reloading session:', err);
                 } else {
@@ -257,6 +276,7 @@ app.use('/api/v1/credits', require('./Routes/credit-routes')); // Module 4: Cred
 app.use('/api/v1/notifications', notificationRoutes); // Module 4: Notification management API routes
 app.use('/api/v1/fulfillment', fulfillmentRoutes); // Module 5: Fulfillment & Manifesting API routes
 app.use('/api/alerts', alertRoutes); // sync failure alert API routes
+app.use('/api/health', healthRoutes); // Module 19: Health check routes
 app.use('/', portalRoutes); // External buyer portal routes
 
 // WebSocket test page

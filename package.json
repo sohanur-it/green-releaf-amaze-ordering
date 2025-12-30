@@ -60,6 +60,7 @@
     "sync:all": "npm run sync:active && npm run sync:transferred && npm run sync:intransit && npm run sync:outgoing && npm run sync:items && npm run sync:strains",
     "sync:batches": "NODE_ENV=development node scripts/sync/sync-batches.js",
     "sync:batches:prod": "NODE_ENV=production node scripts/sync/sync-batches.js",
+    "refresh:all-batches": "NODE_ENV=production node scripts/refresh-all-product-batches.js",
     "module3:setup": "node scripts/setup-module3.js",
     "module3:setup:prod": "NODE_ENV=production node scripts/setup-module3.js",
     "scheduler:start": "node scripts/sync/master-scheduler.js",
