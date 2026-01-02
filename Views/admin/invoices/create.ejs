@@ -1000,32 +1000,50 @@ async function createInvoice(desiredStatus = 'Pending_Approval', triggerBtn = nu
         });
 
         const data = await response.json();
-        if (data.success) {
-            completedSuccessfully = true;
-            const successMessage = data.status === 'Draft'
-                ? 'Invoice draft saved successfully!'
-                : 'Invoice created successfully!';
+        
+        if (!response.ok || !data.success) {
+            // Show error alert with details
+            const errorMessage = data.error || 'Failed to create invoice';
+            const errorDetails = data.details || data.error || 'An unknown error occurred';
+            const fullErrorMessage = errorDetails !== errorMessage 
+                ? `${errorMessage}: ${errorDetails}`
+                : errorMessage;
+            
+            console.error('Invoice creation failed:', {
+                status: response.status,
+                error: data.error,
+                details: data.details,
+                fullResponse: data
+            });
+            
             if (typeof showNotification === 'function') {
-                showNotification(successMessage, 'success');
+                showNotification(fullErrorMessage, 'error');
             } else {
-                alert(successMessage);
+                alert('Error: ' + fullErrorMessage);
             }
-            setTimeout(() => {
-                window.location.href = `/admin/invoices/${data.invoice_id}`;
-            }, 1500);
-        } else {
-            if (typeof showNotification === 'function') {
-                showNotification('Error: ' + (data.error || 'Failed to create invoice'), 'error');
-            } else {
-                alert('Error: ' + (data.error || 'Failed to create invoice'));
-            }
+            return;
         }
-    } catch (error) {
-        console.error('Error:', error);
+        
+        // Success case
+        completedSuccessfully = true;
+        const successMessage = data.status === 'Draft'
+            ? 'Invoice draft saved successfully!'
+            : 'Invoice created successfully!';
         if (typeof showNotification === 'function') {
-            showNotification('Failed to create invoice. Please try again.', 'error');
+            showNotification(successMessage, 'success');
         } else {
-            alert('Failed to create invoice. Please try again.');
+            alert(successMessage);
+        }
+        setTimeout(() => {
+            window.location.href = `/admin/invoices/${data.invoice_id}`;
+        }, 1500);
+    } catch (error) {
+        console.error('Network or parsing error:', error);
+        const errorMessage = error.message || 'Failed to create invoice. Please check your connection and try again.';
+        if (typeof showNotification === 'function') {
+            showNotification('Error: ' + errorMessage, 'error');
+        } else {
+            alert('Error: ' + errorMessage);
         }
     } finally {
         if (!completedSuccessfully && btn) {

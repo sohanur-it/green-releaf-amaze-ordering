@@ -163,16 +163,38 @@ class AccountCreditService {
                 return { success: false, error: 'Invoice has no line items' };
             }
 
+            // Get invoice financials to determine max credit allowed
+            const invoiceFinancials = await exec(`
+                SELECT subtotal, discount_amount, COALESCE(credit_applied, 0) as credit_applied
+                FROM "ORDERS-invoices"
+                WHERE id = $1
+            `, [invoiceId]);
+            
+            if (invoiceFinancials.rows.length === 0) {
+                return { success: false, error: 'Invoice not found' };
+            }
+            
+            const originalSubtotal = parseFloat(invoiceFinancials.rows[0].subtotal || 0);
+            const currentDiscountAmount = parseFloat(invoiceFinancials.rows[0].discount_amount || 0);
+            const currentCredit = parseFloat(invoiceFinancials.rows[0].credit_applied || 0);
+            
+            // Calculate max credit allowed to ensure total >= 0
+            // Constraint: total = originalSubtotal - currentDiscountAmount - credit_applied >= 0
+            // Therefore: credit_applied <= (originalSubtotal - currentDiscountAmount)
+            const maxCreditAllowed = roundToCurrency(originalSubtotal - currentDiscountAmount - currentCredit);
+            
             const actualSubtotal = lineItems.rows.reduce((sum, item) => {
                 const original = parseFloat(item.line_total) + parseFloat(item.credit_portion || 0);
                 return sum + original;
             }, 0);
 
-            const currentCredit = parseFloat(invoiceData.current_credit_applied);
             const balanceNeeded = roundToCurrency(actualSubtotal - currentCredit);
+            
+            // Cap balanceNeeded to maxCreditAllowed to prevent negative totals
+            const cappedBalanceNeeded = roundToCurrency(Math.min(balanceNeeded, maxCreditAllowed));
 
-            if (balanceNeeded <= 0) {
-                return { success: true, applied: 0, message: 'Invoice already covered by credits' };
+            if (cappedBalanceNeeded <= 0) {
+                return { success: true, applied: 0, message: 'Invoice already covered by credits or no credit capacity available' };
             }
 
             const credits = await exec(`
@@ -195,10 +217,10 @@ class AccountCreditService {
             const applications = [];
 
             for (const credit of credits.rows) {
-                if (totalApplied >= balanceNeeded) break;
+                if (totalApplied >= cappedBalanceNeeded) break;
 
                 const available = parseFloat(credit.remaining_balance);
-                const stillNeeded = balanceNeeded - totalApplied;
+                const stillNeeded = cappedBalanceNeeded - totalApplied;
                 const toApply = roundToCurrency(Math.min(available, stillNeeded));
 
                 const newBalance = roundToCurrency(available - toApply);
@@ -235,16 +257,8 @@ class AccountCreditService {
                 originalTotal: roundToCurrency(parseFloat(item.line_total) + parseFloat(item.credit_portion || 0))
             }));
 
-            // Get current invoice values
-            const invoiceWithDiscount = await exec(`
-                SELECT subtotal, discount_amount
-                FROM "ORDERS-invoices"
-                WHERE id = $1
-            `, [invoiceId]);
-            
-            const currentDiscountAmount = parseFloat(invoiceWithDiscount.rows[0]?.discount_amount || 0);
-            // invoice.subtotal stores the ORIGINAL subtotal (before discounts), per discountService.recalculateInvoiceTotals
-            const originalSubtotal = parseFloat(invoiceWithDiscount.rows[0]?.subtotal || 0);
+            // Note: originalSubtotal and currentDiscountAmount already retrieved above
+            // totalApplied is already capped to cappedBalanceNeeded which respects maxCreditAllowed
             
             // After credits are applied, the sum of line_totals (after discounts, before credits) is the sum of originalTotals
             const subtotalAfterDiscounts = originalTotals.reduce((sum, item) => sum + item.originalTotal, 0);
@@ -270,12 +284,18 @@ class AccountCreditService {
                 `, [newLineTotal, creditShare, id]);
             }
 
-            // Constraint requires: total = subtotal - discount_amount - credit_applied
+            // Constraint requires: total = subtotal - discount_amount - credit_applied >= 0
             // Where subtotal = original subtotal (before discounts), stored in invoice.subtotal
-            // So: total = originalSubtotal - currentDiscountAmount - (currentCredit + totalApplied)
+            // So: total = originalSubtotal - currentDiscountAmount - (currentCredit + totalApplied) >= 0
+            // Since totalApplied is already capped to maxCreditAllowed (line 184), we can safely add it
             const currentCreditValue = currentCredit || 0;
             const newCreditApplied = roundToCurrency(currentCreditValue + totalApplied);
             const finalTotal = roundToCurrency(originalSubtotal - currentDiscountAmount - newCreditApplied);
+            
+            // Validate that total is non-negative (should always be true since totalApplied was capped)
+            if (finalTotal < 0) {
+                throw new Error(`Credit application would result in negative total. Max credit allowed: ${maxCreditAllowed}, Applied: ${totalApplied}, Final total: ${finalTotal}`);
+            }
             
             await exec(`
                 UPDATE "ORDERS-invoices"

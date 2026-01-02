@@ -90,10 +90,22 @@ class InternalInvoiceService {
             ]);
             
             const invoiceId = invoice.rows[0].id;
+            console.log(`✅ Invoice created with ID: ${invoiceId}, Invoice Number: ${invoiceNumber}`);
             
             // Add line items with allocation
-            for (const item of invoiceData.line_items) {
-                await this.addLineItem(invoiceId, item, salesRepId, client);
+            for (let i = 0; i < invoiceData.line_items.length; i++) {
+                const item = invoiceData.line_items[i];
+                try {
+                    console.log(`📦 Adding line item ${i + 1}/${invoiceData.line_items.length}: batch_id=${item.fk_batch_id}, quantity=${item.quantity}`);
+                    await this.addLineItem(invoiceId, item, salesRepId, client);
+                    console.log(`✅ Line item ${i + 1} added successfully`);
+                } catch (lineItemError) {
+                    console.error(`❌ Error adding line item ${i + 1}:`, lineItemError.message);
+                    console.error('  - Batch ID:', item.fk_batch_id);
+                    console.error('  - Quantity:', item.quantity);
+                    console.error('  - Error stack:', lineItemError.stack);
+                    throw lineItemError; // Re-throw to trigger rollback
+                }
             }
             
             // Calculate totals
@@ -125,9 +137,32 @@ class InternalInvoiceService {
             
             return { success: true, invoice_id: invoiceId, invoice_number: invoiceNumber };
         } catch (error) {
-            await client.query('ROLLBACK');
-            console.error('Error creating internal invoice:', error);
-            throw error;
+            // Ensure transaction is rolled back
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                console.error('Error during rollback:', rollbackError);
+            }
+            
+            // Log detailed error information
+            console.error('❌ Error creating internal invoice:');
+            console.error('  - Error message:', error.message);
+            console.error('  - Error stack:', error.stack);
+            console.error('  - Sales Rep ID:', salesRepId);
+            console.error('  - Buyer ID:', invoiceData.fk_buyer_id);
+            console.error('  - Location ID:', invoiceData.fk_location_id);
+            console.error('  - Line items count:', invoiceData.line_items?.length || 0);
+            
+            // Re-throw with more context
+            const enhancedError = new Error(`Failed to create internal invoice: ${error.message}`);
+            enhancedError.originalError = error;
+            enhancedError.context = {
+                salesRepId,
+                buyerId: invoiceData.fk_buyer_id,
+                locationId: invoiceData.fk_location_id,
+                lineItemsCount: invoiceData.line_items?.length || 0
+            };
+            throw enhancedError;
         } finally {
             client.release();
         }
@@ -183,16 +218,25 @@ class InternalInvoiceService {
             }
         }
         
-        // Get invoice location for standing discount check
-        const invoiceResult = await client.query(
-            'SELECT fk_location_id FROM "ORDERS-invoices" WHERE id = $1', [invoiceId]
-        );
-        const locationId = invoiceResult.rows[0].fk_location_id;
-        
-        // Check for standing discount
-        const standingDiscount = await discountService.getApplicableStandingDiscount(
-            locationId, b.fk_master_product_id, client
-        );
+            // Get invoice location for standing discount check
+            console.log(`  🔍 Fetching invoice location...`);
+            const invoiceResult = await client.query(
+                'SELECT fk_location_id FROM "ORDERS-invoices" WHERE id = $1', [invoiceId]
+            );
+            
+            if (invoiceResult.rows.length === 0) {
+                throw new Error(`Invoice not found: invoice_id=${invoiceId}`);
+            }
+            
+            const locationId = invoiceResult.rows[0].fk_location_id;
+            console.log(`  ✅ Location ID: ${locationId}`);
+            
+            // Check for standing discount
+            console.log(`  🔍 Checking standing discount for location ${locationId}, product ${b.fk_master_product_id}...`);
+            const standingDiscount = await discountService.getApplicableStandingDiscount(
+                locationId, b.fk_master_product_id, client
+            );
+            console.log(`  ✅ Standing discount check complete`);
         
         let unitPrice = parseFloat(b.unit_price);
         let lineTotal = unitPrice * itemData.quantity;

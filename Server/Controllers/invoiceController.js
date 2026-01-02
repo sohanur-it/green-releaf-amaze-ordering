@@ -1341,6 +1341,14 @@ class InvoiceController {
             
             const internalInvoiceService = require('../Services/internalInvoiceService');
             
+            console.log('📝 Creating internal invoice:', {
+                userId,
+                buyer_id,
+                location_id,
+                line_items_count: line_items.length,
+                targetStatus
+            });
+            
             const result = await internalInvoiceService.createInvoice(userId, {
                 fk_buyer_id: parseInt(buyer_id),
                 fk_location_id: parseInt(location_id),
@@ -1405,11 +1413,39 @@ class InvoiceController {
                 console.error('WebSocket broadcast error (internal invoice create):', wsError.message);
             }
         } catch (error) {
-            console.error('Error creating internal invoice:', error);
+            console.error('❌ Error in createInternalInvoice controller:');
+            console.error('  - Error message:', error.message);
+            console.error('  - Error stack:', error.stack);
+            if (error.originalError) {
+                console.error('  - Original error:', error.originalError.message);
+            }
+            if (error.context) {
+                console.error('  - Context:', error.context);
+            }
+            
+            // Extract user-friendly error message
+            let errorMessage = error.message || 'Failed to create invoice';
+            let errorDetails = error.message;
+            
+            // Handle specific error types
+            if (error.message && error.message.includes('transaction is aborted')) {
+                errorMessage = 'Database transaction error occurred';
+                errorDetails = 'A database error occurred during invoice creation. Please try again.';
+            } else if (error.message && error.message.includes('Insufficient inventory')) {
+                errorMessage = 'Insufficient inventory';
+                errorDetails = error.message;
+            } else if (error.message && error.message.includes('Batch not found')) {
+                errorMessage = 'Batch not found';
+                errorDetails = error.message;
+            } else if (error.message && error.message.includes('not authorized')) {
+                errorMessage = 'Authorization failed';
+                errorDetails = error.message;
+            }
+            
             res.status(500).json({
                 success: false,
-                error: 'Failed to create invoice',
-                details: error.message
+                error: errorMessage,
+                details: errorDetails
             });
         }
     }
