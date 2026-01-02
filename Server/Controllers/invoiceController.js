@@ -857,7 +857,10 @@ class InvoiceController {
                         const batchData = batch.rows[0];
                         const available = batchData.quantity - batchData.allocated_quantity;
                         
-                        if (batchData.status !== 'Sellable') {
+                        // Only check batch status for external invoices
+                        // Internal invoices can access any batch regardless of status
+                        // Status is only used as a marker for external portal behavior
+                        if (origInvoice.source === 'External' && batchData.status !== 'Sellable') {
                             allocationFailures.push({
                                 batch_id: item.fk_batch_id,
                                 product_id: item.fk_master_product_id,
@@ -1079,13 +1082,29 @@ class InvoiceController {
      */
     async getProductsForLocation(req, res) {
         try {
-            const { location_id, search } = req.query;
+            const { location_id, search, source = 'Internal', invoice_id } = req.query;
             
             if (!location_id) {
                 return res.status(400).json({ success: false, error: 'location_id is required' });
             }
             
-            // Get products with available sellable batches
+            // Determine invoice source - for internal invoices, show all products regardless of batch status
+            // Status is only used as a marker for external portal behavior
+            let invoiceSource = source;
+            if (invoice_id) {
+                const invoiceCheck = await query(`
+                    SELECT source FROM "ORDERS-invoices" WHERE id = $1
+                `, [invoice_id]);
+                if (invoiceCheck.rows.length > 0) {
+                    invoiceSource = invoiceCheck.rows[0].source || 'Internal';
+                }
+            }
+            
+            // For internal invoices, show ALL products with batches (regardless of status)
+            // For external invoices, only show products with sellable batches
+            // Status is only used as a marker for external portal behavior
+            
+            // Get products with available batches
             // Note: Products aren't location-specific, but we verify the location exists
             let queryStr = `
                 SELECT DISTINCT
@@ -1099,10 +1118,14 @@ class InvoiceController {
                     p.cultivar_type_name
                 FROM "ORDERS-products" p
                 INNER JOIN "ORDERS-batches" b ON p.entry_id = b.fk_master_product_id
-                WHERE b.status = 'Sellable'
-                  AND (b.quantity - COALESCE(b.allocated_quantity, 0)) > 0
+                WHERE (b.quantity - COALESCE(b.allocated_quantity, 0)) > 0
                   AND b.full_package_count > 0
             `;
+            
+            // Only filter by status for external invoices
+            if (invoiceSource === 'External') {
+                queryStr += ` AND b.status = 'Sellable'`;
+            }
             
             const params = [];
             let paramIndex = 1;
@@ -1160,6 +1183,27 @@ class InvoiceController {
             // 3. "Refresh from METRC" button on product details page (manual single product refresh)
             // This prevents slow API responses on every request
             
+            // Get invoice source from query parameter (defaults to 'Internal' for admin interface)
+            // If invoice_id is provided, look up the invoice source
+            let invoiceSource = req.query.source || 'Internal';
+            if (req.query.invoice_id) {
+                const invoiceCheck = await query(`
+                    SELECT source FROM "ORDERS-invoices" WHERE id = $1
+                `, [req.query.invoice_id]);
+                if (invoiceCheck.rows.length > 0) {
+                    invoiceSource = invoiceCheck.rows[0].source || 'Internal';
+                }
+            }
+            
+            // For internal invoices, show ALL batches regardless of status
+            // Status is only used as a marker for external portal behavior
+            // For external invoices, only show 'Sellable' batches
+            const params = [productId];
+            let statusCondition = '';
+            if (invoiceSource === 'External') {
+                statusCondition = 'AND b.status = \'Sellable\'';
+            }
+            
             const batches = await query(`
                 SELECT 
                     b.id,
@@ -1174,10 +1218,10 @@ class InvoiceController {
                 FROM "ORDERS-batches" b
                 INNER JOIN "ORDERS-products" p ON b.fk_master_product_id = p.entry_id
                 WHERE b.fk_master_product_id = $1
-                  AND b.status = 'Sellable'
+                  ${statusCondition}
                   AND (b.quantity - b.allocated_quantity) > 0
                 ORDER BY b.created_at DESC
-            `, [productId]);
+            `, params);
             
             res.json({
                 success: true,

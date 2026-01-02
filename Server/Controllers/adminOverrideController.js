@@ -19,7 +19,7 @@ class AdminOverrideController {
                 metrc_manifest_numbers, 
                 transportation_details,
                 fulfillment_accepted_at,
-                fulfillment_issue_requested_at,
+                fulfillment_issue_reported_at,
                 manifest_created_at,
                 reason,
                 approval_ticket_number
@@ -66,7 +66,7 @@ class AdminOverrideController {
                     metrc_manifest_numbers,
                     transportation_details,
                     fulfillment_accepted_at,
-                    fulfillment_issue_requested_at,
+                    fulfillment_issue_reported_at,
                     manifest_created_at
                 },
                 reason: reason.trim(),

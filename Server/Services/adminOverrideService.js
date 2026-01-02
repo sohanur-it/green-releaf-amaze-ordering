@@ -21,7 +21,7 @@ class AdminOverrideService {
                     metrc_manifest_numbers,
                     transportation_details,
                     fulfillment_accepted_at,
-                    fulfillment_issue_requested_at,
+                    fulfillment_issue_reported_at,
                     manifest_created_at
                 FROM "ORDERS-invoices"
                 WHERE id = $1
@@ -81,10 +81,10 @@ class AdminOverrideService {
                 changes.fulfillment_accepted_at = { from: current.fulfillment_accepted_at, to: fields.fulfillment_accepted_at };
             }
 
-            if (fields.fulfillment_issue_requested_at !== undefined) {
-                updates.push(`fulfillment_issue_requested_at = $${paramCount++}`);
-                updateParams.push(fields.fulfillment_issue_requested_at || null);
-                changes.fulfillment_issue_requested_at = { from: current.fulfillment_issue_requested_at, to: fields.fulfillment_issue_requested_at };
+            if (fields.fulfillment_issue_reported_at !== undefined) {
+                updates.push(`fulfillment_issue_reported_at = $${paramCount++}`);
+                updateParams.push(fields.fulfillment_issue_reported_at || null);
+                changes.fulfillment_issue_reported_at = { from: current.fulfillment_issue_reported_at, to: fields.fulfillment_issue_reported_at };
             }
 
             if (fields.manifest_created_at !== undefined) {
@@ -485,7 +485,7 @@ class AdminOverrideService {
                     metrc_manifest_numbers,
                     transportation_details,
                     fulfillment_accepted_at,
-                    fulfillment_issue_requested_at,
+                    fulfillment_issue_reported_at,
                     manifest_created_at
                 FROM "ORDERS-invoices"
                 WHERE id = $1

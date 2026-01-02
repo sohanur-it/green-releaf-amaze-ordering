@@ -268,6 +268,7 @@ app.use('/api/v1/swagger/sync', adminSyncRoutes); // admin sync API routes with 
 app.use('/api/v1/manifests', manifestRoutes); // manifest creation API routes
 app.use('/api/v1/admin/users', userManagementRoutes); // user management API routes
 app.use('/api/v1/admin/audit-logs', auditLogRoutes); // audit log API routes
+app.use('/api/v1/admin', adminRoutes); // Admin API routes (including override routes)
 app.use('/api/batches', batchRoutes); // batch status management API routes
 app.use('/api/v1', module3Routes); // Module 3: Product & Inventory Management API routes
 app.use('/api/v1/invoices', invoiceRoutes); // Module 4: Invoice management API routes

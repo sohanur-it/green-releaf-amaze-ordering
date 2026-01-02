@@ -2791,11 +2791,15 @@ function openAdminOverrideModal() {
     const modal = document.getElementById('admin-override-modal');
     if (!modal) {
         createAdminOverrideModal();
-        document.getElementById('admin-override-modal').style.display = 'flex';
+        // Wait for modal to be fully created before loading preview
+        setTimeout(() => {
+            document.getElementById('admin-override-modal').style.display = 'flex';
+            loadInvoicePreview();
+        }, 100);
     } else {
         modal.style.display = 'flex';
+        loadInvoicePreview();
     }
-    loadInvoicePreview();
 }
 
 function createAdminOverrideModal() {
@@ -2852,7 +2856,7 @@ function createAdminOverrideModal() {
                 </div>
                 
                 <div style="margin-bottom: 1rem;">
-                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Fulfillment Issue Requested At</label>
+                    <label style="display: block; margin-bottom: 0.5rem; font-weight: 600;">Fulfillment Issue Reported At</label>
                     <input type="datetime-local" id="override-fulfillment-issue" class="form-control" style="width: 100%; padding: 0.5rem;">
                 </div>
                 
@@ -2884,7 +2888,13 @@ function createAdminOverrideModal() {
     
     document.body.appendChild(modal);
     
-    document.getElementById('admin-override-form').addEventListener('submit', handleAdminOverride);
+    // Wait for DOM to be ready before attaching event listeners
+    setTimeout(() => {
+        const form = document.getElementById('admin-override-form');
+        if (form) {
+            form.addEventListener('submit', handleAdminOverride);
+        }
+    }, 50);
     
     modal.addEventListener('click', (e) => {
         if (e.target === modal) {
@@ -2902,39 +2912,68 @@ function closeAdminOverrideModal() {
 
 async function loadInvoicePreview() {
     try {
+        console.log('Loading invoice preview for invoice:', invoiceId);
         const response = await fetch(`/api/v1/admin/override/invoice/${invoiceId}/preview`);
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+            console.error('API error:', response.status, errorData);
+            alert('Error loading invoice data: ' + (errorData.error || errorData.message || 'Unknown error'));
+            return;
+        }
+        
         const data = await response.json();
+        console.log('API response:', data);
         
         if (data.success && data.invoice) {
             const inv = data.invoice;
+            console.log('Invoice data:', inv);
             
             // Populate current values
-            if (inv.status) {
-                document.getElementById('override-status').value = inv.status;
+            const statusEl = document.getElementById('override-status');
+            if (statusEl && inv.status) {
+                statusEl.value = inv.status;
             }
-            if (inv.metrc_manifest_numbers) {
+            
+            const manifestNumsEl = document.getElementById('override-manifest-numbers');
+            if (manifestNumsEl && inv.metrc_manifest_numbers) {
                 const manifestNums = Array.isArray(inv.metrc_manifest_numbers) 
                     ? inv.metrc_manifest_numbers 
                     : JSON.parse(inv.metrc_manifest_numbers || '[]');
-                document.getElementById('override-manifest-numbers').value = JSON.stringify(manifestNums, null, 2);
+                manifestNumsEl.value = JSON.stringify(manifestNums, null, 2);
             }
-            if (inv.transportation_details) {
+            
+            const transportationEl = document.getElementById('override-transportation');
+            if (transportationEl && inv.transportation_details) {
                 const trans = typeof inv.transportation_details === 'string'
                     ? JSON.parse(inv.transportation_details)
                     : inv.transportation_details;
-                document.getElementById('override-transportation').value = JSON.stringify(trans, null, 2);
+                transportationEl.value = JSON.stringify(trans, null, 2);
             }
-            if (inv.fulfillment_accepted_at) {
+            
+            const fulfillmentAcceptedEl = document.getElementById('override-fulfillment-accepted');
+            if (fulfillmentAcceptedEl && inv.fulfillment_accepted_at) {
                 const date = new Date(inv.fulfillment_accepted_at);
-                document.getElementById('override-fulfillment-accepted').value = date.toISOString().slice(0, 16);
+                fulfillmentAcceptedEl.value = date.toISOString().slice(0, 16);
             }
-            if (inv.fulfillment_issue_requested_at) {
-                const date = new Date(inv.fulfillment_issue_requested_at);
-                document.getElementById('override-fulfillment-issue').value = date.toISOString().slice(0, 16);
+            
+            const fulfillmentIssueEl = document.getElementById('override-fulfillment-issue');
+            if (fulfillmentIssueEl && inv.fulfillment_issue_reported_at) {
+                const date = new Date(inv.fulfillment_issue_reported_at);
+                fulfillmentIssueEl.value = date.toISOString().slice(0, 16);
             }
-            if (inv.manifest_created_at) {
+            
+            const manifestCreatedEl = document.getElementById('override-manifest-created');
+            if (manifestCreatedEl && inv.manifest_created_at) {
                 const date = new Date(inv.manifest_created_at);
-                document.getElementById('override-manifest-created').value = date.toISOString().slice(0, 16);
+                manifestCreatedEl.value = date.toISOString().slice(0, 16);
+            }
+            
+            console.log('Invoice preview loaded successfully');
+        } else {
+            console.warn('API returned success but no invoice data:', data);
+            if (data.error) {
+                alert('Error: ' + data.error);
             }
         }
     } catch (error) {
@@ -2996,7 +3035,7 @@ async function handleAdminOverride(e) {
                 metrc_manifest_numbers: parsedManifestNumbers,
                 transportation_details: parsedTransportation,
                 fulfillment_accepted_at: fulfillmentAccepted || null,
-                fulfillment_issue_requested_at: fulfillmentIssue || null,
+                fulfillment_issue_reported_at: fulfillmentIssue || null,
                 manifest_created_at: manifestCreated || null,
                 reason: reason,
                 approval_ticket_number: ticketNumber
