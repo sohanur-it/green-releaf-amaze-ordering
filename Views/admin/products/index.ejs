@@ -171,6 +171,7 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    position: relative;
 }
 
 .search-toggle-btn {
@@ -198,13 +199,25 @@
 }
 
 .search-input-container {
-    display: none;
+    display: none !important;
     position: relative;
     max-width: 300px;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
 }
 
 .search-input-container.active {
-    display: block;
+    display: flex !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    width: 300px !important;
+    min-width: 200px !important;
+    height: auto !important;
+    min-height: 38px !important;
+    position: relative !important;
+    z-index: 10 !important;
+    flex-shrink: 0 !important;
 }
 
 #searchProducts {
@@ -221,6 +234,288 @@
     outline: none;
 }
 </style>
+
+<script>
+// Define toggleSearch function IMMEDIATELY so it's available for inline onclick
+window.toggleSearch = function() {
+    console.log('🔧 toggleSearch() function CALLED');
+    const btn = document.getElementById('searchToggleBtn');
+    const container = document.getElementById('searchInputContainer');
+    const input = document.getElementById('searchProducts');
+    
+    if (!btn) {
+        console.error('❌ Search button not found');
+        return;
+    }
+    
+    if (!container) {
+        console.error('❌ Search container not found');
+        return;
+    }
+    
+    if (!input) {
+        console.error('❌ Search input not found');
+        return;
+    }
+    
+    // Check both class and computed style to determine actual visibility
+    const hasActiveClass = container.classList.contains('active');
+    const computedStyle = window.getComputedStyle(container);
+    // Check actual rendered dimensions - if width/height are 0, it's not visible
+    const offsetWidth = container.offsetWidth;
+    const offsetHeight = container.offsetHeight;
+    const isActuallyVisible = computedStyle.display !== 'none' && 
+                              computedStyle.visibility !== 'hidden' && 
+                              parseFloat(computedStyle.opacity) > 0 &&
+                              offsetWidth > 0 &&
+                              offsetHeight > 0;
+    
+    console.log('🔧 Current state:', {
+        hasActiveClass: hasActiveClass,
+        isActuallyVisible: isActuallyVisible,
+        computedDisplay: computedStyle.display,
+        computedVisibility: computedStyle.visibility,
+        computedOpacity: computedStyle.opacity,
+        computedWidth: computedStyle.width,
+        computedHeight: computedStyle.height,
+        offsetWidth: offsetWidth,
+        offsetHeight: offsetHeight,
+        clientWidth: container.clientWidth,
+        clientHeight: container.clientHeight
+    });
+    
+    // If it has active class but isn't actually visible (or has zero dimensions), force it to show
+    if (hasActiveClass && (!isActuallyVisible || offsetWidth === 0 || offsetHeight === 0)) {
+        console.log('⚠️ Container has active class but is not visible - forcing visibility');
+        container.classList.add('active'); // Ensure active class
+        btn.classList.add('active');
+        container.style.setProperty('display', 'flex', 'important');
+        container.style.setProperty('opacity', '1', 'important');
+        container.style.setProperty('visibility', 'visible', 'important');
+        container.style.setProperty('max-width', '300px', 'important');
+        container.style.setProperty('width', '300px', 'important');
+        container.style.setProperty('min-width', '200px', 'important');
+        container.style.setProperty('height', 'auto', 'important');
+        container.style.setProperty('min-height', '38px', 'important');
+        // Ensure input is also visible
+        if (input) {
+            input.style.setProperty('display', 'block', 'important');
+            input.style.setProperty('width', '100%', 'important');
+            input.style.setProperty('opacity', '1', 'important');
+            input.style.setProperty('visibility', 'visible', 'important');
+        }
+        setTimeout(() => {
+            try {
+                input.focus();
+                console.log('✅ Search FORCED visible and focused');
+            } catch (e) {
+                console.error('Error focusing input:', e);
+            }
+        }, 50);
+        return;
+    }
+    
+    if (hasActiveClass && isActuallyVisible) {
+        // Hide search
+        console.log('🔧 HIDING search...');
+        container.classList.remove('active');
+        btn.classList.remove('active');
+        input.value = '';
+        container.style.display = 'none';
+        container.style.opacity = '0';
+        container.style.visibility = 'hidden';
+        if (typeof applyFilters === 'function') {
+            applyFilters();
+        }
+        console.log('✅ Search HIDDEN');
+    } else {
+        // Show search
+        console.log('🔧 SHOWING search...');
+        container.classList.add('active');
+        btn.classList.add('active');
+        // Use setProperty with important to ensure it stays visible
+        container.style.setProperty('display', 'flex', 'important');
+        container.style.setProperty('opacity', '1', 'important');
+        container.style.setProperty('visibility', 'visible', 'important');
+        container.style.setProperty('max-width', '300px', 'important');
+        container.style.setProperty('width', '300px', 'important');
+        container.style.setProperty('min-width', '200px', 'important');
+        container.style.setProperty('height', 'auto', 'important');
+        container.style.setProperty('min-height', '38px', 'important');
+        // Ensure input is also visible
+        if (input) {
+            input.style.setProperty('display', 'block', 'important');
+            input.style.setProperty('width', '100%', 'important');
+            input.style.setProperty('opacity', '1', 'important');
+            input.style.setProperty('visibility', 'visible', 'important');
+        }
+        setTimeout(() => {
+            try {
+                input.focus();
+                console.log('✅ Search SHOWN and focused');
+                // Double-check it's still visible after focus
+                if (!container.classList.contains('active')) {
+                    console.warn('⚠️ Search container lost active class, re-adding...');
+                    container.classList.add('active');
+                    container.style.setProperty('display', 'flex', 'important');
+                }
+                // Verify it's actually visible
+                const computedStyle = window.getComputedStyle(container);
+                const inputComputedStyle = input ? window.getComputedStyle(input) : null;
+                // Check parent visibility too
+                const parent = container.parentElement;
+                const parentStyle = parent ? window.getComputedStyle(parent) : null;
+                
+                console.log('🔍 Container visibility check:', {
+                    containerDisplay: computedStyle.display,
+                    containerOpacity: computedStyle.opacity,
+                    containerVisibility: computedStyle.visibility,
+                    containerWidth: computedStyle.width,
+                    containerHeight: computedStyle.height,
+                    containerPosition: computedStyle.position,
+                    containerTop: computedStyle.top,
+                    containerLeft: computedStyle.left,
+                    containerZIndex: computedStyle.zIndex,
+                    inputDisplay: inputComputedStyle ? inputComputedStyle.display : 'N/A',
+                    inputWidth: inputComputedStyle ? inputComputedStyle.width : 'N/A',
+                    inputHeight: inputComputedStyle ? inputComputedStyle.height : 'N/A',
+                    hasActive: container.classList.contains('active'),
+                    parentDisplay: parentStyle ? parentStyle.display : 'N/A',
+                    parentVisibility: parentStyle ? parentStyle.visibility : 'N/A',
+                    parentOpacity: parentStyle ? parentStyle.opacity : 'N/A',
+                    containerOffsetWidth: container.offsetWidth,
+                    containerOffsetHeight: container.offsetHeight,
+                    containerClientWidth: container.clientWidth,
+                    containerClientHeight: container.clientHeight
+                });
+                if (computedStyle.display === 'none') {
+                    console.warn('⚠️ Search container hidden after focus - forcing visible again');
+                    container.style.setProperty('display', 'flex', 'important');
+                }
+            } catch (e) {
+                console.error('Error focusing input:', e);
+            }
+        }, 50);
+    }
+};
+
+// Define applyFilters function globally (before DOMContentLoaded)
+window.applyFilters = function() {
+    console.log('🔍 applyFilters() CALLED - This is FRONTEND filtering (no API call)');
+    
+    // Check if allProducts is populated
+    if (!allProducts || allProducts.length === 0) {
+        console.warn('⚠️ allProducts not populated yet, skipping filter');
+        return;
+    }
+    
+    const categoryFilter = document.getElementById('filterCategory')?.value || '';
+    const linkedStatusFilter = document.getElementById('filterLinkedStatus')?.value || '';
+    const batchesFilter = document.getElementById('filterBatches')?.value || '';
+    const sortBy = document.getElementById('sortBy')?.value || 'created-desc';
+    const searchInput = document.getElementById('searchProducts');
+    const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
+    
+    console.log('🔍 Filter params:', {
+        searchTerm: searchTerm,
+        categoryFilter: categoryFilter,
+        allProductsCount: allProducts.length
+    });
+
+    let visibleCount = 0;
+
+    // Filter products
+    allProducts.forEach(product => {
+        let visible = true;
+
+        // Card filter (stats card click)
+        if (currentFilter === 'has-batches') {
+            visible = visible && product.hasBatches;
+        } else if (currentFilter === 'has-linked-items') {
+            visible = visible && product.linkedItems > 0;
+        } else if (currentFilter === 'no-linked-items') {
+            visible = visible && product.linkedItems === 0;
+        }
+
+        // Category filter
+        if (categoryFilter && product.category !== categoryFilter) {
+            visible = false;
+        }
+
+        // Linked status filter
+        if (linkedStatusFilter === 'linked' && product.linkedItems === 0) {
+            visible = false;
+        } else if (linkedStatusFilter === 'unlinked' && product.linkedItems > 0) {
+            visible = false;
+        }
+
+        // Batches filter
+        if (batchesFilter === 'yes' && !product.hasBatches) {
+            visible = false;
+        } else if (batchesFilter === 'no' && product.hasBatches) {
+            visible = false;
+        }
+
+        // Search filter - search in product name, brand, category, etc.
+        if (searchTerm) {
+            const productText = (product.element.textContent || '').toLowerCase();
+            const productName = (product.name || '').toLowerCase();
+            const productCategory = (product.category || '').toLowerCase();
+            
+            // Search in multiple fields
+            const matchesSearch = 
+                productText.includes(searchTerm) || 
+                productName.includes(searchTerm) ||
+                productCategory.includes(searchTerm);
+            
+            if (!matchesSearch) {
+                visible = false;
+            }
+        }
+
+        // Show/hide row
+        product.element.style.display = visible ? '' : 'none';
+        if (visible) visibleCount++;
+    });
+
+    console.log('🔍 Filter results: visibleCount =', visibleCount, 'out of', allProducts.length);
+
+    // Sort visible products
+    if (typeof sortProducts === 'function') {
+        sortProducts(sortBy);
+    }
+
+    // Update count
+    const countElement = document.getElementById('filteredCount');
+    if (countElement) {
+        countElement.textContent = visibleCount;
+    }
+};
+
+// Define clearFilters function globally
+window.clearFilters = function() {
+    console.log('🔍 clearFilters() CALLED');
+    // Reset all filters
+    const categorySelect = document.getElementById('filterCategory');
+    const linkedStatusSelect = document.getElementById('filterLinkedStatus');
+    const batchesSelect = document.getElementById('filterBatches');
+    const sortSelect = document.getElementById('sortBy');
+    const searchInput = document.getElementById('searchProducts');
+    
+    if (categorySelect) categorySelect.value = '';
+    if (linkedStatusSelect) linkedStatusSelect.value = '';
+    if (batchesSelect) batchesSelect.value = '';
+    if (sortSelect) sortSelect.value = 'created-desc';
+    if (searchInput) searchInput.value = '';
+    
+    // Remove active from cards
+    document.querySelectorAll('.stats-card').forEach(c => c.classList.remove('active'));
+    currentFilter = 'all';
+    
+    // Apply filters (which will reset everything)
+    applyFilters();
+};
+</script>
 
 <div class="container-fluid p-4">
     <% 
@@ -346,7 +641,7 @@
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h5 class="mb-0">All Products (<span id="filteredCount"><%= totalProducts %></span>)</h5>
                 <div class="search-toggle-container">
-                    <button class="search-toggle-btn" id="searchToggleBtn" onclick="toggleSearch()">
+                    <button class="search-toggle-btn" id="searchToggleBtn" type="button" onclick="toggleSearch(); return false;">
                         <i class="fas fa-search"></i>
                         <span>Search</span>
                     </button>
@@ -372,18 +667,24 @@
                     </thead>
                     <tbody id="productsTableBody">
                         <% products.forEach(product => { %>
+                            <% 
+                            // Escape all product data to prevent syntax errors
+                            const safeName = String(product.name || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\n/g, ' ').replace(/\r/g, '').replace(/\\/g, '');
+                            const safeCategory = String(product.category_name || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\n/g, ' ').replace(/\r/g, '').replace(/\\/g, '');
+                            const safeCreatedAt = String(product.created_at || '').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\n/g, ' ').replace(/\r/g, '').replace(/\\/g, '');
+                            %>
                             <tr data-product-id="<%= product.entry_id %>"
-                                data-category="<%= product.category_name || '' %>"
+                                data-category="<%= safeCategory %>"
                                 data-linked-items="<%= (product.metrc_linked_items || []).length %>"
                                 data-has-batches="<%= (parseInt(product.batch_count) || 0) > 0 ? 'yes' : 'no' %>"
-                                data-created-at="<%= product.created_at || '' %>"
+                                data-created-at="<%= safeCreatedAt %>"
                                 data-price="<%= product.default_price || 0 %>"
-                                data-name="<%= product.name.toLowerCase() %>"
+                                data-name="<%= safeName.toLowerCase() %>"
                                 data-batches="<%= product.batch_count || 0 %>">
                                 <td>
                                     <% if (product.primary_image_url) { %>
-                                        <img src="<%= product.primary_image_url %>" 
-                                             alt="<%= product.name %>" 
+                                        <img src="<%= String(product.primary_image_url || '').replace(/"/g, '&quot;') %>" 
+                                             alt="<%= String(product.name || '').replace(/"/g, '&quot;') %>" 
                                              class="product-thumbnail"
                                              onerror="this.onerror=null; this.src='/public/images/placeholder.jpg';">
                                     <% } else { %>
@@ -396,7 +697,7 @@
                                 <td>
                                     <div>
                                         <div class="fw-bold">
-                                            <%= product.name %>
+                                            <%- (product.name || '').replace(/</g, '&lt;').replace(/>/g, '&gt;') %>
                                             <% if (product.is_archived) { %>
                                                 <span class="badge bg-warning text-dark ms-2">
                                                     <i class="fas fa-archive"></i> ARCHIVED
@@ -448,184 +749,28 @@
 </div>
 
 <script>
+// Escape function for HTML attributes to prevent syntax errors
+function escapeHtmlAttr(str) {
+    if (!str) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/\n/g, ' ')
+        .replace(/\r/g, '')
+        .replace(/\\/g, '\\\\');
+}
+
 // Refresh batches for all products with linked METRC items
 // DISABLED: Use scheduled sync jobs or individual product refresh buttons instead
 async function refreshAllProductBatches() {
     alert('Batch refresh for all products has been disabled. Please use:\n1. Scheduled sync jobs (automatic)\n2. "Refresh from METRC" button on individual product pages');
     return;
-    
-    // Original code below is disabled
-    /*
-    const btn = document.getElementById('refreshAllBatchesBtn');
-    if (!btn) return;
-    
-    const originalHtml = btn.innerHTML;
-    btn.disabled = true;
-    
-    // Create progress modal
-    const progressModal = createProgressModal();
-    document.body.appendChild(progressModal);
-    let modal;
-    try {
-        modal = new bootstrap.Modal(progressModal);
-        modal.show();
-    } catch (e) {
-        // Fallback if bootstrap not available
-        progressModal.style.display = 'block';
-        progressModal.classList.add('show');
-    }
-    
-    const progressText = progressModal.querySelector('#progressText');
-    const progressBar = progressModal.querySelector('#progressBar');
-    const batchesCount = progressModal.querySelector('#batchesCount');
-    
-    // Update UI immediately
-    progressText.textContent = 'Starting refresh...';
-    progressBar.style.width = '0%';
-    batchesCount.textContent = '0 batches';
-    
-    let totalBatchesRefreshed = 0;
-    let productsProcessed = 0;
-    let totalProducts = 0;
-    let ws = null;
-    let wsConnected = false;
-    
-    // Try to connect to WebSocket for real-time updates
-    try {
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsHost = window.location.hostname;
-        const wsPort = '8080';
-        ws = new WebSocket(`${wsProtocol}//${wsHost}:${wsPort}`);
-        
-        ws.onopen = () => {
-            console.log('✅ WebSocket connected for batch refresh progress');
-            wsConnected = true;
-        };
-        
-        ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                console.log('📨 WebSocket message received:', data);
-                if (data.type === 'batch_refresh_progress') {
-                    updateProgressUI(data, progressText, progressBar, batchesCount, modal, progressModal, ws);
-                }
-            } catch (err) {
-                console.error('Error parsing WebSocket message:', err);
-            }
-        };
-        
-        ws.onerror = (error) => {
-            console.warn('⚠️ WebSocket error (will use polling fallback):', error);
-            wsConnected = false;
-        };
-        
-        ws.onclose = () => {
-            console.log('WebSocket closed');
-            wsConnected = false;
-        };
-    } catch (err) {
-        console.warn('⚠️ WebSocket not available, using polling fallback:', err);
-        wsConnected = false;
-    }
-    
-    // Make API call - but update UI based on response data directly
-    try {
-        const response = await fetch('/api/v1/products/refresh-all-batches', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include'
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        console.log('📊 API response:', data);
-        
-        // Update UI directly from API response
-        console.log('📊 Processing API response:', data);
-        
-        if (data.success) {
-            const totalProducts = data.products_processed || data.results?.length || 0;
-            const totalBatches = data.total_batches_refreshed || 0;
-            
-            console.log(`📊 Total products: ${totalProducts}, Total batches: ${totalBatches}`);
-            
-            // If we have results array, show progress for each product
-            if (data.results && Array.isArray(data.results) && data.results.length > 0) {
-                let currentIndex = 0;
-                let cumulativeBatches = 0;
-                
-                // Update initial state
-                progressText.textContent = `Starting refresh for ${totalProducts} products...`;
-                progressBar.style.width = '0%';
-                batchesCount.textContent = '0 batches';
-                
-                const updateInterval = setInterval(() => {
-                    if (currentIndex < data.results.length) {
-                        const product = data.results[currentIndex];
-                        const productsProcessed = currentIndex + 1;
-                        const progress = Math.round((productsProcessed / totalProducts) * 100);
-                        
-                        // Add batches for this product
-                        cumulativeBatches += (product.batches_refreshed || 0);
-                        
-                        // Update progress bar
-                        progressBar.style.width = `${progress}%`;
-                        progressBar.setAttribute('aria-valuenow', progress);
-                        
-                        // Update batch count - THIS IS THE KEY FIX
-                        batchesCount.textContent = `${cumulativeBatches} batches`;
-                        console.log(`📊 UI Update: ${productsProcessed}/${totalProducts} products, ${cumulativeBatches} batches`);
-                        
-                        // Update text
-                        if (product.success) {
-                            progressText.textContent = `✅ Updated ${product.batches_refreshed || 0} batch(es) for ${product.product_name} (${productsProcessed}/${totalProducts} products)`;
-                        } else {
-                            progressText.textContent = `❌ Failed to refresh ${product.product_name}: ${product.error || 'Unknown error'} (${productsProcessed}/${totalProducts} products)`;
-                        }
-                        
-                        currentIndex++;
-                    } else {
-                        clearInterval(updateInterval);
-                        // Final update
-                        progressBar.style.width = '100%';
-                        progressBar.setAttribute('aria-valuenow', 100);
-                        batchesCount.textContent = `${totalBatches} batches`;
-                        progressText.textContent = `Completed! Refreshed ${totalBatches} batches for ${totalProducts} products`;
-                        
-                        // Show completion after a short delay
-                        setTimeout(() => {
-                            handleCompletion(data, modal, progressModal, ws);
-                        }, 1000);
-                    }
-                }, 400); // Update every 400ms to show progress
-            } else {
-                // No results array, just show final count
-                console.log('📊 No results array, showing final count directly');
-                progressBar.style.width = '100%';
-                progressBar.setAttribute('aria-valuenow', 100);
-                batchesCount.textContent = `${totalBatches} batches`;
-                progressText.textContent = `Completed! Refreshed ${totalBatches} batches for ${totalProducts} products`;
-                
-                setTimeout(() => {
-                    handleCompletion(data, modal, progressModal, ws);
-                }, 1500);
-            }
-        } else {
-            handleError(data, modal, progressModal, ws);
-        }
-    } catch (error) {
-        console.error('❌ Error refreshing all batches:', error);
-        handleError({ error: error.message }, modal, progressModal, ws);
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = originalHtml;
-    }
 }
 
-// Update progress UI from WebSocket or polling data
+// Helper functions for batch refresh (currently unused but kept for potential future use)
 function updateProgressUI(data, progressText, progressBar, batchesCount, modal, progressModal, ws) {
     if (data.status === 'started') {
         progressText.textContent = data.message || 'Starting refresh...';
@@ -764,14 +909,225 @@ function createProgressModal() {
 }
 
 // Store all products data for filtering
-let allProducts = [];
+// Store all products data for filtering - make it global
+window.allProducts = [];
 let currentFilter = 'all';
 
+// Toggle search input visibility - define before DOMContentLoaded
+function toggleSearch() {
+    console.log('🔧 toggleSearch() function CALLED');
+    const btn = document.getElementById('searchToggleBtn');
+    const container = document.getElementById('searchInputContainer');
+    const input = document.getElementById('searchProducts');
+    
+    console.log('🔧 Elements check:', {
+        btn: !!btn,
+        container: !!container,
+        input: !!input,
+        btnElement: btn,
+        containerElement: container,
+        inputElement: input
+    });
+    
+    if (!btn) {
+        console.error('❌ Search button not found');
+        alert('Search button not found in DOM');
+        return;
+    }
+    
+    if (!container) {
+        console.error('❌ Search container not found');
+        alert('Search container not found in DOM');
+        return;
+    }
+    
+    if (!input) {
+        console.error('❌ Search input not found');
+        alert('Search input not found in DOM');
+        return;
+    }
+    
+    const isActive = container.classList.contains('active');
+    console.log('🔧 Current state - isActive:', isActive);
+    console.log('🔧 Container classes:', container.className);
+    console.log('🔧 Container style.display:', container.style.display);
+    console.log('🔧 Container computed display:', window.getComputedStyle(container).display);
+    
+    if (isActive) {
+        // Hide search
+        console.log('🔧 HIDING search...');
+        container.classList.remove('active');
+        btn.classList.remove('active');
+        input.value = '';
+        container.style.display = 'none';
+        container.style.opacity = '0';
+        container.style.visibility = 'hidden';
+        if (typeof applyFilters === 'function') {
+            applyFilters(); // Reset filters when closing
+        }
+        console.log('✅ Search HIDDEN');
+    } else {
+        // Show search
+        console.log('🔧 SHOWING search...');
+        container.classList.add('active');
+        btn.classList.add('active');
+        container.style.display = 'block';
+        container.style.opacity = '1';
+        container.style.visibility = 'visible';
+        container.style.maxWidth = '300px';
+        // Small delay to ensure display is set before focusing
+        setTimeout(() => {
+            try {
+                input.focus();
+                console.log('✅ Search SHOWN and focused');
+            } catch (e) {
+                console.error('Error focusing input:', e);
+            }
+        }, 50);
+    }
+}
+
+// Make toggleSearch available globally
+window.toggleSearch = toggleSearch;
+
+// Define applyFilters globally (before DOMContentLoaded)
+window.applyFilters = function() {
+    console.log('🔍 applyFilters() CALLED - This is FRONTEND filtering (no API call)');
+    
+    // Check if allProducts is populated (use window.allProducts to ensure we get the global)
+    const products = window.allProducts || [];
+    if (!products || products.length === 0) {
+        console.warn('⚠️ allProducts not populated yet, skipping filter');
+        return;
+    }
+    
+    const categoryFilter = document.getElementById('filterCategory')?.value || '';
+    const linkedStatusFilter = document.getElementById('filterLinkedStatus')?.value || '';
+    const batchesFilter = document.getElementById('filterBatches')?.value || '';
+    const sortBy = document.getElementById('sortBy')?.value || 'created-desc';
+    const searchInput = document.getElementById('searchProducts');
+    const searchTerm = searchInput ? searchInput.value.toLowerCase().trim() : '';
+    
+    console.log('🔍 Filter params:', {
+        searchTerm: searchTerm,
+        categoryFilter: categoryFilter,
+        allProductsCount: products.length
+    });
+
+    let visibleCount = 0;
+
+    // Filter products
+    products.forEach(product => {
+        let visible = true;
+
+        // Card filter (stats card click)
+        if (currentFilter === 'has-batches') {
+            visible = visible && product.hasBatches;
+        } else if (currentFilter === 'has-linked-items') {
+            visible = visible && product.linkedItems > 0;
+        } else if (currentFilter === 'no-linked-items') {
+            visible = visible && product.linkedItems === 0;
+        }
+
+        // Category filter
+        if (categoryFilter && product.category !== categoryFilter) {
+            visible = false;
+        }
+
+        // Linked status filter
+        if (linkedStatusFilter === 'linked' && product.linkedItems === 0) {
+            visible = false;
+        } else if (linkedStatusFilter === 'unlinked' && product.linkedItems > 0) {
+            visible = false;
+        }
+
+        // Batches filter
+        if (batchesFilter === 'yes' && !product.hasBatches) {
+            visible = false;
+        } else if (batchesFilter === 'no' && product.hasBatches) {
+            visible = false;
+        }
+
+        // Search filter - search in product name, brand, category, etc.
+        if (searchTerm) {
+            const productText = (product.element.textContent || '').toLowerCase();
+            const productName = (product.name || '').toLowerCase();
+            const productCategory = (product.category || '').toLowerCase();
+            
+            // Search in multiple fields
+            const matchesSearch = 
+                productText.includes(searchTerm) || 
+                productName.includes(searchTerm) ||
+                productCategory.includes(searchTerm);
+            
+            if (!matchesSearch) {
+                visible = false;
+            }
+        }
+
+        // Show/hide row
+        product.element.style.display = visible ? '' : 'none';
+        if (visible) visibleCount++;
+    });
+
+    console.log('🔍 Filter results: visibleCount =', visibleCount, 'out of', products.length);
+
+    // Sort visible products
+    if (typeof sortProducts === 'function') {
+        sortProducts(sortBy);
+    }
+
+    // Update count
+    const countElement = document.getElementById('filteredCount');
+    if (countElement) {
+        countElement.textContent = visibleCount;
+    }
+};
+
+// Define clearFilters globally (before DOMContentLoaded)
+window.clearFilters = function() {
+    console.log('🔍 clearFilters() CALLED');
+    // Reset all filters
+    const categorySelect = document.getElementById('filterCategory');
+    const linkedStatusSelect = document.getElementById('filterLinkedStatus');
+    const batchesSelect = document.getElementById('filterBatches');
+    const sortSelect = document.getElementById('sortBy');
+    const searchInput = document.getElementById('searchProducts');
+    
+    if (categorySelect) categorySelect.value = '';
+    if (linkedStatusSelect) linkedStatusSelect.value = '';
+    if (batchesSelect) batchesSelect.value = '';
+    if (sortSelect) sortSelect.value = 'created-desc';
+    if (searchInput) searchInput.value = '';
+    
+    // Remove active from cards
+    document.querySelectorAll('.stats-card').forEach(c => c.classList.remove('active'));
+    currentFilter = 'all';
+    
+    // Apply filters (which will reset everything)
+    if (typeof window.applyFilters === 'function') {
+        window.applyFilters();
+    }
+};
+
+// Define toggleShowArchived globally (before DOMContentLoaded)
+window.toggleShowArchived = function(show) {
+    const url = new URL(window.location);
+    if (show) {
+        url.searchParams.set('show_archived', 'true');
+    } else {
+        url.searchParams.delete('show_archived');
+    }
+    window.location.href = url.toString();
+};
+
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('✅ DOMContentLoaded fired for products page');
+    
     // Store product data
     const rows = document.querySelectorAll('#productsTableBody tr');
     rows.forEach(row => {
-        allProducts.push({
+        window.allProducts.push({
             element: row,
             category: row.dataset.category || '',
             linkedItems: parseInt(row.dataset.linkedItems) || 0,
@@ -813,70 +1169,39 @@ document.addEventListener('DOMContentLoaded', function() {
     // Sort
     document.getElementById('sortBy')?.addEventListener('change', applyFilters);
     
-    // Search
+    // Search toggle button
+    const searchToggleBtn = document.getElementById('searchToggleBtn');
+    if (searchToggleBtn) {
+        console.log('Attaching click listener to search toggle button');
+        searchToggleBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            console.log('Search toggle button clicked');
+            toggleSearch();
+        });
+    } else {
+        console.error('Search toggle button not found');
+    }
+    
+    // Search input
     const searchInput = document.getElementById('searchProducts');
     if (searchInput) {
-        searchInput.addEventListener('input', applyFilters);
+        console.log('✅ Search input found, attaching event listener');
+        searchInput.addEventListener('input', function(e) {
+            console.log('🔍 Search input changed:', e.target.value);
+            applyFilters();
+        });
+        searchInput.addEventListener('keyup', function(e) {
+            console.log('🔍 Search keyup:', e.target.value);
+            applyFilters();
+        });
+    } else {
+        console.error('❌ Search input not found');
     }
 });
 
-function applyFilters() {
-    const categoryFilter = document.getElementById('filterCategory')?.value || '';
-    const linkedStatusFilter = document.getElementById('filterLinkedStatus')?.value || '';
-    const batchesFilter = document.getElementById('filterBatches')?.value || '';
-    const sortBy = document.getElementById('sortBy')?.value || 'created-desc';
-    const searchTerm = document.getElementById('searchProducts')?.value.toLowerCase() || '';
-
-    let visibleCount = 0;
-
-    // Filter products
-    allProducts.forEach(product => {
-        let visible = true;
-
-        // Card filter (stats card click)
-        if (currentFilter === 'has-batches') {
-            visible = visible && product.hasBatches;
-        } else if (currentFilter === 'has-linked-items') {
-            visible = visible && product.linkedItems > 0;
-        } else if (currentFilter === 'no-linked-items') {
-            visible = visible && product.linkedItems === 0;
-        }
-
-        // Category filter
-        if (categoryFilter && product.category !== categoryFilter) {
-            visible = false;
-        }
-
-        // Linked status filter
-        if (linkedStatusFilter === 'linked' && product.linkedItems === 0) {
-            visible = false;
-        } else if (linkedStatusFilter === 'unlinked' && product.linkedItems > 0) {
-            visible = false;
-        }
-
-        // Batches filter
-        if (batchesFilter === 'yes' && !product.hasBatches) {
-            visible = false;
-        } else if (batchesFilter === 'no' && product.hasBatches) {
-            visible = false;
-        }
-
-        // Search filter
-        if (searchTerm && !product.element.textContent.toLowerCase().includes(searchTerm)) {
-            visible = false;
-        }
-
-        // Show/hide row
-        product.element.style.display = visible ? '' : 'none';
-        if (visible) visibleCount++;
-    });
-
-    // Sort visible products
-    sortProducts(sortBy);
-
-    // Update count
-    document.getElementById('filteredCount').textContent = visibleCount;
-}
+// applyFilters and clearFilters are now defined globally above, before DOMContentLoaded
+// These are just references for backwards compatibility
 
 function sortProducts(sortBy) {
     const tbody = document.getElementById('productsTableBody');
@@ -909,21 +1234,7 @@ function sortProducts(sortBy) {
     rows.forEach(row => tbody.appendChild(row));
 }
 
-function clearFilters() {
-    // Reset all filters
-    document.getElementById('filterCategory').value = '';
-    document.getElementById('filterLinkedStatus').value = '';
-    document.getElementById('filterBatches').value = '';
-    document.getElementById('sortBy').value = 'created-desc';
-    document.getElementById('searchProducts').value = '';
-    
-    // Remove active from cards
-    document.querySelectorAll('.stats-card').forEach(c => c.classList.remove('active'));
-    currentFilter = 'all';
-    
-    // Apply filters (which will reset everything)
-    applyFilters();
-}
+// clearFilters is already defined globally above (before DOMContentLoaded)
 
 // Toggle show archived products
 function toggleShowArchived(show) {
@@ -936,25 +1247,7 @@ function toggleShowArchived(show) {
     window.location.href = url.toString();
 }
 
-// Toggle search input
-function toggleSearch() {
-    const btn = document.getElementById('searchToggleBtn');
-    const container = document.getElementById('searchInputContainer');
-    const input = document.getElementById('searchProducts');
-    
-    if (container.classList.contains('active')) {
-        // Hide search
-        container.classList.remove('active');
-        btn.classList.remove('active');
-        input.value = '';
-        applyFilters(); // Reset filters when closing
-    } else {
-        // Show search
-        container.classList.add('active');
-        btn.classList.add('active');
-        input.focus();
-    }
-}
+// toggleSearch function is defined above, before DOMContentLoaded
 
 // Initial filter setup
 document.addEventListener('DOMContentLoaded', function() {
