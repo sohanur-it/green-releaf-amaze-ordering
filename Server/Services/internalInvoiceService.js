@@ -99,21 +99,9 @@ class InternalInvoiceService {
             // Calculate totals
             await this.recalculateTotals(invoiceId, client);
             
-            // Validate purchase limits (Module 4 requirement)
-            // Internal orders also need limit validation, though they rarely hit limits
-            try {
-                const purchaseLimitService = require('./purchaseLimitService');
-                await purchaseLimitService.validatePurchaseLimits(invoiceId, client);
-            } catch (limitError) {
-                // If purchase limits are exceeded, rollback and return clear error
-                if (limitError.violations) {
-                    const errorMessages = limitError.violations.map(v => v.message).join('; ');
-                    await client.query('ROLLBACK');
-                    throw new Error(`Purchase limit validation failed: ${errorMessages}`);
-                }
-                // Re-throw if it's not a PurchaseLimitError
-                throw limitError;
-            }
+            // Purchase limit validation is skipped for internal invoices
+            // Purchase limits are only enforced for external portal orders
+            // The validation service will check the invoice source and skip validation for internal invoices
             
             // Log history
             await client.query(`

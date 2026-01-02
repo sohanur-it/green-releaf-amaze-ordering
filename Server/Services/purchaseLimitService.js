@@ -22,15 +22,22 @@ class PurchaseLimitService {
         const queryFunc = client ? client.query.bind(client) : query;
         
         try {
-            // Get invoice details
+            // Get invoice details including source
             const invoice = await queryFunc(`
-                SELECT fk_location_id, total
+                SELECT fk_location_id, total, source
                 FROM "ORDERS-invoices"
                 WHERE id = $1
             `, [invoiceId]);
             
             if (invoice.rows.length === 0) {
                 throw new Error('Invoice not found');
+            }
+            
+            // Skip purchase limit validation for internal invoices
+            // Purchase limits are only enforced for external portal orders
+            const invoiceSource = invoice.rows[0].source || 'Internal';
+            if (invoiceSource === 'Internal') {
+                return; // No validation needed for internal invoices
             }
             
             const locationId = invoice.rows[0].fk_location_id;
