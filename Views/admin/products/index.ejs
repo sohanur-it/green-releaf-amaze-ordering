@@ -914,81 +914,8 @@ window.allProducts = [];
 let currentFilter = 'all';
 
 // Toggle search input visibility - define before DOMContentLoaded
-function toggleSearch() {
-    console.log('🔧 toggleSearch() function CALLED');
-    const btn = document.getElementById('searchToggleBtn');
-    const container = document.getElementById('searchInputContainer');
-    const input = document.getElementById('searchProducts');
-    
-    console.log('🔧 Elements check:', {
-        btn: !!btn,
-        container: !!container,
-        input: !!input,
-        btnElement: btn,
-        containerElement: container,
-        inputElement: input
-    });
-    
-    if (!btn) {
-        console.error('❌ Search button not found');
-        alert('Search button not found in DOM');
-        return;
-    }
-    
-    if (!container) {
-        console.error('❌ Search container not found');
-        alert('Search container not found in DOM');
-        return;
-    }
-    
-    if (!input) {
-        console.error('❌ Search input not found');
-        alert('Search input not found in DOM');
-        return;
-    }
-    
-    const isActive = container.classList.contains('active');
-    console.log('🔧 Current state - isActive:', isActive);
-    console.log('🔧 Container classes:', container.className);
-    console.log('🔧 Container style.display:', container.style.display);
-    console.log('🔧 Container computed display:', window.getComputedStyle(container).display);
-    
-    if (isActive) {
-        // Hide search
-        console.log('🔧 HIDING search...');
-        container.classList.remove('active');
-        btn.classList.remove('active');
-        input.value = '';
-        container.style.display = 'none';
-        container.style.opacity = '0';
-        container.style.visibility = 'hidden';
-        if (typeof applyFilters === 'function') {
-            applyFilters(); // Reset filters when closing
-        }
-        console.log('✅ Search HIDDEN');
-    } else {
-        // Show search
-        console.log('🔧 SHOWING search...');
-        container.classList.add('active');
-        btn.classList.add('active');
-        container.style.display = 'block';
-        container.style.opacity = '1';
-        container.style.visibility = 'visible';
-        container.style.maxWidth = '300px';
-        // Small delay to ensure display is set before focusing
-        setTimeout(() => {
-            try {
-                input.focus();
-                console.log('✅ Search SHOWN and focused');
-            } catch (e) {
-                console.error('Error focusing input:', e);
-            }
-        }, 50);
-    }
-}
-
-// Make toggleSearch available globally
-window.toggleSearch = toggleSearch;
+// Duplicate toggleSearch function removed - using window.toggleSearch from line 240 instead
+// The function at line 240 has the updated logic with offsetWidth/offsetHeight checks
 
 // Define applyFilters globally (before DOMContentLoaded)
 window.applyFilters = function() {
