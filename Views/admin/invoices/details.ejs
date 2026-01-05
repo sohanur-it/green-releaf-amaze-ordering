@@ -2786,26 +2786,42 @@ async function finalizeDestroyedPackages() {
 // Module 11: Admin Tools & Overrides
 // =============================================
 
-// Admin Override Modal
-function openAdminOverrideModal() {
-    const modal = document.getElementById('admin-override-modal');
+// Admin Override Modal - Make globally accessible
+window.openAdminOverrideModal = function() {
+    console.log('🔧 openAdminOverrideModal() called');
+    let modal = document.getElementById('admin-override-modal');
     if (!modal) {
+        console.log('🔧 Creating admin override modal...');
         createAdminOverrideModal();
-        // Wait for modal to be fully created before loading preview
+        // Wait for modal to be fully created before showing
         setTimeout(() => {
-            document.getElementById('admin-override-modal').style.display = 'flex';
-            loadInvoicePreview();
+            modal = document.getElementById('admin-override-modal');
+            if (modal) {
+                console.log('🔧 Showing modal with active class');
+                modal.classList.add('active');
+                modal.style.setProperty('display', 'flex', 'important');
+                modal.style.setProperty('opacity', '1', 'important');
+                modal.style.setProperty('visibility', 'visible', 'important');
+                loadInvoicePreview();
+            } else {
+                console.error('❌ Modal not found after creation');
+            }
         }, 100);
     } else {
-        modal.style.display = 'flex';
+        console.log('🔧 Modal already exists, showing it...');
+        modal.classList.add('active');
+        modal.style.setProperty('display', 'flex', 'important');
+        modal.style.setProperty('opacity', '1', 'important');
+        modal.style.setProperty('visibility', 'visible', 'important');
         loadInvoicePreview();
     }
-}
+};
 
 function createAdminOverrideModal() {
     const modal = document.createElement('div');
     modal.id = 'admin-override-modal';
     modal.className = 'modal-overlay';
+    // Set initial styles - display: none will be changed to flex when showing
     modal.style.cssText = 'display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center;';
     
     modal.innerHTML = `
@@ -2903,12 +2919,16 @@ function createAdminOverrideModal() {
     });
 }
 
-function closeAdminOverrideModal() {
+// Make close function globally accessible
+window.closeAdminOverrideModal = function() {
     const modal = document.getElementById('admin-override-modal');
     if (modal) {
-        modal.style.display = 'none';
+        modal.classList.remove('active');
+        modal.style.setProperty('display', 'none', 'important');
+        modal.style.setProperty('opacity', '0', 'important');
+        modal.style.setProperty('visibility', 'hidden', 'important');
     }
-}
+};
 
 async function loadInvoicePreview() {
     try {
@@ -3048,6 +3068,10 @@ async function handleAdminOverride(e) {
             throw new Error(data.error || 'Failed to apply override');
         }
         
+        // Close the modal first
+        closeAdminOverrideModal();
+        
+        // Show success message and reload page to show updated data
         alert('Invoice fields updated successfully');
         window.location.reload();
     } catch (error) {
@@ -3055,16 +3079,31 @@ async function handleAdminOverride(e) {
     }
 }
 
-// Admin Tools Menu
-function openAdminToolsMenu() {
-    const menu = document.getElementById('admin-tools-menu');
+// Admin Tools Menu - Make globally accessible
+window.openAdminToolsMenu = function() {
+    console.log('🔧 openAdminToolsMenu() called');
+    let menu = document.getElementById('admin-tools-menu');
     if (!menu) {
+        console.log('🔧 Creating admin tools menu...');
         createAdminToolsMenu();
-        document.getElementById('admin-tools-menu').style.display = 'flex';
+        setTimeout(() => {
+            menu = document.getElementById('admin-tools-menu');
+            if (menu) {
+                console.log('🔧 Showing admin tools menu with active class');
+                menu.classList.add('active');
+                menu.style.setProperty('display', 'flex', 'important');
+                menu.style.setProperty('opacity', '1', 'important');
+                menu.style.setProperty('visibility', 'visible', 'important');
+            }
+        }, 100);
     } else {
-        menu.style.display = 'flex';
+        console.log('🔧 Admin tools menu already exists, showing it...');
+        menu.classList.add('active');
+        menu.style.setProperty('display', 'flex', 'important');
+        menu.style.setProperty('opacity', '1', 'important');
+        menu.style.setProperty('visibility', 'visible', 'important');
     }
-}
+};
 
 function createAdminToolsMenu() {
     const menu = document.createElement('div');
@@ -3114,25 +3153,40 @@ function createAdminToolsMenu() {
     });
 }
 
-function closeAdminToolsMenu() {
+// Make close function globally accessible
+window.closeAdminToolsMenu = function() {
     const menu = document.getElementById('admin-tools-menu');
     if (menu) {
-        menu.style.display = 'none';
+        menu.classList.remove('active');
+        menu.style.setProperty('display', 'none', 'important');
+        menu.style.setProperty('opacity', '0', 'important');
+        menu.style.setProperty('visibility', 'hidden', 'important');
     }
-}
+};
 
 // Manually Add Package Modal
-function openManuallyAddPackageModal() {
+window.openManuallyAddPackageModal = function() {
     closeAdminToolsMenu();
     
-    const modal = document.getElementById('manually-add-package-modal');
+    let modal = document.getElementById('manually-add-package-modal');
     if (!modal) {
         createManuallyAddPackageModal();
-        document.getElementById('manually-add-package-modal').style.display = 'flex';
+        setTimeout(() => {
+            modal = document.getElementById('manually-add-package-modal');
+            if (modal) {
+                modal.classList.add('active');
+                modal.style.setProperty('display', 'flex', 'important');
+                modal.style.setProperty('opacity', '1', 'important');
+                modal.style.setProperty('visibility', 'visible', 'important');
+            }
+        }, 100);
     } else {
-        modal.style.display = 'flex';
+        modal.classList.add('active');
+        modal.style.setProperty('display', 'flex', 'important');
+        modal.style.setProperty('opacity', '1', 'important');
+        modal.style.setProperty('visibility', 'visible', 'important');
     }
-}
+};
 
 function createManuallyAddPackageModal() {
     const modal = document.createElement('div');
@@ -3211,12 +3265,15 @@ function populateLineItemsForManualAdd() {
     });
 }
 
-function closeManuallyAddPackageModal() {
+window.closeManuallyAddPackageModal = function() {
     const modal = document.getElementById('manually-add-package-modal');
     if (modal) {
-        modal.style.display = 'none';
+        modal.classList.remove('active');
+        modal.style.setProperty('display', 'none', 'important');
+        modal.style.setProperty('opacity', '0', 'important');
+        modal.style.setProperty('visibility', 'hidden', 'important');
     }
-}
+};
 
 async function handleManuallyAddPackage(e) {
     e.preventDefault();
@@ -3266,17 +3323,28 @@ async function handleManuallyAddPackage(e) {
 }
 
 // Force Release Allocation Modal
-function openForceReleaseAllocationModal() {
+window.openForceReleaseAllocationModal = function() {
     closeAdminToolsMenu();
     
-    const modal = document.getElementById('force-release-allocation-modal');
+    let modal = document.getElementById('force-release-allocation-modal');
     if (!modal) {
         createForceReleaseAllocationModal();
-        document.getElementById('force-release-allocation-modal').style.display = 'flex';
+        setTimeout(() => {
+            modal = document.getElementById('force-release-allocation-modal');
+            if (modal) {
+                modal.classList.add('active');
+                modal.style.setProperty('display', 'flex', 'important');
+                modal.style.setProperty('opacity', '1', 'important');
+                modal.style.setProperty('visibility', 'visible', 'important');
+            }
+        }, 100);
     } else {
-        modal.style.display = 'flex';
+        modal.classList.add('active');
+        modal.style.setProperty('display', 'flex', 'important');
+        modal.style.setProperty('opacity', '1', 'important');
+        modal.style.setProperty('visibility', 'visible', 'important');
     }
-}
+};
 
 function createForceReleaseAllocationModal() {
     const modal = document.createElement('div');
@@ -3363,12 +3431,15 @@ function populateLineItemsForRelease() {
     });
 }
 
-function closeForceReleaseAllocationModal() {
+window.closeForceReleaseAllocationModal = function() {
     const modal = document.getElementById('force-release-allocation-modal');
     if (modal) {
-        modal.style.display = 'none';
+        modal.classList.remove('active');
+        modal.style.setProperty('display', 'none', 'important');
+        modal.style.setProperty('opacity', '0', 'important');
+        modal.style.setProperty('visibility', 'hidden', 'important');
     }
-}
+};
 
 async function handleForceReleaseAllocation(e) {
     e.preventDefault();

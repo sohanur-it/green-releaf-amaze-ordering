@@ -210,7 +210,7 @@
 .invoice-modal {
     background: var(--card-bg, #fff);
     width: 95%;
-    max-width: 650px;
+    max-width: 900px;
     max-height: 90vh;
     border-radius: 14px;
     box-shadow: 0 25px 55px rgba(15, 23, 42, 0.45);
@@ -278,6 +278,50 @@
     font-size: 0.85rem;
     color: var(--text-light, #6b7280);
     margin-top: 6px;
+}
+
+.batch-section {
+    margin-bottom: 24px;
+}
+
+.batch-section:last-child {
+    margin-bottom: 0;
+}
+
+.section-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-color, #111827);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--border-color, #e5e7eb);
+}
+
+.partial-package-card {
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 10px;
+    background: var(--hover-bg, #f9fafb);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.partial-package-info {
+    flex: 1;
+}
+
+.partial-package-label {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text-color, #111827);
+    margin-bottom: 4px;
+}
+
+.partial-package-meta {
+    font-size: 0.9rem;
+    color: var(--text-light, #6b7280);
 }
 
 .partial-package-row {
@@ -625,7 +669,7 @@ function escapeHtml(str = '') {
         .replace(/'/g, '&#039;');
 }
 
-function showBatchSelectionModal(productId, productLabel, batches) {
+async function showBatchSelectionModal(productId, productLabel, batches) {
     closeBatchModal();
 
     const overlay = document.createElement('div');
@@ -638,10 +682,10 @@ function showBatchSelectionModal(productId, productLabel, batches) {
                 <button type="button" class="btn btn-secondary" id="batch-modal-close">Close</button>
             </div>
             <div class="modal-body">
-                <p style="margin-top: 0; margin-bottom: 12px; color: var(--text-light, #6b7280); font-size: 0.95rem;">
+                <p style="margin-top: 0; margin-bottom: 16px; color: var(--text-light, #6b7280); font-size: 0.95rem;">
                     ${escapeHtml(productLabel)}
                 </p>
-                <div id="batch-card-container"></div>
+                <div id="batch-card-container">Loading...</div>
             </div>
         </div>
     `;
@@ -650,37 +694,6 @@ function showBatchSelectionModal(productId, productLabel, batches) {
     document.body.style.overflow = 'hidden';
 
     const cardContainer = overlay.querySelector('#batch-card-container');
-    cardContainer.innerHTML = batches.map(batch => `
-        <div class="batch-card"
-             data-batch-id="${batch.id}"
-             data-batch-name="${escapeHtml(batch.batch_name)}"
-             data-unit-price="${batch.unit_price}"
-             data-available="${batch.available_quantity}"
-             data-partial-count="${batch.partial_package_count || 0}">
-            <h4>${escapeHtml(batch.batch_name)}</h4>
-            <div class="batch-meta">
-                Available: ${batch.available_quantity} • Unit Price: $${parseFloat(batch.unit_price || 0).toFixed(2)}
-            </div>
-            <div class="batch-actions">
-                <label for="batch-qty-${batch.id}" style="font-weight: 600;">Quantity</label>
-                <input type="number"
-                       id="batch-qty-${batch.id}"
-                       min="1"
-                       value="1"
-                       max="${batch.available_quantity}"
-                       data-qty-input="${batch.id}">
-                ${batch.partial_package_count > 0 ? `
-                    <button type="button" class="btn btn-secondary" data-partial-selector="${batch.id}">
-                        Select Partial Packages
-                    </button>
-                ` : ''}
-                <button type="button" class="btn btn-primary" data-add-batch="${batch.id}">
-                    Add Batch
-                </button>
-            </div>
-            <div class="partial-summary" data-partial-summary="${batch.id}"></div>
-        </div>
-    `).join('');
 
     overlay.addEventListener('click', (event) => {
         if (event.target === overlay) {
@@ -690,52 +703,145 @@ function showBatchSelectionModal(productId, productLabel, batches) {
 
     overlay.querySelector('#batch-modal-close').addEventListener('click', closeBatchModal);
 
-    overlay.querySelectorAll('[data-partial-selector]').forEach(button => {
-        button.addEventListener('click', async () => {
-            const batchId = parseInt(button.dataset.partialSelector, 10);
-            const qtyInput = overlay.querySelector(`[data-qty-input="${batchId}"]`);
-            const summaryEl = overlay.querySelector(`[data-partial-summary="${batchId}"]`);
-            await openPartialPackageSelector(batchId, summaryEl, qtyInput);
+    try {
+        // Separate batches into full packages and batches with partials
+        const fullPackageBatches = batches.filter(batch => (batch.full_package_count || 0) > 0);
+        const batchesWithPartials = batches.filter(batch => (batch.partial_package_count || 0) > 0);
+
+        // Fetch all partial packages - store in closure-accessible variable
+        let allPartialPackages = [];
+        for (const batch of batchesWithPartials) {
+            try {
+                if (!partialPackageCache[batch.id]) {
+                    const response = await fetch(`/api/v1/batches/${batch.id}/partial-packages/available`);
+                    const data = await response.json();
+                    if (data.success && data.partial_packages) {
+                        partialPackageCache[batch.id] = data.partial_packages.filter(pkg => pkg.available);
+                    } else {
+                        partialPackageCache[batch.id] = [];
+                    }
+                }
+                
+                const availablePartials = partialPackageCache[batch.id] || [];
+                // Add batch info to each partial package
+                availablePartials.forEach(pkg => {
+                    allPartialPackages.push({
+                        ...pkg,
+                        batch_id: batch.id,
+                        batch_name: batch.batch_name,
+                        unit_price: batch.unit_price
+                    });
+                });
+            } catch (error) {
+                console.error(`Error loading partial packages for batch ${batch.id}:`, error);
+            }
+        }
+
+        // Build HTML
+        let html = '';
+
+        // Full Packages Section
+        if (fullPackageBatches.length > 0) {
+            html += '<div class="batch-section">';
+            html += '<div class="section-title">Full Packages</div>';
+            html += fullPackageBatches.map(batch => `
+                <div class="batch-card"
+                     data-batch-id="${batch.id}"
+                     data-batch-name="${escapeHtml(batch.batch_name)}"
+                     data-unit-price="${batch.unit_price}"
+                     data-available="${batch.available_quantity}">
+                    <h4>${escapeHtml(batch.batch_name)}</h4>
+                    <div class="batch-meta">
+                        Available: ${batch.available_quantity} • Unit Price: $${parseFloat(batch.unit_price || 0).toFixed(2)}
+                    </div>
+                    <div class="batch-actions">
+                        <label for="batch-qty-${batch.id}" style="font-weight: 600;">Quantity</label>
+                        <input type="number"
+                               id="batch-qty-${batch.id}"
+                               min="1"
+                               value="1"
+                               max="${batch.available_quantity}"
+                               data-qty-input="${batch.id}">
+                        <button type="button" class="btn btn-primary" data-add-batch="${batch.id}">
+                            Add Batch
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+            html += '</div>';
+        }
+
+        // Partial Packages Section
+        if (allPartialPackages.length > 0) {
+            html += '<div class="batch-section">';
+            html += '<div class="section-title">Partial Packages</div>';
+            html += allPartialPackages.map((pkg, index) => `
+                <div class="partial-package-card">
+                    <div class="partial-package-info">
+                        <div class="partial-package-label">${escapeHtml(pkg.label)}</div>
+                        <div class="partial-package-meta">
+                            Batch: ${escapeHtml(pkg.batch_name)} • Quantity: ${parseFloat(pkg.quantity || 0).toFixed(2)} • Unit Price: $${parseFloat(pkg.unit_price || 0).toFixed(2)}
+                        </div>
+                    </div>
+                    <button type="button" class="btn btn-primary" data-add-partial="${pkg.batch_id}" data-partial-label="${escapeHtml(pkg.label)}" data-partial-qty="${pkg.quantity}" data-partial-unit-price="${pkg.unit_price}" data-partial-batch-name="${escapeHtml(pkg.batch_name)}">
+                        Add Package
+                    </button>
+                </div>
+            `).join('');
+            html += '</div>';
+        }
+
+        if (html === '') {
+            html = '<div class="empty-state">No packages available.</div>';
+        }
+
+        cardContainer.innerHTML = html;
+
+        // Add event listeners for full package batches
+        overlay.querySelectorAll('[data-add-batch]').forEach(button => {
+            button.addEventListener('click', () => {
+                const batchId = parseInt(button.dataset.addBatch, 10);
+                const card = button.closest('.batch-card');
+                const available = parseInt(card.dataset.available, 10);
+                const unitPrice = parseFloat(card.dataset.unitPrice);
+                const batchName = card.dataset.batchName;
+                const qtyInput = overlay.querySelector(`[data-qty-input="${batchId}"]`);
+                const quantity = parseInt(qtyInput.value, 10);
+
+                if (!quantity || quantity <= 0) {
+                    alert('Please enter a valid quantity.');
+                    return;
+                }
+
+                if (quantity > available) {
+                    alert(`Only ${available} units available for this batch.`);
+                    return;
+                }
+
+                addLineItem(productId, batchId, quantity, unitPrice, batchName, []);
+                closeBatchModal();
+            });
         });
-    });
 
-    overlay.querySelectorAll('[data-add-batch]').forEach(button => {
-        button.addEventListener('click', () => {
-            const batchId = parseInt(button.dataset.addBatch, 10);
-            const card = button.closest('.batch-card');
-            const available = parseInt(card.dataset.available, 10);
-            const unitPrice = parseFloat(card.dataset.unitPrice);
-            const batchName = card.dataset.batchName;
-            const qtyInput = overlay.querySelector(`[data-qty-input="${batchId}"]`);
-            let quantity = parseInt(qtyInput.value, 10);
+        // Add event listeners for partial packages
+        overlay.querySelectorAll('[data-add-partial]').forEach(button => {
+            button.addEventListener('click', () => {
+                const batchId = parseInt(button.dataset.addPartial, 10);
+                const partialLabel = button.dataset.partialLabel;
+                const partialQty = parseFloat(button.dataset.partialQty || 1);
+                const unitPrice = parseFloat(button.dataset.partialUnitPrice || 0);
+                const batchName = button.dataset.partialBatchName || `Batch ${batchId}`;
 
-            const partialLabels = selectedPartialPackages[batchId] || [];
-            if (partialLabels.length > 0) {
-                quantity = partialLabels.length;
-            }
-
-            if (!quantity || quantity <= 0) {
-                alert('Please enter a valid quantity.');
-                return;
-            }
-
-            if (quantity > available) {
-                alert(`Only ${available} units available for this batch.`);
-                return;
-            }
-
-            addLineItem(productId, batchId, quantity, unitPrice, batchName, partialLabels);
-            delete selectedPartialPackages[batchId];
-            closeBatchModal();
+                // Add as individual line item with the partial package label
+                // Each partial package is its own line item with quantity = partial package quantity
+                addLineItem(productId, batchId, partialQty, unitPrice, batchName, [partialLabel]);
+                closeBatchModal();
+            });
         });
-    });
-
-    cardContainer.querySelectorAll('.batch-card').forEach(card => {
-        const batchId = parseInt(card.dataset.batchId, 10);
-        const summaryEl = card.querySelector(`[data-partial-summary="${batchId}"]`);
-        const qtyInput = card.querySelector(`[data-qty-input="${batchId}"]`);
-        updatePartialSummary(batchId, summaryEl, qtyInput);
-    });
+    } catch (error) {
+        console.error('Error loading batch data:', error);
+        cardContainer.innerHTML = '<div class="empty-state">Error loading batches. Please try again.</div>';
+    }
 }
 
 function closeBatchModal() {

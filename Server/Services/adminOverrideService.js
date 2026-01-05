@@ -61,16 +61,38 @@ class AdminOverrideService {
             }
 
             if (fields.transportation_details !== undefined) {
-                const newValue = typeof fields.transportation_details === 'object'
-                    ? JSON.stringify(fields.transportation_details)
-                    : fields.transportation_details;
+                // Handle null explicitly - null should be SQL NULL, not JSON string "null"
+                let newValue;
+                if (fields.transportation_details === null) {
+                    newValue = null;
+                } else if (typeof fields.transportation_details === 'object' && fields.transportation_details !== null) {
+                    newValue = JSON.stringify(fields.transportation_details);
+                } else if (typeof fields.transportation_details === 'string') {
+                    // Validate it's valid JSON if it's a string
+                    try {
+                        JSON.parse(fields.transportation_details);
+                        newValue = fields.transportation_details;
+                    } catch (e) {
+                        await client.query('ROLLBACK');
+                        return { success: false, error: 'Invalid JSON format for transportation_details' };
+                    }
+                } else {
+                    newValue = fields.transportation_details;
+                }
+                
                 const currentValue = current.transportation_details
                     ? JSON.stringify(current.transportation_details)
                     : null;
                 
-                if (newValue !== currentValue) {
-                    updates.push(`transportation_details = $${paramCount++}::jsonb`);
-                    updateParams.push(newValue);
+                // Compare properly - if newValue is null, currentValue should also be null for equality
+                const newValueForComparison = newValue === null ? null : newValue;
+                if (newValueForComparison !== currentValue) {
+                    if (newValue === null) {
+                        updates.push(`transportation_details = NULL`);
+                    } else {
+                        updates.push(`transportation_details = $${paramCount++}::jsonb`);
+                        updateParams.push(newValue);
+                    }
                     changes.transportation_details = { from: current.transportation_details, to: fields.transportation_details };
                 }
             }
@@ -178,19 +200,36 @@ class AdminOverrideService {
             await client.query('BEGIN');
 
             // Validate package exists in activepackages
+            // First check the license column name (could be synclicense or sync_license)
+            const licenseColumnCheck = await client.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'activepackages' 
+                AND column_name IN ('synclicense', 'sync_license')
+                LIMIT 1
+            `);
+            const licenseColumn = licenseColumnCheck.rows[0]?.column_name || 'synclicense';
+            
+            // Check what item column exists (could be 'item', 'item_name', or might not exist)
+            const itemColumnCheck = await client.query(`
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'activepackages' 
+                AND column_name IN ('item', 'item_name', 'item_strainname')
+                LIMIT 1
+            `);
+            const itemColumn = itemColumnCheck.rows[0]?.column_name;
+            
             const packageCheck = await client.query(`
                 SELECT 
-                    p.package_label,
-                    p.synclicense,
+                    p.label as package_label,
+                    p.${licenseColumn} as synclicense,
                     p.quantity,
-                    p.item_strain_name,
-                    b.id as batch_id,
-                    b.fk_master_product_id
+                    ${itemColumn ? `p.${itemColumn} as item_strain_name` : 'NULL as item_strain_name'}
                 FROM activepackages p
-                LEFT JOIN "ORDERS-batches" b ON p.batch_id = b.batch_id
-                WHERE p.package_label = $1
+                WHERE UPPER(p.label) = UPPER($1)
             `, [packageLabel]);
-
+            
             if (packageCheck.rows.length === 0) {
                 await client.query('ROLLBACK');
                 return { success: false, error: 'Package not found in METRC active packages' };
@@ -226,12 +265,23 @@ class AdminOverrideService {
                 };
             }
 
-            // Validate batch matches
-            if (pkg.batch_id && pkg.batch_id !== item.fk_batch_id) {
+            // Validate package belongs to the batch (check if package label is in batch's available_labels or sourcepackagelabels)
+            const batchCheck = await client.query(`
+                SELECT id
+                FROM "ORDERS-batches"
+                WHERE id = $1
+                    AND (
+                        (available_labels IS NOT NULL AND available_labels @> $2::jsonb)
+                        OR (sourcepackagelabels IS NOT NULL AND sourcepackagelabels LIKE '%' || $3 || '%')
+                        OR (first_sourcepackage_label = $3)
+                    )
+            `, [item.fk_batch_id, JSON.stringify([packageLabel.toUpperCase()]), packageLabel.toUpperCase()]);
+
+            if (batchCheck.rows.length === 0) {
                 await client.query('ROLLBACK');
                 return { 
                     success: false, 
-                    error: `Package belongs to different batch` 
+                    error: `Package ${packageLabel} does not belong to the selected batch` 
                 };
             }
 

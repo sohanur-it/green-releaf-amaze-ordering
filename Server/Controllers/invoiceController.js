@@ -1213,6 +1213,7 @@ class InvoiceController {
                     (b.quantity - b.allocated_quantity) as available_quantity,
                     COALESCE(b.override_price, p.default_price, 0) as unit_price,
                     b.status,
+                    b.full_package_count,
                     b.partial_package_count,
                     b.partial_package_details
                 FROM "ORDERS-batches" b
