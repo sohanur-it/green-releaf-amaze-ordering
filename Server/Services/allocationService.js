@@ -224,12 +224,23 @@ class AllocationService {
 
             const currentAllocated = batch.rows[0].allocated_quantity;
 
-            // Decrement allocation
+            // Prevent negative allocation - only release up to what's allocated
+            const releaseQty = Math.min(quantity, currentAllocated);
+            
+            if (releaseQty <= 0) {
+                await client.query('ROLLBACK');
+                return {
+                    success: false,
+                    error: `Cannot release allocation: batch has ${currentAllocated} allocated, trying to release ${quantity}`
+                };
+            }
+
+            // Decrement allocation (with safeguard to prevent negative)
             await client.query(`
                 UPDATE "ORDERS-batches"
-                SET allocated_quantity = allocated_quantity - $1
+                SET allocated_quantity = GREATEST(0, allocated_quantity - $1)
                 WHERE id = $2
-            `, [quantity, batchId]);
+            `, [releaseQty, batchId]);
 
             // Log history
             await client.query(`
@@ -237,9 +248,9 @@ class AllocationService {
                     batch_id, change_type, field_name,
                     old_value, new_value, reason,
                     related_invoice_id, changed_by_system
-                ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
+                )                 VALUES ($1, 'allocation_decreased', 'allocated_quantity',
                           $2, $3, $4, $5, true)
-            `, [batchId, currentAllocated, currentAllocated - quantity, reason, invoiceId]);
+            `, [batchId, currentAllocated.toString(), Math.max(0, currentAllocated - releaseQty).toString(), reason, invoiceId]);
 
             await client.query('COMMIT');
 
@@ -303,24 +314,31 @@ class AllocationService {
                 
                 if (batch.rows.length === 0) continue;
                 
-                const currentAllocated = batch.rows[0].allocated_quantity;
+                const currentAllocated = parseInt(batch.rows[0].allocated_quantity || 0);
                 
-                // Decrement allocation
-                await client.query(`
-                    UPDATE "ORDERS-batches"
-                    SET allocated_quantity = allocated_quantity - $1
-                    WHERE id = $2
-                `, [quantity, batchId]);
+                // Prevent negative allocation - only release up to what's allocated
+                const releaseQty = Math.min(quantity, currentAllocated);
                 
-                // Log history
-                await client.query(`
-                    INSERT INTO "ORDERS-batch-history" (
-                        batch_id, change_type, field_name,
-                        old_value, new_value, reason,
-                        related_invoice_id, changed_by_system
-                    ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
-                              $2, $3, 'Invoice cancelled', $4, true)
-                `, [batchId, currentAllocated, currentAllocated - quantity, invoiceId]);
+                if (releaseQty > 0) {
+                    // Decrement allocation (with safeguard to prevent negative)
+                    await client.query(`
+                        UPDATE "ORDERS-batches"
+                        SET allocated_quantity = GREATEST(0, allocated_quantity - $1)
+                        WHERE id = $2
+                    `, [releaseQty, batchId]);
+                    
+                    // Log history
+                    await client.query(`
+                        INSERT INTO "ORDERS-batch-history" (
+                            batch_id, change_type, field_name,
+                            old_value, new_value, reason,
+                            related_invoice_id, changed_by_system
+                        ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
+                                  $2, $3, 'Invoice cancelled', $4, true)
+                    `, [batchId, currentAllocated.toString(), Math.max(0, currentAllocated - releaseQty).toString(), invoiceId]);
+                } else {
+                    console.warn(`⚠️  Cannot release allocation for batch ${batchId}: current allocated is ${currentAllocated}, trying to release ${quantity}`);
+                }
                 
                 // Zero out line item allocation
                 await client.query(`

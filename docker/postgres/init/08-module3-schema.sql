@@ -79,7 +79,9 @@ CREATE TABLE IF NOT EXISTS "ORDERS-batches" (
     last_modified             TIMESTAMPTZ,
     -- From METRC
     last_synced               TIMESTAMPTZ DEFAULT Now(),
-    created_at                TIMESTAMPTZ DEFAULT Now()
+    created_at                TIMESTAMPTZ DEFAULT Now(),
+    -- Prevent negative allocated_quantity
+    CONSTRAINT chk_allocated_quantity_non_negative CHECK (allocated_quantity >= 0)
 );
 
 -- =============================================

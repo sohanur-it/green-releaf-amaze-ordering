@@ -1118,13 +1118,17 @@ class InvoiceController {
                     p.cultivar_type_name
                 FROM "ORDERS-products" p
                 INNER JOIN "ORDERS-batches" b ON p.entry_id = b.fk_master_product_id
-                WHERE (b.quantity - COALESCE(b.allocated_quantity, 0)) > 0
-                  AND b.full_package_count > 0
+                WHERE p.is_archived = FALSE OR p.is_archived IS NULL
+                  AND (b.quantity - COALESCE(b.allocated_quantity, 0)) > 0
             `;
             
-            // Only filter by status for external invoices
+            // For external invoices, only show products with full packages
+            // For internal invoices, show products with either full or partial packages
             if (invoiceSource === 'External') {
-                queryStr += ` AND b.status = 'Sellable'`;
+                queryStr += ` AND b.status = 'Sellable' AND b.full_package_count > 0`;
+            } else {
+                // Internal invoices can use both full and partial packages
+                queryStr += ` AND (b.full_package_count > 0 OR b.partial_package_count > 0)`;
             }
             
             const params = [];
@@ -1220,7 +1224,13 @@ class InvoiceController {
                 INNER JOIN "ORDERS-products" p ON b.fk_master_product_id = p.entry_id
                 WHERE b.fk_master_product_id = $1
                   ${statusCondition}
-                  AND (b.quantity - b.allocated_quantity) > 0
+                  AND (
+                      -- Show batches with available full packages
+                      (b.quantity - b.allocated_quantity) > 0
+                      OR
+                      -- OR show batches with partial packages (even if no full packages available)
+                      (b.partial_package_count > 0 AND b.partial_package_details IS NOT NULL)
+                  )
                 ORDER BY b.created_at DESC
             `, params);
             
@@ -1356,7 +1366,10 @@ class InvoiceController {
                 line_items: line_items.map(item => ({
                     fk_batch_id: item.fk_batch_id,
                     quantity: parseInt(item.quantity),
-                    partial_packages_selected: item.partial_packages_selected || null
+                    partial_packages_selected: item.partial_packages_selected || null,
+                    manual_line_total: item.manual_line_total !== undefined && item.manual_line_total !== null 
+                        ? parseFloat(item.manual_line_total) 
+                        : undefined
                 })),
                 customer_notes: customer_notes || null,
                 internal_notes: internal_notes || null
@@ -1609,7 +1622,7 @@ class InvoiceController {
     async updateLineItem(req, res) {
         try {
             const { id, lineItemId } = req.params;
-            const { quantity, modification_reason } = req.body;
+            const { quantity, modification_reason, manual_line_total } = req.body;
             const userId = req.session.userId || req.user?.id;
 
             // Handle quantity = 0 as remove line item
@@ -1782,31 +1795,59 @@ class InvoiceController {
                 } else if (quantityDelta < 0) {
                     // Release allocation if decreasing quantity
                     const releaseQty = Math.abs(quantityDelta);
-                    await client.query(`
-                        UPDATE "ORDERS-batches"
-                        SET allocated_quantity = allocated_quantity - $1
-                        WHERE id = $2
-                    `, [releaseQty, item.fk_batch_id]);
+                    
+                    // Get current allocated_quantity to prevent negative values
+                    const batchCheck = await client.query(`
+                        SELECT allocated_quantity
+                        FROM "ORDERS-batches"
+                        WHERE id = $1
+                        FOR UPDATE
+                    `, [item.fk_batch_id]);
+                    
+                    if (batchCheck.rows.length > 0) {
+                        const currentAllocated = parseInt(batchCheck.rows[0].allocated_quantity || 0);
+                        const actualReleaseQty = Math.min(releaseQty, currentAllocated);
+                        
+                        if (actualReleaseQty > 0) {
+                            await client.query(`
+                                UPDATE "ORDERS-batches"
+                                SET allocated_quantity = GREATEST(0, allocated_quantity - $1)
+                                WHERE id = $2
+                            `, [actualReleaseQty, item.fk_batch_id]);
 
-                    // Log batch history
-                    await client.query(`
-                        INSERT INTO "ORDERS-batch-history" (
-                            batch_id, change_type, field_name,
-                            old_value, new_value, reason,
-                            related_invoice_id, changed_by_system
-                        ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
-                                  $2, $3, 'Line item quantity decreased', $4, true)
-                    `, [
-                        item.fk_batch_id,
-                        currentAllocated,
-                        currentAllocated - releaseQty,
-                        id
-                    ]);
+                            // Log batch history
+                            await client.query(`
+                                INSERT INTO "ORDERS-batch-history" (
+                                    batch_id, change_type, field_name,
+                                    old_value, new_value, reason,
+                                    related_invoice_id, changed_by_system
+                                ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
+                                          $2, $3, 'Line item quantity decreased', $4, true)
+                            `, [
+                                item.fk_batch_id,
+                                currentAllocated.toString(),
+                                Math.max(0, currentAllocated - actualReleaseQty).toString(),
+                                id
+                            ]);
+                        } else {
+                            console.warn(`⚠️  Cannot release allocation for batch ${item.fk_batch_id}: current allocated is ${currentAllocated}, trying to release ${releaseQty}`);
+                        }
+                    }
                 }
 
                 // Update line item with modification tracking (Module 4 requirement)
-                const unitPrice = parseFloat(item.unit_price);
-                const newLineTotal = unitPrice * newQuantity - parseFloat(item.line_discount_amount || 0);
+                let unitPrice = parseFloat(item.unit_price);
+                let newLineTotal;
+                
+                // If manual_line_total is provided, use it for price override
+                if (manual_line_total !== null && manual_line_total !== undefined) {
+                    newLineTotal = parseFloat(manual_line_total);
+                    // Calculate unit price from total (for display purposes)
+                    unitPrice = newQuantity > 0 ? newLineTotal / newQuantity : 0;
+                } else {
+                    // Standard calculation
+                    newLineTotal = unitPrice * newQuantity - parseFloat(item.line_discount_amount || 0);
+                }
                 
                 // Set fulfillment_issue_modification flag if invoice is in Fulfillment_Issue status
                 const isFulfillmentIssueMod = item.status === 'Fulfillment_Issue';
@@ -1820,38 +1861,35 @@ class InvoiceController {
                 `);
                 const hasColumn = columnCheck.rows.length > 0;
 
-                if (hasColumn && isFulfillmentIssueMod) {
-                    await client.query(`
-                        UPDATE "ORDERS-invoice-line-items"
-                        SET 
-                            quantity_ordered = $1,
-                            quantity_allocated = $1,
-                            line_total = $2,
-                            was_modified = true,
-                            original_quantity = $3,
-                            modification_reason = $4,
-                            modified_at = NOW(),
-                            modified_by = $5,
-                            updated_at = NOW(),
-                            fulfillment_issue_modification = true
-                        WHERE id = $6
-                    `, [newQuantity, newLineTotal, originalQuantity, modReason, userId, lineItemId]);
-                } else {
-                    await client.query(`
-                        UPDATE "ORDERS-invoice-line-items"
-                        SET 
-                            quantity_ordered = $1,
-                            quantity_allocated = $1,
-                            line_total = $2,
-                            was_modified = true,
-                            original_quantity = $3,
-                            modification_reason = $4,
-                            modified_at = NOW(),
-                            modified_by = $5,
-                            updated_at = NOW()
-                        WHERE id = $6
-                    `, [newQuantity, newLineTotal, originalQuantity, modReason, userId, lineItemId]);
-                }
+                // Update unit_price if manual pricing was used
+                const updateFields = hasColumn && isFulfillmentIssueMod
+                    ? `quantity_ordered = $1,
+                       quantity_allocated = $1,
+                       unit_price = $7,
+                       line_total = $2,
+                       was_modified = true,
+                       original_quantity = $3,
+                       modification_reason = $4,
+                       modified_at = NOW(),
+                       modified_by = $5,
+                       updated_at = NOW(),
+                       fulfillment_issue_modification = true`
+                    : `quantity_ordered = $1,
+                       quantity_allocated = $1,
+                       unit_price = $7,
+                       line_total = $2,
+                       was_modified = true,
+                       original_quantity = $3,
+                       modification_reason = $4,
+                       modified_at = NOW(),
+                       modified_by = $5,
+                       updated_at = NOW()`;
+                
+                await client.query(`
+                    UPDATE "ORDERS-invoice-line-items"
+                    SET ${updateFields}
+                    WHERE id = $6
+                `, [newQuantity, newLineTotal, originalQuantity, modReason, userId, lineItemId, unitPrice]);
 
                 await lineItemHistoryService.addLineItemHistoryEntry({
                     client,
@@ -2039,26 +2077,43 @@ class InvoiceController {
 
                 // Release allocation
                 if (allocatedQty > 0) {
-                    await client.query(`
-                        UPDATE "ORDERS-batches"
-                        SET allocated_quantity = allocated_quantity - $1
-                        WHERE id = $2
-                    `, [allocatedQty, item.fk_batch_id]);
+                    // Get current allocated_quantity to prevent negative values
+                    const batchCheck = await client.query(`
+                        SELECT allocated_quantity
+                        FROM "ORDERS-batches"
+                        WHERE id = $1
+                        FOR UPDATE
+                    `, [item.fk_batch_id]);
+                    
+                    if (batchCheck.rows.length > 0) {
+                        const currentAllocated = parseInt(batchCheck.rows[0].allocated_quantity || 0);
+                        const releaseQty = Math.min(allocatedQty, currentAllocated);
+                        
+                        if (releaseQty > 0) {
+                            await client.query(`
+                                UPDATE "ORDERS-batches"
+                                SET allocated_quantity = GREATEST(0, allocated_quantity - $1)
+                                WHERE id = $2
+                            `, [releaseQty, item.fk_batch_id]);
 
-                    // Log batch history
-                    await client.query(`
-                        INSERT INTO "ORDERS-batch-history" (
-                            batch_id, change_type, field_name,
-                            old_value, new_value, reason,
-                            related_invoice_id, changed_by_system
-                        ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
-                                  $2, $3, 'Line item removed', $4, true)
-                    `, [
-                        item.fk_batch_id,
-                        allocatedQty.toString(),
-                        '0',
-                        id
-                    ]);
+                            // Log batch history
+                            await client.query(`
+                                INSERT INTO "ORDERS-batch-history" (
+                                    batch_id, change_type, field_name,
+                                    old_value, new_value, reason,
+                                    related_invoice_id, changed_by_system
+                                ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
+                                          $2, $3, 'Line item removed', $4, true)
+                            `, [
+                                item.fk_batch_id,
+                                currentAllocated.toString(),
+                                Math.max(0, currentAllocated - releaseQty).toString(),
+                                id
+                            ]);
+                        } else {
+                            console.warn(`⚠️  Cannot release allocation for batch ${item.fk_batch_id}: current allocated is ${currentAllocated}, trying to release ${allocatedQty}`);
+                        }
+                    }
                 }
 
                 // Delete line item

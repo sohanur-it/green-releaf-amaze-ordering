@@ -430,6 +430,46 @@ exports.getProductById = async (req, res) => {
             ORDER BY status, production_date DESC
         `, [productId]);
 
+        // Calculate available partial packages for each batch
+        // (exclude those allocated to active invoices)
+        const batchesWithAvailablePartials = await Promise.all(
+            batchesResult.rows.map(async (batch) => {
+                if (!batch.partial_package_details || batch.partial_package_count === 0) {
+                    return {
+                        ...batch,
+                        available_partial_count: 0
+                    };
+                }
+
+                const partialPackageDetails = batch.partial_package_details.partial_packages || [];
+                
+                // Check which packages are allocated to active invoices
+                const availablePartials = await Promise.all(
+                    partialPackageDetails.map(async (pkg) => {
+                        const allocationCheck = await pool.query(`
+                            SELECT 
+                                i.id as invoice_id,
+                                i.status
+                            FROM "ORDERS-invoice-line-items" li
+                            INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
+                            WHERE li.fk_batch_id = $1
+                              AND li.specific_package_labels @> $2::jsonb
+                              AND i.status NOT IN ('Cancelled', 'Paid', 'Fully_Rejected')
+                        `, [batch.id, JSON.stringify([pkg.label])]);
+
+                        return allocationCheck.rows.length === 0; // Available if not allocated
+                    })
+                );
+
+                const availableCount = availablePartials.filter(available => available).length;
+
+                return {
+                    ...batch,
+                    available_partial_count: availableCount
+                };
+            })
+        );
+
         // Helper function to decode HTML entities
         function decodeHtmlEntities(str) {
             if (!str) return str;
@@ -453,7 +493,7 @@ exports.getProductById = async (req, res) => {
             title: 'Product Details',
             layout: 'layouts/main',
             product: product,
-            batches: batchesResult.rows,
+            batches: batchesWithAvailablePartials,
             user: req.session.user
         });
     } catch (error) {

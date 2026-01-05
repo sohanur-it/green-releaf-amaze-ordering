@@ -1389,27 +1389,45 @@ class FulfillmentIssueService {
         } else if (quantityDelta < 0) {
             // Decreasing, release allocation
             const releaseQty = Math.abs(quantityDelta);
-            await client.query(`
-                UPDATE "ORDERS-batches"
-                SET allocated_quantity = allocated_quantity - $1
-                WHERE id = $2
-            `, [releaseQty, item.fk_batch_id]);
+            
+            // Get current allocated_quantity to prevent negative values
+            const batchCheck = await client.query(`
+                SELECT allocated_quantity
+                FROM "ORDERS-batches"
+                WHERE id = $1
+                FOR UPDATE
+            `, [item.fk_batch_id]);
+            
+            if (batchCheck.rows.length > 0) {
+                const currentAllocated = parseInt(batchCheck.rows[0].allocated_quantity || 0);
+                const actualReleaseQty = Math.min(releaseQty, currentAllocated);
+                
+                if (actualReleaseQty > 0) {
+                    await client.query(`
+                        UPDATE "ORDERS-batches"
+                        SET allocated_quantity = GREATEST(0, allocated_quantity - $1)
+                        WHERE id = $2
+                    `, [actualReleaseQty, item.fk_batch_id]);
 
-            // Log batch history
-            await client.query(`
-                INSERT INTO "ORDERS-batch-history" (
-                    batch_id, change_type, field_name,
-                    old_value, new_value, reason,
-                    related_invoice_id, changed_by_system
-                ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
-                          $2, $3, 'Line item quantity reduced: ' || $4, $5, false)
-            `, [
-                item.fk_batch_id,
-                item.quantity_allocated,
-                item.quantity_allocated - releaseQty,
-                reason,
-                invoiceId
-            ]);
+                    // Log batch history
+                    await client.query(`
+                        INSERT INTO "ORDERS-batch-history" (
+                            batch_id, change_type, field_name,
+                            old_value, new_value, reason,
+                            related_invoice_id, changed_by_system
+                        ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
+                                  $2, $3, 'Line item quantity reduced: ' || $4, $5, false)
+                    `, [
+                        item.fk_batch_id,
+                        currentAllocated.toString(),
+                        Math.max(0, currentAllocated - actualReleaseQty).toString(),
+                        reason,
+                        invoiceId
+                    ]);
+                } else {
+                    console.warn(`⚠️  Cannot release allocation for batch ${item.fk_batch_id}: current allocated is ${currentAllocated}, trying to release ${releaseQty}`);
+                }
+            }
         }
 
         // Calculate new line total

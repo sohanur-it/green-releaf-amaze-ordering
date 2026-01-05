@@ -304,7 +304,13 @@
     margin-bottom: 10px;
     background: var(--hover-bg, #f9fafb);
     display: flex;
-    justify-content: space-between;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.partial-package-actions {
+    display: flex;
+    gap: 8px;
     align-items: center;
 }
 
@@ -755,16 +761,34 @@ async function showBatchSelectionModal(productId, productLabel, batches) {
                         Available: ${batch.available_quantity} • Unit Price: $${parseFloat(batch.unit_price || 0).toFixed(2)}
                     </div>
                     <div class="batch-actions">
-                        <label for="batch-qty-${batch.id}" style="font-weight: 600;">Quantity</label>
-                        <input type="number"
-                               id="batch-qty-${batch.id}"
-                               min="1"
-                               value="1"
-                               max="${batch.available_quantity}"
-                               data-qty-input="${batch.id}">
-                        <button type="button" class="btn btn-primary" data-add-batch="${batch.id}">
-                            Add Batch
-                        </button>
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            <div>
+                                <label for="batch-qty-${batch.id}" style="font-weight: 600; display: block; margin-bottom: 4px;">Quantity</label>
+                                <input type="number"
+                                       id="batch-qty-${batch.id}"
+                                       min="1"
+                                       value="1"
+                                       max="${batch.available_quantity}"
+                                       data-qty-input="${batch.id}"
+                                       style="width: 80px;">
+                            </div>
+                            <div>
+                                <label for="batch-price-${batch.id}" style="font-weight: 600; display: block; margin-bottom: 4px;">Price Override: $</label>
+                                <input type="number"
+                                       id="batch-price-${batch.id}"
+                                       step="0.01"
+                                       min="0"
+                                       value="${parseFloat(batch.unit_price || 0).toFixed(2)}"
+                                       data-price-input="${batch.id}"
+                                       style="width: 100px;"
+                                       placeholder="Auto">
+                            </div>
+                            <div style="align-self: flex-end;">
+                                <button type="button" class="btn btn-primary" data-add-batch="${batch.id}" style="margin-top: 0;">
+                                    Add Batch
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             `).join('');
@@ -780,12 +804,22 @@ async function showBatchSelectionModal(productId, productLabel, batches) {
                     <div class="partial-package-info">
                         <div class="partial-package-label">${escapeHtml(pkg.label)}</div>
                         <div class="partial-package-meta">
-                            Batch: ${escapeHtml(pkg.batch_name)} • Quantity: ${parseFloat(pkg.quantity || 0).toFixed(2)} • Unit Price: $${parseFloat(pkg.unit_price || 0).toFixed(2)}
+                            Batch: ${escapeHtml(pkg.batch_name)} • Quantity: ${parseFloat(pkg.quantity || 0).toFixed(2)}
                         </div>
                     </div>
-                    <button type="button" class="btn btn-primary" data-add-partial="${pkg.batch_id}" data-partial-label="${escapeHtml(pkg.label)}" data-partial-qty="${pkg.quantity}" data-partial-unit-price="${pkg.unit_price}" data-partial-batch-name="${escapeHtml(pkg.batch_name)}">
-                        Add Package
-                    </button>
+                    <div class="partial-package-actions">
+                        <label style="font-size: 0.9rem; font-weight: 500; white-space: nowrap;">Price: $</label>
+                        <input type="number" 
+                               step="0.01" 
+                               min="0" 
+                               value="0.00" 
+                               class="partial-price-input" 
+                               data-partial-price-input="${pkg.batch_id}-${index}"
+                               style="width: 100px; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9rem;">
+                        <button type="button" class="btn btn-primary" data-add-partial="${pkg.batch_id}" data-partial-label="${escapeHtml(pkg.label)}" data-partial-qty="${pkg.quantity}" data-partial-batch-name="${escapeHtml(pkg.batch_name)}" data-partial-index="${index}">
+                            Add Package
+                        </button>
+                    </div>
                 </div>
             `).join('');
             html += '</div>';
@@ -803,10 +837,13 @@ async function showBatchSelectionModal(productId, productLabel, batches) {
                 const batchId = parseInt(button.dataset.addBatch, 10);
                 const card = button.closest('.batch-card');
                 const available = parseInt(card.dataset.available, 10);
-                const unitPrice = parseFloat(card.dataset.unitPrice);
+                const defaultUnitPrice = parseFloat(card.dataset.unitPrice);
                 const batchName = card.dataset.batchName;
                 const qtyInput = overlay.querySelector(`[data-qty-input="${batchId}"]`);
+                const priceInput = overlay.querySelector(`[data-price-input="${batchId}"]`);
                 const quantity = parseInt(qtyInput.value, 10);
+                // Get manual price override, or use default unit price if not specified
+                const manualPrice = priceInput ? parseFloat(priceInput.value) || defaultUnitPrice : defaultUnitPrice;
 
                 if (!quantity || quantity <= 0) {
                     alert('Please enter a valid quantity.');
@@ -818,7 +855,9 @@ async function showBatchSelectionModal(productId, productLabel, batches) {
                     return;
                 }
 
-                addLineItem(productId, batchId, quantity, unitPrice, batchName, []);
+                // For full packages, if price is overridden, use manual pricing
+                const isPriceOverridden = priceInput && parseFloat(priceInput.value) !== defaultUnitPrice;
+                addLineItem(productId, batchId, quantity, manualPrice, batchName, [], false, isPriceOverridden);
                 closeBatchModal();
             });
         });
@@ -829,12 +868,24 @@ async function showBatchSelectionModal(productId, productLabel, batches) {
                 const batchId = parseInt(button.dataset.addPartial, 10);
                 const partialLabel = button.dataset.partialLabel;
                 const partialQty = parseFloat(button.dataset.partialQty || 1);
-                const unitPrice = parseFloat(button.dataset.partialUnitPrice || 0);
                 const batchName = button.dataset.partialBatchName || `Batch ${batchId}`;
+                const partialIndex = button.dataset.partialIndex;
+                
+                // Get manual price from input (default 0)
+                const priceInput = overlay.querySelector(`[data-partial-price-input="${batchId}-${partialIndex}"]`);
+                const manualPrice = parseFloat(priceInput?.value || 0);
+                
+                console.log('Adding partial package:', {
+                    label: partialLabel,
+                    quantity: partialQty,
+                    manualPrice: manualPrice,
+                    priceInputValue: priceInput?.value
+                });
 
                 // Add as individual line item with the partial package label
                 // Each partial package is its own line item with quantity = partial package quantity
-                addLineItem(productId, batchId, partialQty, unitPrice, batchName, [partialLabel]);
+                // For partial packages, use manual price (default 0) instead of unit price * quantity
+                addLineItem(productId, batchId, partialQty, manualPrice, batchName, [partialLabel], true);
                 closeBatchModal();
             });
         });
@@ -954,7 +1005,7 @@ function updatePartialSummary(batchId, summaryEl, qtyInput) {
     }
 }
 
-async function addLineItem(productId, batchId, quantity, unitPrice, batchName, partialPackages = []) {
+async function addLineItem(productId, batchId, quantity, unitPrice, batchName, partialPackages = [], isPartialPackage = false, isPriceOverridden = false) {
     // Check if product already added, if so update quantity
     const existing = lineItems.find(item => item.product_id === productId && item.batch_id === batchId);
     if (existing) {
@@ -986,6 +1037,37 @@ async function addLineItem(productId, batchId, quantity, unitPrice, batchName, p
     }
     
     if (product) {
+        // Calculate line total based on whether price is overridden
+        let manualLineTotal = null;
+        if (isPartialPackage || isPriceOverridden) {
+            // For partial packages or price-overridden items, use the provided price as the line total
+            // unitPrice parameter contains the manual price for these cases
+            manualLineTotal = parseFloat(unitPrice || 0);
+            console.log('Setting manual line total:', {
+                isPartialPackage,
+                isPriceOverridden,
+                unitPrice,
+                manualLineTotal
+            });
+        }
+        
+        // For partial packages, always set unit_price to 0 (we use manual_line_total)
+        // For price-overridden full packages, calculate from manual_line_total
+        // For regular packages, use unitPrice or product.default_price
+        let finalUnitPrice;
+        if (isPartialPackage) {
+            // Partial packages always have unit_price = 0
+            finalUnitPrice = 0;
+        } else if (isPriceOverridden && manualLineTotal !== null) {
+            // Price-overridden full packages: calculate unit_price from manual_line_total
+            finalUnitPrice = quantity > 0 ? parseFloat(manualLineTotal / quantity) : 0;
+        } else {
+            // Regular packages: use unitPrice (check for null/undefined, not falsy, since 0 is valid)
+            finalUnitPrice = (unitPrice !== null && unitPrice !== undefined) 
+                ? parseFloat(unitPrice) 
+                : parseFloat(product.default_price || 0);
+        }
+        
         lineItems.push({
             product_id: productId,
             product_name: product.name,
@@ -993,9 +1075,13 @@ async function addLineItem(productId, batchId, quantity, unitPrice, batchName, p
             batch_id: batchId,
             batch_name: batchName || `Batch ${batchId}`,
             quantity: quantity,
-            unit_price: parseFloat(unitPrice || product.default_price || 0),
-            partial_packages_selected: partialPackages && partialPackages.length ? partialPackages.slice() : []
+            unit_price: finalUnitPrice,
+            partial_packages_selected: partialPackages && partialPackages.length ? partialPackages.slice() : [],
+            is_partial_package: isPartialPackage,
+            is_price_overridden: isPriceOverridden,
+            manual_line_total: manualLineTotal
         });
+        console.log('Added line item:', lineItems[lineItems.length - 1]);
         renderLineItems();
     } else {
         if (typeof showNotification === 'function') {
@@ -1023,15 +1109,21 @@ function renderLineItems() {
 
     let total = 0;
     container.innerHTML = lineItems.map((item, index) => {
-        const lineTotal = item.quantity * parseFloat(item.unit_price);
+        // For partial packages or price-overridden items, use manual_line_total if set, otherwise calculate normally
+        const lineTotal = (item.is_partial_package || item.is_price_overridden) && item.manual_line_total !== null 
+            ? parseFloat(item.manual_line_total) 
+            : item.quantity * parseFloat(item.unit_price);
         total += lineTotal;
+        const priceDisplay = item.is_partial_package || item.is_price_overridden
+            ? `Manual Price: $${parseFloat(item.manual_line_total || 0).toFixed(2)}`
+            : `Unit Price: $${parseFloat(item.unit_price).toFixed(2)}`;
         return `
             <div class="line-item-row">
                 <div class="line-item-info">
                     <strong>${item.brand_name || 'AMAZE'} ${item.product_name}</strong>
                     <div style="font-size: 0.9rem; color: #666;">
                         ${item.batch_name || `Batch ID: ${item.batch_id}`} | Qty: ${item.quantity} | 
-                        Unit Price: $${parseFloat(item.unit_price).toFixed(2)} | 
+                        ${priceDisplay} | 
                         Total: $<strong>${parseFloat(lineTotal).toFixed(2)}</strong>
                     </div>
                     ${item.partial_packages_selected && item.partial_packages_selected.length ? `
@@ -1093,13 +1185,30 @@ async function createInvoice(desiredStatus = 'Pending_Approval', triggerBtn = nu
                 location_id: parseInt(selectedLocationId),
                 source: 'Internal',
                 status,
-                line_items: lineItems.map(item => ({
-                    fk_batch_id: item.batch_id,
-                    quantity: item.quantity,
-                    partial_packages_selected: item.partial_packages_selected && item.partial_packages_selected.length
-                        ? item.partial_packages_selected
-                        : null
-                })),
+                line_items: lineItems.map(item => {
+                    const lineItem = {
+                        fk_batch_id: item.batch_id,
+                        quantity: item.quantity,
+                        partial_packages_selected: item.partial_packages_selected && item.partial_packages_selected.length
+                            ? item.partial_packages_selected
+                            : null
+                    };
+                    // Always send manual_line_total if it was set (including 0 for partial packages)
+                    if (item.is_partial_package || item.is_price_overridden) {
+                        if (item.manual_line_total !== null && item.manual_line_total !== undefined) {
+                            lineItem.manual_line_total = parseFloat(item.manual_line_total);
+                            console.log('Sending line item with manual pricing:', {
+                                batch_id: item.batch_id,
+                                quantity: item.quantity,
+                                is_partial: item.is_partial_package,
+                                is_price_overridden: item.is_price_overridden,
+                                manual_line_total: lineItem.manual_line_total,
+                                partial_packages: item.partial_packages_selected
+                            });
+                        }
+                    }
+                    return lineItem;
+                }),
                 customer_notes: document.getElementById('customer-notes').value,
                 internal_notes: document.getElementById('internal-notes').value
             })

@@ -307,15 +307,24 @@ class CartCleanupService {
 
                 if (batch.rows.length === 0) continue;
 
-                const currentAllocated = batch.rows[0].allocated_quantity;
+                const currentAllocated = parseInt(batch.rows[0].allocated_quantity || 0);
+                const releaseQty = parseInt(item.quantity_allocated || 0);
+                
+                // Prevent negative allocation - only release up to what's allocated
+                const actualReleaseQty = Math.min(releaseQty, currentAllocated);
+                
+                if (actualReleaseQty <= 0) {
+                    console.warn(`⚠️  Cannot release allocation for batch ${item.fk_batch_id}: current allocated is ${currentAllocated}, trying to release ${releaseQty}`);
+                    continue;
+                }
 
                 // Decrement allocated_quantity on batch (within transaction)
                 const updateResult = await client.query(`
                     UPDATE "ORDERS-batches"
-                    SET allocated_quantity = allocated_quantity - $1
+                    SET allocated_quantity = GREATEST(0, allocated_quantity - $1)
                     WHERE id = $2
                     RETURNING id, quantity, allocated_quantity
-                `, [item.quantity_allocated, item.fk_batch_id]);
+                `, [actualReleaseQty, item.fk_batch_id]);
 
                 if (updateResult.rows.length === 0) {
                     console.warn(`⚠️  Batch ${item.fk_batch_id} not found when releasing allocation`);

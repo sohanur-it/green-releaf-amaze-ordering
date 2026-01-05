@@ -423,12 +423,19 @@ class AdminOverrideService {
 
             const batchAllocated = parseInt(batch.rows[0].allocated_quantity || 0);
 
-            // Release allocation
-            await client.query(`
-                UPDATE "ORDERS-batches"
-                SET allocated_quantity = allocated_quantity - $1
-                WHERE id = $2
-            `, [currentAllocated, batchId]);
+            // Prevent negative allocation - only release up to what's allocated
+            const releaseQty = Math.min(currentAllocated, batchAllocated);
+            
+            if (releaseQty > 0) {
+                // Release allocation (with safeguard to prevent negative)
+                await client.query(`
+                    UPDATE "ORDERS-batches"
+                    SET allocated_quantity = GREATEST(0, allocated_quantity - $1)
+                    WHERE id = $2
+                `, [releaseQty, batchId]);
+            } else {
+                console.warn(`⚠️  Cannot release allocation for batch ${batchId}: current allocated is ${batchAllocated}, trying to release ${currentAllocated}`);
+            }
 
             await client.query(`
                 UPDATE "ORDERS-invoice-line-items"

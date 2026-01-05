@@ -799,33 +799,54 @@ class CancelledShipmentService {
 
         // Apply batch updates
         for (const [batchId, updates] of Object.entries(batchUpdates)) {
-            // Decrement allocated_quantity
-            await client.query(`
-                UPDATE "ORDERS-batches"
-                SET allocated_quantity = GREATEST(0, allocated_quantity - $1)
-                WHERE id = $2
-            `, [updates.allocated, batchId]);
+            // Get current allocated_quantity to prevent negative values
+            const batchCheck = await client.query(`
+                SELECT allocated_quantity
+                FROM "ORDERS-batches"
+                WHERE id = $1
+                FOR UPDATE
+            `, [batchId]);
+            
+            if (batchCheck.rows.length > 0) {
+                const currentAllocated = parseInt(batchCheck.rows[0].allocated_quantity || 0);
+                const actualReleaseQty = Math.min(updates.allocated, currentAllocated);
+                
+                if (actualReleaseQty > 0) {
+                    // Decrement allocated_quantity (with safeguard to prevent negative)
+                    await client.query(`
+                        UPDATE "ORDERS-batches"
+                        SET allocated_quantity = GREATEST(0, allocated_quantity - $1)
+                        WHERE id = $2
+                    `, [actualReleaseQty, batchId]);
 
-            // Log to batch history
-            await client.query(`
-                INSERT INTO "ORDERS-batch-history" (
-                    batch_id,
-                    change_type,
-                    field_name,
-                    reason,
-                    related_invoice_id,
-                    changed_by_system,
-                    change_details
-                ) VALUES ($1, 'allocation_released_cancelled_shipment', 'allocated_quantity',
-                         'Allocations released - cancelled shipment packages accounted for', $2, false, $3)
-            `, [
-                batchId,
-                invoiceId,
-                JSON.stringify({
-                    packages: updates.packages.map(p => p.package_label),
-                    quantity_released: updates.allocated
-                })
-            ]);
+                    // Log to batch history
+                    await client.query(`
+                        INSERT INTO "ORDERS-batch-history" (
+                            batch_id,
+                            change_type,
+                            field_name,
+                            old_value,
+                            new_value,
+                            reason,
+                            related_invoice_id,
+                            changed_by_system,
+                            change_details
+                        ) VALUES ($1, 'allocation_released_cancelled_shipment', 'allocated_quantity',
+                                 $2, $3, 'Allocations released - cancelled shipment packages accounted for', $4, false, $5)
+                    `, [
+                        batchId,
+                        currentAllocated.toString(),
+                        Math.max(0, currentAllocated - actualReleaseQty).toString(),
+                        invoiceId,
+                        JSON.stringify({
+                            packages: updates.packages.map(p => p.package_label),
+                            quantity_released: actualReleaseQty
+                        })
+                    ]);
+                } else {
+                    console.warn(`⚠️  Cannot release allocation for batch ${batchId}: current allocated is ${currentAllocated}, trying to release ${updates.allocated}`);
+                }
+            }
 
             // Broadcast batch update
             const batch = await client.query(`
