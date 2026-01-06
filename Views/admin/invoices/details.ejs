@@ -232,6 +232,132 @@
 .dark-theme .rejection-alert-content .close-btn:hover {
     background: var(--hover-bg, #374151);
 }
+
+/* Batch Selection Modal Styles */
+.invoice-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(15, 23, 42, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+}
+
+.invoice-modal {
+    background: var(--card-bg, #fff);
+    width: 95%;
+    max-width: 900px;
+    max-height: 90vh;
+    border-radius: 14px;
+    box-shadow: 0 25px 55px rgba(15, 23, 42, 0.45);
+    display: flex;
+    flex-direction: column;
+}
+
+.invoice-modal .modal-header,
+.invoice-modal .modal-body,
+.invoice-modal .modal-footer {
+    padding: 20px 24px;
+}
+
+.invoice-modal .modal-header {
+    border-bottom: 1px solid var(--border-color, #e5e7eb);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.invoice-modal .modal-body {
+    overflow-y: auto;
+}
+
+.batch-card {
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 14px;
+    background: var(--hover-bg, #f9fafb);
+}
+
+.batch-card h4 {
+    margin: 0;
+    font-size: 15px;
+    color: var(--text-color, #111827);
+}
+
+.batch-meta {
+    font-size: 0.9rem;
+    color: var(--text-light, #6b7280);
+    margin-top: 4px;
+}
+
+.batch-actions {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.batch-section {
+    margin-bottom: 24px;
+}
+
+.batch-section:last-child {
+    margin-bottom: 0;
+}
+
+.section-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--text-color, #111827);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--border-color, #e5e7eb);
+}
+
+.partial-package-card {
+    border: 1px solid var(--border-color, #e5e7eb);
+    border-radius: 10px;
+    padding: 14px;
+    margin-bottom: 10px;
+    background: var(--hover-bg, #f9fafb);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.partial-package-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.partial-package-info {
+    flex: 1;
+}
+
+.partial-package-label {
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--text-color, #111827);
+    margin-bottom: 4px;
+}
+
+.partial-package-meta {
+    font-size: 0.9rem;
+    color: var(--text-light, #6b7280);
+}
+
+.empty-state {
+    text-align: center;
+    padding: 2rem;
+    color: var(--text-light, #6b7280);
+}
 </style>
 
 <div class="page-header">
@@ -542,8 +668,8 @@
             </button>
         <% } %>
     </div>
-    <% if (lineItems && lineItems.length > 0) { %>
-        <div id="line-items-view">
+    <div id="line-items-view">
+        <% if (lineItems && lineItems.length > 0) { %>
             <table class="line-items-table">
                 <thead>
                     <tr>
@@ -555,7 +681,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    <% lineItems.forEach((item, index) => { %>
+                    <% lineItems.forEach(function(item, index) { %>
                         <tr data-line-item-id="<%= item.id %>" data-batch-id="<%= item.fk_batch_id %>" data-product-name="<%= (item.brand_name || 'AMAZE') + ' ' + item.product_name %>">
                             <td>
                                 <strong style="color: var(--text-color);"><%= item.brand_name || 'AMAZE' %> <%= item.product_name %></strong>
@@ -568,8 +694,15 @@
                     <% }); %>
                 </tbody>
             </table>
-        </div>
-        <div id="line-items-edit" style="display: none;">
+        <% } %>
+        <% if (!lineItems || lineItems.length === 0) { %>
+            <div class="empty-state" style="padding: 2rem; text-align: center; color: var(--text-light, #6b7280);">
+                <p>No line items in this invoice.</p>
+                <p style="font-size: 0.9rem; margin-top: 0.5rem;">Click "Edit Line Items" to add products.</p>
+            </div>
+        <% } %>
+    </div>
+    <div id="line-items-edit" style="display: none;">
             <!-- Product Search Section (only shown in edit mode) -->
             <div style="margin-bottom: 1.5rem; padding: 1rem; background: var(--bg-color, #f8f9fa); border-radius: 8px; border: 1px solid var(--border-color, #dee2e6);">
                 <h4 style="margin-bottom: 0.75rem; color: var(--text-color);">Add New Products</h4>
@@ -596,29 +729,39 @@
                     </tr>
                 </thead>
                 <tbody id="editable-line-items-tbody">
-                    <% lineItems.forEach((item, index) => { %>
-                        <tr data-line-item-id="<%= item.id %>" data-batch-id="<%= item.fk_batch_id %>" data-product-name="<%= (item.brand_name || 'AMAZE') + ' ' + item.product_name %>">
-                            <td>
-                                <strong style="color: var(--text-color);"><%= item.brand_name || 'AMAZE' %> <%= item.product_name %></strong>
-                            </td>
-                            <td style="color: var(--text-color);"><%= item.batch_name %></td>
-                            <td>
-                                <input type="number" 
-                                       class="line-item-quantity" 
-                                       value="<%= item.quantity_ordered %>" 
-                                       min="1" 
-                                       data-line-item-id="<%= item.id %>"
-                                       style="width: 80px; padding: 0.25rem; border-radius: 4px; border: 1px solid var(--border-color);">
-                            </td>
-                            <td style="color: var(--text-color);">$<%= parseFloat(item.unit_price || 0).toFixed(2) %></td>
-                            <td><strong style="color: var(--text-color);" class="line-item-total" data-unit-price="<%= item.unit_price || 0 %>">$<%= parseFloat(item.line_total || 0).toFixed(2) %></strong></td>
-                            <td>
-                                <button onclick="removeLineItem(<%= item.id %>)" class="btn btn-sm btn-danger" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">
-                                    <i class="fas fa-trash"></i> Remove
-                                </button>
+                    <% if (lineItems && lineItems.length > 0) { %>
+                        <% for (let i = 0; i < lineItems.length; i++) { 
+                            const item = lineItems[i]; %>
+                            <tr data-line-item-id="<%= item.id %>" data-batch-id="<%= item.fk_batch_id %>" data-product-name="<%= (item.brand_name || 'AMAZE') + ' ' + item.product_name %>">
+                                <td>
+                                    <strong style="color: var(--text-color);"><%= item.brand_name || 'AMAZE' %> <%= item.product_name %></strong>
+                                </td>
+                                <td style="color: var(--text-color);"><%= item.batch_name %></td>
+                                <td>
+                                    <input type="number" 
+                                           class="line-item-quantity" 
+                                           value="<%= item.quantity_ordered %>" 
+                                           min="1" 
+                                           data-line-item-id="<%= item.id %>"
+                                           style="width: 80px; padding: 0.25rem; border-radius: 4px; border: 1px solid var(--border-color);">
+                                </td>
+                                <td style="color: var(--text-color);">$<%= parseFloat(item.unit_price || 0).toFixed(2) %></td>
+                                <td><strong style="color: var(--text-color);" class="line-item-total" data-unit-price="<%= item.unit_price || 0 %>">$<%= parseFloat(item.line_total || 0).toFixed(2) %></strong></td>
+                                <td>
+                                    <button onclick="removeLineItem(<%= item.id %>)" class="btn btn-sm btn-danger" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">
+                                        <i class="fas fa-trash"></i> Remove
+                                    </button>
+                                </td>
+                            </tr>
+                        <% } %>
+                    <% } %>
+                    <% if (!lineItems || lineItems.length === 0) { %>
+                        <tr>
+                            <td colspan="6" style="text-align: center; padding: 2rem; color: var(--text-light, #6b7280);">
+                                No line items. Use the search above to add products.
                             </td>
                         </tr>
-                    <% }); %>
+                    <% } %>
                 </tbody>
             </table>
             <div style="margin-top: 1rem; display: flex; gap: 0.5rem; justify-content: flex-end;">
@@ -675,9 +818,6 @@
                 </div>
             </div>
         </div>
-    <% } else { %>
-        <p>No line items</p>
-    <% } %>
 </div>
 
 <!-- History -->
@@ -1261,6 +1401,7 @@ const locationId = null;
 <% } %>
 let productSearchTimeout;
 let productCache = [];
+const partialPackageCache = {};
 
 function toggleEditMode() {
     isEditMode = !isEditMode;
@@ -1412,24 +1553,23 @@ async function selectProductForEdit(productId) {
     }
 }
 
-function showBatchSelectionModalForEdit(productId, productLabel, batches) {
+async function showBatchSelectionModalForEdit(productId, productLabel, batches) {
     closeBatchModalForEdit();
     
     const overlay = document.createElement('div');
     overlay.id = 'batch-selection-modal-edit';
     overlay.className = 'invoice-modal-overlay';
-    overlay.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 10000; display: flex; align-items: center; justify-content: center;';
     overlay.innerHTML = `
-        <div class="invoice-modal" style="background: var(--card-bg, white); border-radius: 8px; padding: 1.5rem; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-            <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color, #dee2e6); padding-bottom: 0.75rem;">
-                <h3 style="margin: 0; color: var(--text-color);">Select Batch</h3>
-                <button type="button" class="btn btn-secondary" id="batch-modal-close-edit" style="padding: 0.5rem 1rem; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-color, #f8f9fa); color: var(--text-color); cursor: pointer;">Close</button>
+        <div class="invoice-modal">
+            <div class="modal-header">
+                <h3>Select Batch</h3>
+                <button type="button" class="btn btn-secondary" id="batch-modal-close-edit">Close</button>
             </div>
             <div class="modal-body">
-                <p style="margin-top: 0; margin-bottom: 12px; color: var(--text-light, #6b7280); font-size: 0.95rem;">
+                <p style="margin-top: 0; margin-bottom: 16px; color: var(--text-light, #6b7280); font-size: 0.95rem;">
                     ${escapeHtml(productLabel)}
                 </p>
-                <div id="batch-card-container-edit"></div>
+                <div id="batch-card-container-edit">Loading...</div>
             </div>
         </div>
     `;
@@ -1438,42 +1578,188 @@ function showBatchSelectionModalForEdit(productId, productLabel, batches) {
     document.body.style.overflow = 'hidden';
     
     const cardContainer = overlay.querySelector('#batch-card-container-edit');
-    cardContainer.innerHTML = batches.map(batch => `
-        <div class="batch-card" style="border: 1px solid var(--border-color, #dee2e6); border-radius: 8px; padding: 1rem; margin-bottom: 1rem; background: var(--card-bg, white);">
-            <h4 style="margin: 0 0 0.5rem 0; color: var(--text-color);">${escapeHtml(batch.batch_name)}</h4>
-            <div class="batch-meta" style="font-size: 0.9rem; color: var(--text-light, #666); margin-bottom: 1rem;">
-                Available: ${batch.available_quantity} • Unit Price: $${parseFloat(batch.unit_price || 0).toFixed(2)}
-            </div>
-            <div class="batch-actions" style="display: flex; gap: 0.5rem; align-items: center;">
-                <label for="batch-qty-${batch.id}" style="font-weight: 600; color: var(--text-color);">Quantity:</label>
-                <input type="number"
-                       id="batch-qty-${batch.id}"
-                       min="1"
-                       value="1"
-                       max="${batch.available_quantity}"
-                       style="width: 80px; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border-color); background: var(--card-bg, white); color: var(--text-color);">
-                <button type="button" class="btn btn-primary" data-add-batch-edit="${batch.id}" style="padding: 0.5rem 1rem; border-radius: 4px; border: none; background: #007bff; color: white; cursor: pointer;">
-                    Add Batch
-                </button>
-            </div>
-        </div>
-    `).join('');
     
-    // Add event listeners
+    overlay.addEventListener('click', (event) => {
+        if (event.target === overlay) {
+            closeBatchModalForEdit();
+        }
+    });
+    
     overlay.querySelector('#batch-modal-close-edit').addEventListener('click', closeBatchModalForEdit);
     
-    cardContainer.querySelectorAll('[data-add-batch-edit]').forEach(btn => {
-        btn.addEventListener('click', function() {
-            const batchId = parseInt(this.dataset.addBatchEdit);
-            const qtyInput = document.getElementById(`batch-qty-${batchId}`);
-            const quantity = parseInt(qtyInput.value) || 1;
-            const batch = batches.find(b => b.id === batchId);
-            
-            if (batch) {
-                addProductToInvoice(productId, batchId, productLabel, batch.batch_name, batch.unit_price, quantity);
+    try {
+        // Separate batches into full packages and batches with partials
+        const fullPackageBatches = batches.filter(batch => (batch.full_package_count || 0) > 0);
+        const batchesWithPartials = batches.filter(batch => (batch.partial_package_count || 0) > 0);
+        
+        // Fetch all partial packages
+        let allPartialPackages = [];
+        for (const batch of batchesWithPartials) {
+            try {
+                if (!partialPackageCache[batch.id]) {
+                    const response = await fetch(`/api/v1/batches/${batch.id}/partial-packages/available`);
+                    const data = await response.json();
+                    if (data.success && data.partial_packages) {
+                        partialPackageCache[batch.id] = data.partial_packages.filter(pkg => pkg.available);
+                    } else {
+                        partialPackageCache[batch.id] = [];
+                    }
+                }
+                
+                const availablePartials = partialPackageCache[batch.id] || [];
+                // Add batch info to each partial package
+                availablePartials.forEach(pkg => {
+                    allPartialPackages.push({
+                        ...pkg,
+                        batch_id: batch.id,
+                        batch_name: batch.batch_name,
+                        unit_price: batch.unit_price
+                    });
+                });
+            } catch (error) {
+                console.error(`Error loading partial packages for batch ${batch.id}:`, error);
             }
+        }
+        
+        // Build HTML
+        let html = '';
+        
+        // Full Packages Section
+        if (fullPackageBatches.length > 0) {
+            html += '<div class="batch-section">';
+            html += '<div class="section-title">Full Packages</div>';
+            html += fullPackageBatches.map(batch => `
+                <div class="batch-card"
+                     data-batch-id="${batch.id}"
+                     data-batch-name="${escapeHtml(batch.batch_name)}"
+                     data-unit-price="${batch.unit_price}"
+                     data-available="${batch.available_quantity}">
+                    <h4>${escapeHtml(batch.batch_name)}</h4>
+                    <div class="batch-meta">
+                        Available: ${batch.available_quantity} • Unit Price: $${parseFloat(batch.unit_price || 0).toFixed(2)}
+                    </div>
+                    <div class="batch-actions">
+                        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                            <div>
+                                <label for="batch-qty-${batch.id}" style="font-weight: 600; display: block; margin-bottom: 4px;">Quantity</label>
+                                <input type="number"
+                                       id="batch-qty-${batch.id}"
+                                       min="1"
+                                       value="1"
+                                       max="${batch.available_quantity}"
+                                       data-qty-input="${batch.id}"
+                                       style="width: 80px;">
+                            </div>
+                            <div>
+                                <label for="batch-price-${batch.id}" style="font-weight: 600; display: block; margin-bottom: 4px;">Price Override: $</label>
+                                <input type="number"
+                                       id="batch-price-${batch.id}"
+                                       step="0.01"
+                                       min="0"
+                                       value="${parseFloat(batch.unit_price || 0).toFixed(2)}"
+                                       data-price-input="${batch.id}"
+                                       style="width: 100px;"
+                                       placeholder="Auto">
+                            </div>
+                            <div style="align-self: flex-end;">
+                                <button type="button" class="btn btn-primary" data-add-batch-edit="${batch.id}" style="margin-top: 0;">
+                                    Add Batch
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            html += '</div>';
+        }
+        
+        // Partial Packages Section
+        if (allPartialPackages.length > 0) {
+            html += '<div class="batch-section">';
+            html += '<div class="section-title">Partial Packages</div>';
+            html += allPartialPackages.map((pkg, index) => `
+                <div class="partial-package-card">
+                    <div class="partial-package-info">
+                        <div class="partial-package-label">${escapeHtml(pkg.label)}</div>
+                        <div class="partial-package-meta">
+                            Batch: ${escapeHtml(pkg.batch_name)} • Quantity: ${parseFloat(pkg.quantity || 0).toFixed(2)}
+                        </div>
+                    </div>
+                    <div class="partial-package-actions">
+                        <label style="font-size: 0.9rem; font-weight: 500; white-space: nowrap;">Price: $</label>
+                        <input type="number" 
+                               step="0.01" 
+                               min="0" 
+                               value="0.00" 
+                               class="partial-price-input" 
+                               data-partial-price-input="${pkg.batch_id}-${index}"
+                               style="width: 100px; padding: 6px; border: 1px solid #ddd; border-radius: 4px; font-size: 0.9rem;">
+                        <button type="button" class="btn btn-primary" data-add-partial-edit="${pkg.batch_id}" data-partial-label="${escapeHtml(pkg.label)}" data-partial-qty="${pkg.quantity}" data-partial-batch-name="${escapeHtml(pkg.batch_name)}" data-partial-index="${index}">
+                            Add Package
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+            html += '</div>';
+        }
+        
+        if (html === '') {
+            html = '<div class="empty-state">No packages available.</div>';
+        }
+        
+        cardContainer.innerHTML = html;
+        
+        // Add event listeners for full package batches
+        overlay.querySelectorAll('[data-add-batch-edit]').forEach(button => {
+            button.addEventListener('click', () => {
+                const batchId = parseInt(button.dataset.addBatchEdit, 10);
+                const card = button.closest('.batch-card');
+                const available = parseInt(card.dataset.available, 10);
+                const defaultUnitPrice = parseFloat(card.dataset.unitPrice);
+                const batchName = card.dataset.batchName;
+                const qtyInput = overlay.querySelector(`[data-qty-input="${batchId}"]`);
+                const priceInput = overlay.querySelector(`[data-price-input="${batchId}"]`);
+                const quantity = parseInt(qtyInput.value, 10);
+                const manualPrice = priceInput ? parseFloat(priceInput.value) || defaultUnitPrice : defaultUnitPrice;
+                
+                if (!quantity || quantity <= 0) {
+                    alert('Please enter a valid quantity.');
+                    return;
+                }
+                
+                if (quantity > available) {
+                    alert(`Only ${available} units available for this batch.`);
+                    return;
+                }
+                
+                const isPriceOverridden = priceInput && parseFloat(priceInput.value) !== defaultUnitPrice;
+                addProductToInvoice(productId, batchId, productLabel, batchName, manualPrice, quantity, [], false, isPriceOverridden);
+                closeBatchModalForEdit();
+            });
         });
-    });
+        
+        // Add event listeners for partial packages
+        overlay.querySelectorAll('[data-add-partial-edit]').forEach(button => {
+            button.addEventListener('click', () => {
+                const batchId = parseInt(button.dataset.addPartialEdit, 10);
+                const partialLabel = button.dataset.partialLabel;
+                const partialQty = parseFloat(button.dataset.partialQty || 1);
+                const batchName = button.dataset.partialBatchName || `Batch ${batchId}`;
+                const partialIndex = button.dataset.partialIndex;
+                
+                // Get manual price from input (default 0)
+                const priceInput = overlay.querySelector(`[data-partial-price-input="${batchId}-${partialIndex}"]`);
+                const manualPrice = parseFloat(priceInput?.value || 0);
+                
+                // Add as individual line item with the partial package label
+                addProductToInvoice(productId, batchId, productLabel, batchName, manualPrice, partialQty, [partialLabel], true);
+                closeBatchModalForEdit();
+            });
+        });
+    } catch (error) {
+        console.error('Error loading batch data:', error);
+        cardContainer.innerHTML = '<div class="empty-state">Error loading batches. Please try again.</div>';
+    }
 }
 
 function closeBatchModalForEdit() {
@@ -1484,7 +1770,7 @@ function closeBatchModalForEdit() {
     }
 }
 
-async function addProductToInvoice(productId, batchId, productName, batchName, unitPrice, quantity = null) {
+async function addProductToInvoice(productId, batchId, productName, batchName, unitPrice, quantity = null, partialPackagesSelected = [], isPartialPackage = false, isPriceOverridden = false) {
     // Close batch modal
     closeBatchModalForEdit();
     
@@ -1498,16 +1784,35 @@ async function addProductToInvoice(productId, batchId, productName, batchName, u
         finalQuantity = parseInt(qtyInput);
     }
     
+    // Build request body
+    const requestBody = {
+        fk_batch_id: batchId,
+        quantity: finalQuantity
+    };
+    
+    // Add partial packages if provided
+    if (isPartialPackage && partialPackagesSelected && partialPackagesSelected.length > 0) {
+        requestBody.partial_packages_selected = partialPackagesSelected;
+    }
+    
+    // For partial packages, always send manual_line_total (even if 0)
+    // For price-overridden full packages, send manual_line_total if price was changed
+    if (isPartialPackage) {
+        // For partial packages, use the provided unitPrice directly as the total (not multiplied by quantity)
+        // unitPrice is the manual price entered in the input (default 0)
+        requestBody.manual_line_total = parseFloat(unitPrice) || 0;
+    } else if (isPriceOverridden) {
+        // For price-overridden full packages, calculate: unitPrice * quantity
+        requestBody.manual_line_total = parseFloat(unitPrice) * finalQuantity;
+    }
+    
     try {
         const response = await fetch(`/api/v1/invoices/${invoiceId}/line-items`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                fk_batch_id: batchId,
-                quantity: finalQuantity
-            })
+            body: JSON.stringify(requestBody)
         });
         
         const data = await response.json();
@@ -1537,12 +1842,22 @@ async function addProductToInvoice(productId, batchId, productName, batchName, u
 
 function cancelEditLineItems() {
     isEditMode = false;
-    document.getElementById('line-items-view').style.display = 'block';
-    document.getElementById('line-items-edit').style.display = 'none';
-    document.getElementById('edit-line-items-btn').innerHTML = '<i class="fas fa-edit"></i> Edit Line Items';
-    document.getElementById('edit-line-items-btn').classList.remove('btn-secondary');
-    document.getElementById('edit-line-items-btn').classList.add('btn-primary');
-    document.getElementById('edit-line-items-btn').setAttribute('onclick', 'toggleEditMode()');
+    const lineItemsView = document.getElementById('line-items-view');
+    const lineItemsEdit = document.getElementById('line-items-edit');
+    const editBtn = document.getElementById('edit-line-items-btn');
+    
+    if (lineItemsView) {
+        lineItemsView.style.display = 'block';
+    }
+    if (lineItemsEdit) {
+        lineItemsEdit.style.display = 'none';
+    }
+    if (editBtn) {
+        editBtn.innerHTML = '<i class="fas fa-edit"></i> Edit Line Items';
+        editBtn.classList.remove('btn-secondary');
+        editBtn.classList.add('btn-primary');
+        editBtn.setAttribute('onclick', 'toggleEditMode()');
+    }
     
     // Reload page to reset any changes
     window.location.reload();

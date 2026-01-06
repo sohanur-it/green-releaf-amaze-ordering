@@ -2671,13 +2671,14 @@ router.get('/batches/:batchId/partial-packages/available', auth, async (req, res
     try {
         const { batchId } = req.params;
 
-        // Get batch with partial package details
+        // Get batch with partial package details and license
         const batch = await query(`
             SELECT 
                 id,
                 batch_name,
                 partial_package_count,
-                partial_package_details
+                partial_package_details,
+                synclicense
             FROM "ORDERS-batches"
             WHERE id = $1
         `, [batchId]);
@@ -2703,7 +2704,21 @@ router.get('/batches/:batchId/partial-packages/available', auth, async (req, res
         // Parse partial package details
         const partialPackageDetails = batchData.partial_package_details.partial_packages || [];
         
-        // Check which packages are allocated to active invoices
+        // Get the correct license column name for activepackages table
+        const licenseColumnCheck = await query(`
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'activepackages' 
+            AND column_name IN ('sync_license', 'synclicense')
+            LIMIT 1
+        `);
+        const licenseColumn = licenseColumnCheck.rows.length > 0 ? licenseColumnCheck.rows[0].column_name : 'synclicense';
+        
+        // Get batch license for METRC check (from batch data we already fetched)
+        // Batches use 'synclicense' column
+        const batchLicense = batchData.synclicense || null;
+        
+        // Check which packages are allocated to active invoices AND still exist in METRC
         const partialPackages = await Promise.all(
             partialPackageDetails.map(async (pkg) => {
                 // Check if this package is allocated to any active invoice
@@ -2716,17 +2731,48 @@ router.get('/batches/:batchId/partial-packages/available', auth, async (req, res
                     INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
                     WHERE li.fk_batch_id = $1
                       AND li.specific_package_labels @> $2::jsonb
-                      AND i.status NOT IN ('Cancelled', 'Paid', 'Fully_Rejected')
+                      AND li.specific_package_labels IS NOT NULL
+                      AND i.status NOT IN ('Cancelled', 'Voided', 'Paid', 'Fully_Rejected')
                 `, [batchId, JSON.stringify([pkg.label])]);
 
                 const isAllocated = allocationCheck.rows.length > 0;
                 const allocatedTo = isAllocated ? allocationCheck.rows[0].invoice_number : null;
+                
+                // Check if package still exists in METRC (activepackages table)
+                let existsInMetrc = false;
+                if (batchLicense) {
+                    const metrcCheck = await query(`
+                        SELECT 1 
+                        FROM activepackages 
+                        WHERE label = $1
+                          AND ${licenseColumn} = $2
+                          AND isarchived = false
+                          AND isfinished = false
+                        LIMIT 1
+                    `, [pkg.label, batchLicense]);
+                    existsInMetrc = metrcCheck.rows.length > 0;
+                } else {
+                    // If no license, check without license filter (fallback)
+                    const metrcCheck = await query(`
+                        SELECT 1 
+                        FROM activepackages 
+                        WHERE label = $1
+                          AND isarchived = false
+                          AND isfinished = false
+                        LIMIT 1
+                    `, [pkg.label]);
+                    existsInMetrc = metrcCheck.rows.length > 0;
+                }
+
+                // Package is only available if: not allocated AND exists in METRC
+                const isAvailable = !isAllocated && existsInMetrc;
 
                 return {
                     label: pkg.label,
                     quantity: parseFloat(pkg.quantity || 0),
-                    available: !isAllocated,
-                    allocated_to: allocatedTo
+                    available: isAvailable,
+                    allocated_to: allocatedTo,
+                    exists_in_metrc: existsInMetrc
                 };
             })
         );

@@ -296,14 +296,17 @@ class AllocationService {
             }
             
             const lineItems = await client.query(`
-                SELECT id, fk_batch_id, quantity_allocated
+                SELECT id, fk_batch_id, quantity_allocated, specific_package_labels
                 FROM "ORDERS-invoice-line-items"
-                WHERE fk_invoice_id = $1 AND quantity_allocated > 0
+                WHERE fk_invoice_id = $1 AND (quantity_allocated > 0 OR specific_package_labels IS NOT NULL)
             `, [invoiceId]);
             
             for (const item of lineItems.rows) {
                 const batchId = item.fk_batch_id;
-                const quantity = item.quantity_allocated;
+                const quantity = parseInt(item.quantity_allocated || 0);
+                const hasPartialPackages = item.specific_package_labels && 
+                    (Array.isArray(item.specific_package_labels) ? item.specific_package_labels.length > 0 : 
+                     typeof item.specific_package_labels === 'string' ? item.specific_package_labels.length > 0 : false);
                 
                 // Lock batch
                 const batch = await client.query(`
@@ -316,34 +319,46 @@ class AllocationService {
                 
                 const currentAllocated = parseInt(batch.rows[0].allocated_quantity || 0);
                 
-                // Prevent negative allocation - only release up to what's allocated
-                const releaseQty = Math.min(quantity, currentAllocated);
-                
-                if (releaseQty > 0) {
-                    // Decrement allocation (with safeguard to prevent negative)
-                    await client.query(`
-                        UPDATE "ORDERS-batches"
-                        SET allocated_quantity = GREATEST(0, allocated_quantity - $1)
-                        WHERE id = $2
-                    `, [releaseQty, batchId]);
+                // Release full package allocation (if any)
+                if (quantity > 0) {
+                    // Prevent negative allocation - only release up to what's allocated
+                    const releaseQty = Math.min(quantity, currentAllocated);
                     
-                    // Log history
-                    await client.query(`
-                        INSERT INTO "ORDERS-batch-history" (
-                            batch_id, change_type, field_name,
-                            old_value, new_value, reason,
-                            related_invoice_id, changed_by_system
-                        ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
-                                  $2, $3, 'Invoice cancelled', $4, true)
-                    `, [batchId, currentAllocated.toString(), Math.max(0, currentAllocated - releaseQty).toString(), invoiceId]);
-                } else {
-                    console.warn(`⚠️  Cannot release allocation for batch ${batchId}: current allocated is ${currentAllocated}, trying to release ${quantity}`);
+                    if (releaseQty > 0) {
+                        // Decrement allocation (with safeguard to prevent negative)
+                        await client.query(`
+                            UPDATE "ORDERS-batches"
+                            SET allocated_quantity = GREATEST(0, allocated_quantity - $1)
+                            WHERE id = $2
+                        `, [releaseQty, batchId]);
+                        
+                        // Log history
+                        await client.query(`
+                            INSERT INTO "ORDERS-batch-history" (
+                                batch_id, change_type, field_name,
+                                old_value, new_value, reason,
+                                related_invoice_id, changed_by_system
+                            ) VALUES ($1, 'allocation_decreased', 'allocated_quantity',
+                                      $2, $3, 'Invoice cancelled', $4, true)
+                        `, [batchId, currentAllocated.toString(), Math.max(0, currentAllocated - releaseQty).toString(), invoiceId]);
+                    } else {
+                        console.warn(`⚠️  Cannot release allocation for batch ${batchId}: current allocated is ${currentAllocated}, trying to release ${quantity}`);
+                    }
                 }
                 
-                // Zero out line item allocation
+                // Clear partial package labels to release them back to availability
+                // This is critical: partial packages are tracked via specific_package_labels,
+                // not allocated_quantity, so clearing this makes them available again
+                if (hasPartialPackages) {
+                    console.log(`🔄 Releasing partial packages from line item ${item.id} for batch ${batchId}`);
+                }
+                
+                // Zero out line item allocation and clear partial package labels
+                // This releases partial packages back to availability
                 await client.query(`
                     UPDATE "ORDERS-invoice-line-items"
-                    SET quantity_allocated = 0
+                    SET quantity_allocated = 0,
+                        specific_package_labels = NULL
                     WHERE id = $1
                 `, [item.id]);
             }

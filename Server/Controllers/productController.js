@@ -33,7 +33,10 @@ exports.getAllProducts = async (req, res) => {
             SELECT 
                 p.*,
                 COUNT(b.id) as batch_count,
-                GREATEST(0, SUM(CASE WHEN b.status = 'Sellable' THEN b.quantity - b.allocated_quantity ELSE 0 END)) as available_quantity,
+                GREATEST(0, SUM(CASE 
+                    WHEN b.status = 'Sellable' THEN GREATEST(0, b.quantity - GREATEST(0, COALESCE(b.allocated_quantity, 0))) 
+                    ELSE 0 
+                END)) as available_quantity,
                 (
                     SELECT file_path 
                     FROM "ORDERS-product-images" pi

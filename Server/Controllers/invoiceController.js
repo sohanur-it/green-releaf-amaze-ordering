@@ -1471,7 +1471,7 @@ class InvoiceController {
     async addLineItem(req, res) {
         try {
             const { id } = req.params;
-            const { fk_batch_id, quantity, partial_packages_selected } = req.body;
+            const { fk_batch_id, quantity, partial_packages_selected, manual_line_total } = req.body;
             const userId = req.session.userId || req.user?.id;
 
             if (!fk_batch_id || !quantity) {
@@ -1553,7 +1553,10 @@ class InvoiceController {
                     {
                         fk_batch_id: parseInt(fk_batch_id),
                         quantity: parseInt(quantity),
-                        partial_packages_selected: partial_packages_selected || null
+                        partial_packages_selected: partial_packages_selected || null,
+                        manual_line_total: manual_line_total !== undefined && manual_line_total !== null
+                            ? parseFloat(manual_line_total)
+                            : undefined
                     },
                     userId,
                     client

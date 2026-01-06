@@ -1022,13 +1022,30 @@ async function addLineItem(productId, batchId, quantity, unitPrice, batchName, p
     
     if (!product) {
         try {
-            // Try to get from search results or fetch
+            // First, try to get from search results if there's a search query
             const searchQuery = document.getElementById('product-search').value;
             if (searchQuery) {
                 const response = await fetch(`/api/v1/invoices/products?location_id=${selectedLocationId}&search=${encodeURIComponent(searchQuery)}`);
                 const data = await response.json();
                 if (data.success && data.products) {
                     product = data.products.find(p => p.product_id === productId);
+                    // Update cache with search results
+                    if (data.products.length > 0) {
+                        productCache = [...productCache, ...data.products.filter(p => !productCache.find(cached => cached.product_id === p.product_id))];
+                    }
+                }
+            }
+            
+            // If still not found, fetch all products for the location to find it
+            if (!product && selectedLocationId) {
+                const response = await fetch(`/api/v1/invoices/products?location_id=${selectedLocationId}`);
+                const data = await response.json();
+                if (data.success && data.products) {
+                    product = data.products.find(p => p.product_id === productId);
+                    // Update cache
+                    if (data.products.length > 0) {
+                        productCache = data.products;
+                    }
                 }
             }
         } catch (error) {
