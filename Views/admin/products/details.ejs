@@ -394,7 +394,6 @@ body {
                                 <td>
                                     <% 
                                         const totalPartialCount = batch.partial_package_count || 0;
-                                        const availablePartialCount = batch.available_partial_count !== undefined ? batch.available_partial_count : totalPartialCount;
                                         const partialList = (batch.partial_package_details && batch.partial_package_details.partial_packages) || [];
                                         const partialTooltip = partialList.length
                                             ? partialList.map(p => `${p.label}${p.quantity ? ' (Qty: ' + p.quantity + ')' : ''}`).join(', ')
@@ -402,10 +401,10 @@ body {
                                     %>
                                     <% if (totalPartialCount > 0) { %>
                                         <span class="badge bg-warning text-dark" title="<%= partialTooltip %>">
-                                            <%= availablePartialCount %>/<%= totalPartialCount %> available
+                                            Partial packages available
                                         </span>
                                     <% } else { %>
-                                        <span class="text-muted">0</span>
+                                        <span class="text-muted">-</span>
                                     <% } %>
                                 </td>
                                 <td>

@@ -294,16 +294,7 @@ async function createManifest() {
             return;
         }
 
-        // Confirm before creating
-        const confirmMessage = `Create manifest(s) for invoice ${previewData.payload.invoice_number}?\n\n` +
-            `This will create ${previewData.payload.licenseCount} manifest(s) in METRC.`;
-
-        if (!confirm(confirmMessage)) {
-            createBtn.disabled = false;
-            createBtn.innerHTML = '<i class="fas fa-file-export"></i> Create Manifest(s)';
-            return;
-        }
-
+        // Proceed directly to manifest creation (confirmation removed)
         createBtn.disabled = true;
         createBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating Manifest...';
 

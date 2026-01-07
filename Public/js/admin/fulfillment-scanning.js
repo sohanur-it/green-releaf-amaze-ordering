@@ -582,7 +582,7 @@ function renderProgress(data) {
                         <div class="line-item-progress-fill" style="width: ${percentage}%"></div>
                     </div>
                     <span style="font-weight: 600; color: var(--text-color);">
-                        ${item.scanned_count} / ${item.quantity_ordered}
+                        ${item.scanned_count} / ${item.quantity_ordered}${item.is_partial_package ? ' (partial packages)' : ''}
                     </span>
                 </div>
 

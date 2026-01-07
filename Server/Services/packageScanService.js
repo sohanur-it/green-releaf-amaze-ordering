@@ -197,8 +197,74 @@ class PackageScanService {
             let matchedLineItem = null;
             let isPartialPackageRequired = false;
 
-            // Try to match package to a line item
+            // First, check if this is a partial package by looking at batch's partial_package_details
+            let isScannedPackagePartial = false;
+            if (pkg.partial_package_details) {
+                try {
+                    const partialDetails = typeof pkg.partial_package_details === 'string' 
+                        ? JSON.parse(pkg.partial_package_details) 
+                        : pkg.partial_package_details;
+                    const partialLabels = partialDetails.partial_packages?.map(p => p.label) || [];
+                    isScannedPackagePartial = partialLabels.includes(normalizedPackageLabel);
+                } catch (error) {
+                    console.warn('[PackageScan] Error parsing partial_package_details:', error);
+                }
+            }
+
+            // CRITICAL: Check if this package is required by ANY partial package line item
+            // This must be done BEFORE matching to ensure partial packages go to the right line item
+            let isRequiredByPartialLineItem = false;
+            let requiredPartialLineItemId = null;
+            const normalizedPackageLabelForCheck = String(packageLabel).toUpperCase();
+            
             for (const li of lineItems.rows) {
+                if (li.specific_package_labels === null || li.specific_package_labels === '') continue;
+                
+                try {
+                    const specificLabels = Array.isArray(li.specific_package_labels)
+                        ? li.specific_package_labels
+                        : JSON.parse(li.specific_package_labels || '[]');
+                    const normalizedSpecificLabels = specificLabels.map(label => String(label).toUpperCase());
+                    
+                    if (normalizedSpecificLabels.includes(normalizedPackageLabelForCheck)) {
+                        isRequiredByPartialLineItem = true;
+                        requiredPartialLineItemId = li.id;
+                        console.log(`[PackageScan] Package ${packageLabel} is REQUIRED by partial line item ${li.id}`);
+                        break;
+                    }
+                } catch (error) {
+                    // Skip if parsing fails
+                }
+            }
+
+            // Try to match package to a line item
+            // Prioritize matching partial packages to partial line items, and full packages to full line items
+            const lineItemsToCheck = [...lineItems.rows];
+            
+            // Sort: if package is required by a partial line item OR is detected as partial, check partial line items FIRST
+            lineItemsToCheck.sort((a, b) => {
+                const aIsPartial = a.specific_package_labels !== null && a.specific_package_labels !== '';
+                const bIsPartial = b.specific_package_labels !== null && b.specific_package_labels !== '';
+                
+                // If package is required by a partial line item, prioritize partial line items
+                if (isRequiredByPartialLineItem || isScannedPackagePartial) {
+                    // Prioritize partial line items
+                    if (aIsPartial && !bIsPartial) return -1;
+                    if (!aIsPartial && bIsPartial) return 1;
+                    // If both are partial, prioritize the one that requires this package
+                    if (aIsPartial && bIsPartial) {
+                        if (a.id === requiredPartialLineItemId) return -1;
+                        if (b.id === requiredPartialLineItemId) return 1;
+                    }
+                } else {
+                    // Prioritize full line items
+                    if (!aIsPartial && bIsPartial) return -1;
+                    if (aIsPartial && !bIsPartial) return 1;
+                }
+                return 0;
+            });
+
+            for (const li of lineItemsToCheck) {
                 // Check if package label is in this line item's batch
                 // Method 1: Check if package's batch_name matches (if available)
                 let batchMatches = false;
@@ -251,27 +317,41 @@ class PackageScanService {
                 }
                 
                 if (batchMatches) {
-                    matchedLineItem = li;
-
                     // Check if specific package labels are required
-                    if (li.specific_package_labels !== null) {
+                    if (li.specific_package_labels !== null && li.specific_package_labels !== '') {
+                        // This is a partial package line item
                         isPartialPackageRequired = true;
 
-                        // Must be one of the specific labels
+                        // Must be one of the specific labels (case-insensitive comparison)
                         const specificLabels = Array.isArray(li.specific_package_labels) 
                             ? li.specific_package_labels 
                             : JSON.parse(li.specific_package_labels || '[]');
+                        
+                        // Normalize for case-insensitive comparison
+                        const normalizedSpecificLabels = specificLabels.map(label => String(label).toUpperCase());
+                        const normalizedPackageLabel = String(packageLabel).toUpperCase();
 
-                        if (!specificLabels.includes(packageLabel)) {
-                            await client.query('ROLLBACK');
-                            throw new ValidationError(
-                                'WRONG_PARTIAL_PACKAGE',
-                                `This line item requires specific partial packages. ${packageLabel} is not in the required list.`,
-                                { allowedLabels: specificLabels }
-                            );
+                        if (!normalizedSpecificLabels.includes(normalizedPackageLabel)) {
+                            // This partial package is not in the required list, continue searching
+                            continue;
+                        }
+                    } else {
+                        // This is a full package line item
+                        isPartialPackageRequired = false;
+                        
+                        // CRITICAL: If this package is required by a partial line item, NEVER match it to a full package line item
+                        if (isRequiredByPartialLineItem) {
+                            console.log(`[PackageScan] Package ${packageLabel} is required by partial line item ${requiredPartialLineItemId}, skipping full package line item ${li.id}`);
+                            continue;
+                        }
+                        
+                        // If scanned package is detected as partial from batch details, don't match it to a full package line item
+                        if (isScannedPackagePartial) {
+                            continue;
                         }
                     }
 
+                    matchedLineItem = li;
                     break; // Found the matching line item
                 }
             }
@@ -378,7 +458,7 @@ class PackageScanService {
             }
 
             // ============================================
-            // VALIDATION LAYER 6: Duplicate Scan Check
+            // VALIDATION LAYER 6: Duplicate Scan Check & Wrong Line Item Check
             // ============================================
             const assignedLabels = matchedLineItem.assigned_package_labels 
                 ? (Array.isArray(matchedLineItem.assigned_package_labels)
@@ -386,6 +466,7 @@ class PackageScanService {
                     : JSON.parse(matchedLineItem.assigned_package_labels || '[]'))
                 : [];
 
+            // Check if package is already assigned to this line item
             if (assignedLabels.includes(packageLabel)) {
                 // Just ignore silently and let them continue
                 await client.query('COMMIT');
@@ -395,6 +476,62 @@ class PackageScanService {
                     message: 'Package already scanned (ignored)',
                     line_item_id: matchedLineItem.line_item_id
                 };
+            }
+            
+            // CRITICAL: Check if package is assigned to a DIFFERENT line item
+            // If it's assigned to a full package line item but should be in a partial one, we need to move it
+            for (const otherLi of lineItems.rows) {
+                if (otherLi.id === matchedLineItem.line_item_id) continue; // Skip the matched line item
+                
+                const otherAssignedLabels = otherLi.assigned_package_labels
+                    ? (Array.isArray(otherLi.assigned_package_labels)
+                        ? otherLi.assigned_package_labels
+                        : JSON.parse(otherLi.assigned_package_labels || '[]'))
+                    : [];
+                
+                // Check if package is in this other line item (case-insensitive)
+                const normalizedOtherLabels = otherAssignedLabels.map(label => String(label).toUpperCase());
+                if (normalizedOtherLabels.includes(normalizedPackageLabelForCheck)) {
+                    // Package is already assigned to a different line item
+                    // If the matched line item is a partial and the other is full, move it
+                    // If the matched line item is full and the other is partial, this shouldn't happen due to our sorting
+                    // but if it does, we should move it to the partial
+                    const otherIsPartial = otherLi.specific_package_labels !== null && otherLi.specific_package_labels !== '';
+                    const matchedIsPartial = matchedLineItem.specific_package_labels !== null && matchedLineItem.specific_package_labels !== '';
+                    
+                    if (matchedIsPartial && !otherIsPartial) {
+                        // Package is in full package line item but should be in partial - move it
+                        console.log(`[PackageScan] Moving package ${packageLabel} from full package line item ${otherLi.id} to partial line item ${matchedLineItem.line_item_id}`);
+                        
+                        // Remove from full package line item
+                        const updatedOtherLabels = otherAssignedLabels.filter(label => 
+                            String(label).toUpperCase() !== normalizedPackageLabelForCheck
+                        );
+                        await client.query(`
+                            UPDATE "ORDERS-invoice-line-items"
+                            SET assigned_package_labels = $1
+                            WHERE id = $2
+                        `, [JSON.stringify(updatedOtherLabels), otherLi.id]);
+                        
+                        // Will be added to partial line item below
+                    } else if (!matchedIsPartial && otherIsPartial) {
+                        // Package is in partial line item but we're trying to add to full - this shouldn't happen
+                        // but if it does, reject it
+                        console.warn(`[PackageScan] Package ${packageLabel} is already in partial line item ${otherLi.id}, cannot add to full package line item ${matchedLineItem.line_item_id}`);
+                        await client.query('ROLLBACK');
+                        throw new ValidationError('PACKAGE_ALREADY_IN_PARTIAL', 
+                            `Package ${packageLabel} is already assigned to a partial package line item. Please remove it from that line item first.`);
+                    } else {
+                        // Package is already in another line item of the same type - duplicate
+                        await client.query('COMMIT');
+                        return {
+                            success: true,
+                            duplicate: true,
+                            message: `Package already scanned in another line item (ignored)`,
+                            line_item_id: otherLi.id
+                        };
+                    }
+                }
             }
 
             // ============================================

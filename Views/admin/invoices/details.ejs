@@ -780,6 +780,42 @@
             </div>
         </div>
         
+        <!-- Report Fulfillment Issue Button - Visible when fulfillment has started and sales needs to make changes -->
+        <% 
+        // Show button when fulfillment has started (even if status is still "Approved")
+        // Fulfillment has started when:
+        // 1. Status is Fulfillment_Accepted, Manifested, or Partially_Manifested
+        // 2. OR fulfillment_accepted_by is set (fulfillment has claimed the order)
+        // 3. OR there's an active scanning session (fulfillment is scanning packages)
+        const fulfillmentStatuses = ['Fulfillment_Accepted', 'Manifested', 'Partially_Manifested'];
+        const hasFulfillmentClaimed = invoice.fulfillment_accepted_by && invoice.fulfillment_accepted_by !== null;
+        const hasActiveScanning = invoice.has_active_scanning_session === true;
+        const fulfillmentStarted = fulfillmentStatuses.includes(invoice.status) || hasFulfillmentClaimed || hasActiveScanning;
+        const canReportIssue = fulfillmentStarted && 
+                              invoice.status !== 'Fulfillment_Issue' && 
+                              invoice.status !== 'Draft' && 
+                              invoice.status !== 'Pending_Approval' &&
+                              !isFulfillmentUser && 
+                              (isSalesAdmin || isSalesRep || isAdmin);
+        %>
+        <% if (canReportIssue) { %>
+        <div class="fulfillment-issue-alert" style="margin-top: 1.5rem; padding: 1rem; background: #fff3e0; border: 1px solid #ff9800; border-radius: 8px; border-left: 4px solid #ff9800;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+                <div style="flex: 1; min-width: 250px;">
+                    <h4 style="margin: 0 0 0.5rem 0; color: var(--text-color);">
+                        <i class="fas fa-info-circle" style="color: #ff9800;"></i> Fulfillment In Progress
+                    </h4>
+                    <p style="margin: 0; color: var(--text-light); font-size: 0.875rem;">
+                        Fulfillment team has started working on this order. To make changes, you must first report an issue, which will return the invoice to you for editing.
+                    </p>
+                </div>
+                <button onclick="reportFulfillmentIssue()" class="btn btn-warning" id="report-issue-btn" style="white-space: nowrap; flex-shrink: 0; background: #ff9800; color: white; border: none;">
+                    <i class="fas fa-exclamation-triangle"></i> Report Issue
+                </button>
+            </div>
+        </div>
+        <% } %>
+        
         <!-- Kick Back to Fulfillment Button - Visible when invoice is in Fulfillment_Issue, Manifest_Voided, or Partially_Voided status -->
         <% if ((invoice.status === 'Fulfillment_Issue' || invoice.status === 'Manifest_Voided' || invoice.status === 'Partially_Voided') && !isFulfillmentUser) { %>
         <div class="fulfillment-issue-alert" style="margin-top: 1.5rem; padding: 1rem; background: #fef3c7; border: 1px solid #f59e0b; border-radius: 8px; border-left: 4px solid #f59e0b;">
@@ -1983,29 +2019,78 @@ async function saveLineItemChanges() {
 }
 
 /**
+ * Report fulfillment issue to enable editing
+ */
+async function reportFulfillmentIssue() {
+    const reason = prompt('Please describe the issue that requires changes to this invoice:');
+    if (!reason || reason.trim().length < 10) {
+        if (reason) {
+            alert('Issue description must be at least 10 characters long.');
+        }
+        return;
+    }
+    
+    if (!confirm('This will report a fulfillment issue and return the invoice to you for editing. Continue?')) {
+        return;
+    }
+    
+    // Get the button and show loading state
+    const button = document.getElementById('report-issue-btn');
+    setButtonLoading(button, true);
+    
+    try {
+        // Create a generic issue for the entire invoice
+        const issues = [{
+            type: 'general',
+            description: reason.trim(),
+            batch_name: 'All items',
+            batch_id: null
+        }];
+        
+        const response = await fetch(`/api/v1/invoices/${invoiceId}/fulfillment/issue`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                issues: issues,
+                note: reason.trim()
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Failed to report fulfillment issue');
+        }
+        
+        if (typeof showNotification === 'function') {
+            showNotification('Fulfillment issue reported successfully. You can now edit the invoice.', 'success');
+        } else {
+            alert('Fulfillment issue reported successfully. You can now edit the invoice.');
+        }
+        
+        // Reload page to show updated status
+        setTimeout(() => window.location.reload(), 1000);
+    } catch (error) {
+        console.error('Error:', error);
+        if (typeof showNotification === 'function') {
+            showNotification('Failed to report fulfillment issue: ' + error.message, 'error');
+        } else {
+            alert('Failed to report fulfillment issue: ' + error.message);
+        }
+    } finally {
+        setButtonLoading(button, false);
+    }
+}
+
+/**
  * Kick back invoice to fulfillment after fixing issues
  */
 async function kickBackToFulfillment() {
-    // First check if any line items were modified
-    try {
-        const invoiceResponse = await fetch(`/api/v1/invoices/${invoiceId}`);
-        const invoiceData = await invoiceResponse.json();
-        
-        if (invoiceData.success && invoiceData.invoice) {
-            const lineItems = invoiceData.invoice.line_items || [];
-            const hasModifications = lineItems.some(item => 
-                item.was_modified === true || item.fulfillment_issue_modification === true
-            );
-            
-            if (!hasModifications) {
-                alert('Cannot kick back to fulfillment - no changes have been made to the invoice line items.\n\nPlease modify at least one line item (quantity, add, or remove items) before returning to fulfillment.');
-                return;
-            }
-        }
-    } catch (error) {
-        console.error('Error checking modifications:', error);
-        // Continue anyway - backend will validate
-    }
+    // Allow kick back to fulfillment without requiring line item modifications
+    // Status can be changed when issues are resolved through other means
+    // (e.g., clarification, note updates, etc.) without inventory changes
     
     if (!confirm('Are you sure you want to kick this invoice back to fulfillment? This will change the status from Fulfillment_Issue to Approved.')) {
         return;

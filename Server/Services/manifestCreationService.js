@@ -70,6 +70,123 @@ class ManifestCreationService {
         }
         console.log(`[Manifest] ✓ Scanning complete`);
         
+        // Check for active scanning sessions BEFORE starting transaction
+        // This avoids transaction abort issues
+        console.log(`[Manifest] Checking for active scanning sessions (pre-transaction)...`);
+        const sessionCheckClient = await pool.connect();
+        try {
+            const activeSessions = await sessionCheckClient.query(`
+                SELECT 
+                    id,
+                    fk_user_id,
+                    last_activity,
+                    EXTRACT(EPOCH FROM (NOW() - last_activity)) / 60 as inactivity_minutes
+                FROM "ORDERS-scanning-sessions"
+                WHERE fk_invoice_id = $1
+                    AND session_status = 'active'
+            `, [invoiceId]);
+
+            if (activeSessions.rows.length > 0) {
+                for (const session of activeSessions.rows) {
+                    const inactivityMinutes = parseFloat(session.inactivity_minutes) || 0;
+                    console.log(`[Manifest] Found active scanning session ${session.id}, inactive for ${inactivityMinutes.toFixed(1)} minutes`);
+                    
+                    // Check if all packages are scanned - if yes, we can auto-abandon and proceed
+                    console.log(`[Manifest] Checking if all packages are scanned for invoice ${invoiceId}...`);
+                    const lineItemsCheck = await sessionCheckClient.query(`
+                        SELECT 
+                            li.id,
+                            li.quantity_ordered,
+                            li.assigned_package_labels,
+                            li.specific_package_labels,
+                            CASE 
+                                WHEN jsonb_typeof(li.assigned_package_labels) = 'array' 
+                                THEN jsonb_array_length(li.assigned_package_labels)
+                                ELSE 0
+                            END as scanned_count
+                        FROM "ORDERS-invoice-line-items" li
+                        WHERE li.fk_invoice_id = $1
+                    `, [invoiceId]);
+                    
+                    let allPackagesScanned = true;
+                    for (const li of lineItemsCheck.rows) {
+                        const isPartialPackage = li.specific_package_labels !== null && li.specific_package_labels !== '';
+                        
+                        if (isPartialPackage) {
+                            // For partial packages: check if all specific_package_labels are in assigned_package_labels
+                            try {
+                                const specificLabels = Array.isArray(li.specific_package_labels)
+                                    ? li.specific_package_labels
+                                    : JSON.parse(li.specific_package_labels || '[]');
+                                
+                                const scannedLabels = li.assigned_package_labels 
+                                    ? (Array.isArray(li.assigned_package_labels)
+                                        ? li.assigned_package_labels
+                                        : JSON.parse(li.assigned_package_labels || '[]'))
+                                    : [];
+                                
+                                // Normalize for case-insensitive comparison
+                                const normalizedSpecificLabels = specificLabels.map(label => String(label).toUpperCase());
+                                const normalizedScannedLabels = scannedLabels.map(label => String(label).toUpperCase());
+                                
+                                // Check if all specific labels are scanned
+                                const allScanned = normalizedSpecificLabels.every(label => 
+                                    normalizedScannedLabels.includes(label)
+                                );
+                                
+                                if (!allScanned) {
+                                    console.log(`[Manifest] Line item ${li.id} (PARTIAL): Not all packages scanned. Required: ${specificLabels.length}, Scanned: ${scannedLabels.length}`);
+                                    allPackagesScanned = false;
+                                    break;
+                                }
+                            } catch (error) {
+                                console.warn(`[Manifest] Error checking partial package line item ${li.id}:`, error.message);
+                                allPackagesScanned = false;
+                                break;
+                            }
+                        } else {
+                            // For full packages: check if scanned_count equals quantity_ordered
+                            const scannedCount = parseInt(li.scanned_count) || 0;
+                            const quantityOrdered = parseInt(li.quantity_ordered) || 0;
+                            
+                            if (scannedCount < quantityOrdered) {
+                                console.log(`[Manifest] Line item ${li.id} (FULL): Not all packages scanned. Required: ${quantityOrdered}, Scanned: ${scannedCount}`);
+                                allPackagesScanned = false;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (allPackagesScanned) {
+                        // All packages are scanned - auto-abandon the session and proceed
+                        console.log(`[Manifest] All packages are scanned - auto-abandoning session ${session.id} to allow manifest creation`);
+                        await sessionCheckClient.query(`
+                            UPDATE "ORDERS-scanning-sessions"
+                            SET session_status = 'abandoned', abandoned_at = NOW()
+                            WHERE id = $1
+                        `, [session.id]);
+                        console.log(`[Manifest] Session ${session.id} abandoned successfully (all packages scanned)`);
+                    } else if (inactivityMinutes > 5) {
+                        // Session is inactive for more than 5 minutes, abandon it
+                        console.log(`[Manifest] Abandoning inactive scanning session ${session.id} (inactive for ${inactivityMinutes.toFixed(1)} minutes)`);
+                        await sessionCheckClient.query(`
+                            UPDATE "ORDERS-scanning-sessions"
+                            SET session_status = 'abandoned', abandoned_at = NOW()
+                            WHERE id = $1
+                        `, [session.id]);
+                        console.log(`[Manifest] Session ${session.id} abandoned successfully`);
+                    } else {
+                        // Session is still active (within 5 minutes) and not all packages scanned, throw error
+                        // Don't release client here - finally block will handle it
+                        throw new Error(`Invoice is currently locked by an active scanning session (inactive for ${inactivityMinutes.toFixed(1)} minutes). Please wait for the scanning session to complete or contact an admin to abandon it.`);
+                    }
+                }
+            }
+        } finally {
+            sessionCheckClient.release();
+        }
+        
+        // Now start the main transaction
         const client = await pool.connect();
 
         try {
@@ -88,7 +205,8 @@ class ManifestCreationService {
                         fulfillment_accepted_by,
                         transportation_details,
                         invoice_number,
-                        fk_location_id
+                        fk_location_id,
+                        source
                     FROM "ORDERS-invoices"
                     WHERE id = $1
                     FOR UPDATE NOWAIT
@@ -96,7 +214,18 @@ class ManifestCreationService {
                 console.log(`[Manifest] Invoice query completed`);
             } catch (lockError) {
                 if (lockError.code === '55P03') { // Lock not available
-                    throw new Error('Invoice is currently locked by another transaction. Please try again in a moment.');
+                    // Check if there's still an active scanning session
+                    const stillActive = await client.query(`
+                        SELECT id FROM "ORDERS-scanning-sessions"
+                        WHERE fk_invoice_id = $1 AND session_status = 'active'
+                        LIMIT 1
+                    `, [invoiceId]);
+                    
+                    if (stillActive.rows.length > 0) {
+                        throw new Error('Invoice is currently locked by an active scanning session. Please wait for the scanning session to complete or contact an admin to abandon it.');
+                    } else {
+                        throw new Error('Invoice is currently locked by another transaction. Please try again in a moment.');
+                    }
                 }
                 throw lockError;
             }
@@ -151,6 +280,7 @@ class ManifestCreationService {
                     li.id, 
                     li.fk_batch_id, 
                     li.assigned_package_labels,
+                    li.specific_package_labels,
                     li.line_total,
                     li.quantity_ordered,
                     b.status as batch_status,
@@ -162,26 +292,69 @@ class ManifestCreationService {
             console.log(`[Manifest] Found ${allLineItems.rows.length} line items`);
             
             // Section 17.3.2: Validate all batches are sellable
-            const nonSellableBatches = allLineItems.rows.filter(li => li.batch_status !== 'Sellable');
-            if (nonSellableBatches.length > 0) {
-                const batchNames = nonSellableBatches.map(li => `${li.batch_name} (${li.batch_status})`).join(', ');
-                throw new Error(
-                    `Cannot create manifest: ${nonSellableBatches.length} batch(es) are not in Sellable status. ` +
-                    `Batches must be Sellable before manifest creation. Invalid batches: ${batchNames}`
-                );
+            // For internal invoices, skip batch status validation (allow any status)
+            // For external invoices, batches must be Sellable
+            if (inv.source !== 'Internal') {
+                const nonSellableBatches = allLineItems.rows.filter(li => li.batch_status !== 'Sellable');
+                if (nonSellableBatches.length > 0) {
+                    const batchNames = nonSellableBatches.map(li => `${li.batch_name} (${li.batch_status})`).join(', ');
+                    throw new Error(
+                        `Cannot create manifest: ${nonSellableBatches.length} batch(es) are not in Sellable status. ` +
+                        `Batches must be Sellable before manifest creation. Invalid batches: ${batchNames}`
+                    );
+                }
+                console.log(`[Manifest] ✓ All batches validated as Sellable`);
+            } else {
+                console.log(`[Manifest] ✓ Internal invoice - skipping batch status validation (allowing any batch status)`);
             }
-            console.log(`[Manifest] ✓ All batches validated as Sellable`);
 
             // Collect all package labels
+            // For partial packages: use specific_package_labels (pre-assigned individual package labels)
+            // For full packages: use assigned_package_labels (scanned during fulfillment)
             console.log(`[Manifest] Collecting package labels from line items...`);
             const allPackageLabels = [];
             for (const li of allLineItems.rows) {
-                const labels = li.assigned_package_labels 
-                    ? (Array.isArray(li.assigned_package_labels)
-                        ? li.assigned_package_labels
-                        : JSON.parse(li.assigned_package_labels || '[]'))
-                    : [];
-                console.log(`[Manifest] Line item ${li.id}: ${labels.length} package(s) assigned:`, labels);
+                // Check if this is a partial package (has specific_package_labels)
+                const isPartialPackage = li.specific_package_labels !== null && li.specific_package_labels !== '';
+                
+                let labels = [];
+                if (isPartialPackage) {
+                    // Partial packages: use assigned_package_labels (scanned packages) that match specific_package_labels
+                    // Only include packages that have been scanned AND are in the specific_package_labels list
+                    try {
+                        const specificLabels = Array.isArray(li.specific_package_labels)
+                            ? li.specific_package_labels
+                            : JSON.parse(li.specific_package_labels || '[]');
+                        
+                        const scannedLabels = li.assigned_package_labels 
+                            ? (Array.isArray(li.assigned_package_labels)
+                                ? li.assigned_package_labels
+                                : JSON.parse(li.assigned_package_labels || '[]'))
+                            : [];
+                        
+                        // Normalize for case-insensitive comparison
+                        const normalizedSpecificLabels = specificLabels.map(label => String(label).toUpperCase());
+                        
+                        // Only include scanned packages that are in the specific_package_labels list
+                        labels = scannedLabels.filter(label => 
+                            normalizedSpecificLabels.includes(String(label).toUpperCase())
+                        );
+                        
+                        console.log(`[Manifest] Line item ${li.id} (PARTIAL): ${labels.length}/${specificLabels.length} packages scanned and ready for manifest:`, labels);
+                    } catch (error) {
+                        console.warn(`[Manifest] Failed to parse labels for partial package line item ${li.id}:`, error.message);
+                        labels = [];
+                    }
+                } else {
+                    // Full packages: use assigned_package_labels (scanned during fulfillment)
+                    labels = li.assigned_package_labels 
+                        ? (Array.isArray(li.assigned_package_labels)
+                            ? li.assigned_package_labels
+                            : JSON.parse(li.assigned_package_labels || '[]'))
+                        : [];
+                    console.log(`[Manifest] Line item ${li.id} (FULL): ${labels.length} scanned package(s):`, labels);
+                }
+                
                 allPackageLabels.push(...labels);
             }
             console.log(`[Manifest] Total packages collected: ${allPackageLabels.length}`);
@@ -697,27 +870,60 @@ class ManifestCreationService {
         } catch (error) {
             console.error(`[Manifest] Error in createManifest:`, error.message);
             console.error(`[Manifest] Stack:`, error.stack);
-            await client.query('ROLLBACK');
             
-            // Log failure if not already logged
+            // Rollback transaction - handle case where transaction might already be aborted
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackError) {
+                // Transaction might already be aborted or rolled back - that's okay
+                if (rollbackError.message && !rollbackError.message.includes('current transaction is aborted')) {
+                    console.error(`[Manifest] Error during rollback:`, rollbackError.message);
+                }
+            }
+            
+            // Log failure if not already logged (use separate connection since transaction is aborted)
             // Use 'status_changed' as modification_type since 'manifest_creation_failed' doesn't exist in enum
             try {
-                await client.query(`
-                    INSERT INTO "ORDERS-invoice-history" (
-                        fk_invoice_id,
-                        modification_type,
-                        reason,
-                        changed_by_user_id
-                    ) VALUES ($1, 'status_changed', $2, $3)
-                `, [invoiceId, `Manifest creation failed: ${error.message}`, userId]);
+                const historyClient = await pool.connect();
+                try {
+                    await historyClient.query(`
+                        INSERT INTO "ORDERS-invoice-history" (
+                            fk_invoice_id,
+                            modification_type,
+                            reason,
+                            changed_by_user_id
+                        ) VALUES ($1, 'status_changed', $2, $3)
+                    `, [invoiceId, `Manifest creation failed: ${error.message}`, userId]);
+                } finally {
+                    historyClient.release();
+                }
             } catch (historyError) {
                 console.error(`[Manifest] Failed to log history:`, historyError.message);
             }
 
             throw error;
         } finally {
-            client.release();
-            console.log(`[Manifest] Client released`);
+            if (client) {
+                try {
+                    // Check if client is still connected before releasing
+                    if (client._ending || client._released) {
+                        console.log(`[Manifest] Client already released or ending, skipping release`);
+                    } else {
+                        client.release();
+                        console.log(`[Manifest] Client released`);
+                    }
+                } catch (releaseError) {
+                    // Client may have already been released - ignore the error
+                    const errorMsg = releaseError.message || '';
+                    if (errorMsg.includes('already been released') || 
+                        errorMsg.includes('Cannot release') ||
+                        errorMsg.includes('released to the pool')) {
+                        console.log(`[Manifest] Client already released (expected): ${errorMsg}`);
+                    } else {
+                        console.error(`[Manifest] Error releasing client:`, releaseError.message);
+                    }
+                }
+            }
         }
     }
 
@@ -732,11 +938,45 @@ class ManifestCreationService {
         console.log(`[Manifest] Using license column: ${licenseColumn} for grouping`);
 
         for (const li of lineItems) {
-            const assignedLabels = li.assigned_package_labels 
-                ? (Array.isArray(li.assigned_package_labels)
-                    ? li.assigned_package_labels
-                    : JSON.parse(li.assigned_package_labels || '[]'))
-                : [];
+            // Check if this is a partial package
+            const isPartialPackage = li.specific_package_labels !== null && li.specific_package_labels !== '';
+            
+            let assignedLabels = [];
+            if (isPartialPackage) {
+                // Partial packages: use assigned_package_labels (scanned packages) that match specific_package_labels
+                // Only include packages that have been scanned AND are in the specific_package_labels list
+                try {
+                    const specificLabels = Array.isArray(li.specific_package_labels)
+                        ? li.specific_package_labels
+                        : JSON.parse(li.specific_package_labels || '[]');
+                    
+                    const scannedLabels = li.assigned_package_labels 
+                        ? (Array.isArray(li.assigned_package_labels)
+                            ? li.assigned_package_labels
+                            : JSON.parse(li.assigned_package_labels || '[]'))
+                        : [];
+                    
+                    // Normalize for case-insensitive comparison
+                    const normalizedSpecificLabels = specificLabels.map(label => String(label).toUpperCase());
+                    
+                    // Only include scanned packages that are in the specific_package_labels list
+                    assignedLabels = scannedLabels.filter(label => 
+                        normalizedSpecificLabels.includes(String(label).toUpperCase())
+                    );
+                    
+                    console.log(`[Manifest] Line item ${li.id} (PARTIAL): ${assignedLabels.length}/${specificLabels.length} packages scanned and ready for manifest`);
+                } catch (error) {
+                    console.warn(`[Manifest] Failed to parse labels for partial package line item ${li.id}:`, error.message);
+                    assignedLabels = [];
+                }
+            } else {
+                // Full packages: use assigned_package_labels (scanned during fulfillment)
+                assignedLabels = li.assigned_package_labels 
+                    ? (Array.isArray(li.assigned_package_labels)
+                        ? li.assigned_package_labels
+                        : JSON.parse(li.assigned_package_labels || '[]'))
+                    : [];
+            }
 
             for (const label of assignedLabels) {
                 let license = null;
@@ -903,11 +1143,49 @@ class ManifestCreationService {
         let totalGrossWeight = 0;
 
         for (const li of licenseData.lineItems) {
-            const assignedLabels = li.assigned_package_labels 
-                ? (Array.isArray(li.assigned_package_labels)
-                    ? li.assigned_package_labels
-                    : JSON.parse(li.assigned_package_labels || '[]'))
-                : [];
+            // Check if this is a partial package line item
+            const isPartialPackage = li.specific_package_labels !== null && li.specific_package_labels !== '';
+            
+            console.log(`[Manifest] Processing line item ${li.id} (isPartial: ${isPartialPackage})`);
+            
+            let assignedLabels = [];
+            if (isPartialPackage) {
+                // Partial packages: use assigned_package_labels (scanned packages) that match specific_package_labels
+                try {
+                    const specificLabels = Array.isArray(li.specific_package_labels)
+                        ? li.specific_package_labels
+                        : JSON.parse(li.specific_package_labels || '[]');
+                    
+                    const scannedLabels = li.assigned_package_labels 
+                        ? (Array.isArray(li.assigned_package_labels)
+                            ? li.assigned_package_labels
+                            : JSON.parse(li.assigned_package_labels || '[]'))
+                        : [];
+                    
+                    console.log(`[Manifest] Partial line item ${li.id}: specificLabels=${JSON.stringify(specificLabels)}, scannedLabels=${JSON.stringify(scannedLabels)}`);
+                    
+                    // Normalize for case-insensitive comparison
+                    const normalizedSpecificLabels = specificLabels.map(label => String(label).toUpperCase());
+                    
+                    // Only include scanned packages that are in the specific_package_labels list
+                    assignedLabels = scannedLabels.filter(label => 
+                        normalizedSpecificLabels.includes(String(label).toUpperCase())
+                    );
+                    
+                    console.log(`[Manifest] Partial line item ${li.id}: filtered to ${assignedLabels.length} matching packages`);
+                } catch (error) {
+                    console.warn(`[Manifest] Failed to parse labels for partial package line item ${li.id}:`, error.message);
+                    assignedLabels = [];
+                }
+            } else {
+                // Full packages: use assigned_package_labels (scanned during fulfillment)
+                assignedLabels = li.assigned_package_labels 
+                    ? (Array.isArray(li.assigned_package_labels)
+                        ? li.assigned_package_labels
+                        : JSON.parse(li.assigned_package_labels || '[]'))
+                    : [];
+                console.log(`[Manifest] Full line item ${li.id}: ${assignedLabels.length} scanned packages`);
+            }
 
             // Filter to only packages for this license
             const licenseLabels = assignedLabels.filter(label => 
@@ -947,7 +1225,27 @@ class ManifestCreationService {
                 totalGrossWeight += grossWeight;
 
                 // Calculate price per package (only for packages in this license)
-                const pricePerPackage = parseFloat(li.line_total) / licenseLabels.length;
+                // For partial packages, line_total is the total for the line item
+                // For full packages, divide line_total by number of packages
+                if (licenseLabels.length === 0) {
+                    throw new Error(`Line item ${li.id} has no packages for license ${license}`);
+                }
+                
+                const lineTotal = parseFloat(li.line_total) || 0;
+                const pricePerPackage = lineTotal / licenseLabels.length;
+                
+                // Log price calculation for debugging
+                console.log(`[Manifest] Line item ${li.id} price calculation: line_total=${lineTotal}, package_count=${licenseLabels.length}, price_per_package=${pricePerPackage}`);
+                
+                // Validate price calculation - METRC requires wholesalePrice > 0
+                if (isNaN(pricePerPackage) || pricePerPackage < 0) {
+                    throw new Error(`Invalid price calculation for line item ${li.id}: line_total=${lineTotal}, package_count=${licenseLabels.length}, price_per_package=${pricePerPackage}`);
+                }
+                
+                // METRC does not allow wholesalePrice of 0 - this is a hard requirement
+                if (pricePerPackage === 0) {
+                    throw new Error(`Line item ${li.id} has a wholesale price of 0, which METRC does not allow. line_total=${lineTotal}, package_count=${licenseLabels.length}. Please ensure the line item has a valid price.`);
+                }
 
                 // Validate that metrcid is a valid number
                 const packageMetrcId = parseInt(pkg.metrcid, 10);
@@ -959,8 +1257,9 @@ class ManifestCreationService {
                 const validatedWholesalePrice = parseFloat(pricePerPackage.toFixed(2));
                 const validatedGrossWeight = parseFloat(grossWeight.toFixed(2));
                 
-                if (isNaN(validatedWholesalePrice) || validatedWholesalePrice < 0) {
-                    throw new Error(`Package ${label} has invalid wholesale price: ${pricePerPackage}`);
+                // METRC requires wholesalePrice > 0 (not just >= 0)
+                if (isNaN(validatedWholesalePrice) || validatedWholesalePrice <= 0) {
+                    throw new Error(`Package ${label} has invalid wholesale price: ${pricePerPackage}. METRC requires wholesalePrice > 0. Line item ${li.id} has line_total=${lineTotal}, package_count=${licenseLabels.length}`);
                 }
                 
                 if (isNaN(validatedGrossWeight) || validatedGrossWeight <= 0) {
@@ -1297,6 +1596,11 @@ class ManifestCreationService {
                     throw new Error(`Package ${i + 1} has invalid or missing numeric field '${field}': ${pkg[field]}`);
                 }
             }
+            
+            // METRC requires wholesalePrice > 0 (not just >= 0)
+            if (pkg.wholesalePrice <= 0) {
+                throw new Error(`Package ${i + 1} (METRC ID: ${pkg.id}) has invalid wholesalePrice: ${pkg.wholesalePrice}. METRC requires wholesalePrice > 0. Please check the line item pricing.`);
+            }
         }
         
         console.log(`[Manifest] ✓ Payload validation passed - all numeric fields are valid`);
@@ -1488,6 +1792,22 @@ class ManifestCreationService {
             // Validate payload structure - ensure no null values in numeric fields
             this.validatePayloadForNumericFields(payload);
             
+            // Log the full payload being sent to METRC for debugging
+            console.log(`[Manifest] Full payload being sent to METRC:`, JSON.stringify(payload, null, 2));
+            
+            // Log package details
+            if (payload && Array.isArray(payload) && payload[0]?.destinations?.[0]?.packages) {
+                const packages = payload[0].destinations[0].packages;
+                console.log(`[Manifest] Package count: ${packages.length}`);
+                packages.forEach((pkg, idx) => {
+                    console.log(`[Manifest] Package ${idx + 1}:`, {
+                        id: pkg.id,
+                        wholesalePrice: pkg.wholesalePrice,
+                        grossWeight: pkg.grossWeight,
+                        grossUnitOfWeightId: pkg.grossUnitOfWeightId
+                    });
+                });
+            }
             
             // Call METRC T3 API to create transfer/manifest
             // Use submit=true parameter to actually create the manifest (not just dry run)
@@ -1760,11 +2080,76 @@ class ManifestCreationService {
         } catch (error) {
             console.error(`[Manifest] ❌ METRC API error caught:`, error);
             console.error(`[Manifest] Error message:`, error.message);
+            console.error(`[Manifest] Error stack:`, error.stack);
+            
+            // Log the payload that failed (for debugging) - include full structure
+            console.error(`[Manifest] ========================================`);
+            console.error(`[Manifest] PAYLOAD THAT FAILED (Full Structure):`);
+            console.error(`[Manifest] ========================================`);
+            console.error(JSON.stringify(payload, null, 2));
+            console.error(`[Manifest] ========================================`);
+            
+            // Log package-level details for debugging
+            if (payload && Array.isArray(payload) && payload[0]?.destinations?.[0]?.packages) {
+                const packages = payload[0].destinations[0].packages;
+                console.error(`[Manifest] Package Details (${packages.length} packages):`);
+                packages.forEach((pkg, idx) => {
+                    console.error(`[Manifest]   Package ${idx + 1}:`, {
+                        id: pkg.id,
+                        wholesalePrice: pkg.wholesalePrice,
+                        grossWeight: pkg.grossWeight,
+                        grossUnitOfWeightId: pkg.grossUnitOfWeightId,
+                        allFields: pkg
+                    });
+                });
+            }
             
             if (error.response) {
-                console.error(`[Manifest] Response status:`, error.response.status);
-                console.error(`[Manifest] Response headers:`, error.response.headers);
-                console.error(`[Manifest] Full response data:`, JSON.stringify(error.response.data, null, 2));
+                console.error(`[Manifest] ========================================`);
+                console.error(`[Manifest] METRC ERROR RESPONSE:`);
+                console.error(`[Manifest] ========================================`);
+                console.error(`[Manifest] Status:`, error.response.status);
+                console.error(`[Manifest] Status Text:`, error.response.statusText);
+                console.error(`[Manifest] Headers:`, JSON.stringify(error.response.headers, null, 2));
+                console.error(`[Manifest] Full Response Data:`, JSON.stringify(error.response.data, null, 2));
+                console.error(`[Manifest] ========================================`);
+                
+                // For 400 errors, extract ALL possible error details
+                if (error.response.status === 400 && error.response.data) {
+                    const errorData = error.response.data;
+                    console.error(`[Manifest] 400 Error Details:`);
+                    
+                    // Log all possible error fields
+                    if (errorData.errors) {
+                        console.error(`[Manifest]   errors:`, JSON.stringify(errorData.errors, null, 2));
+                    }
+                    if (errorData.detail) {
+                        console.error(`[Manifest]   detail:`, errorData.detail);
+                    }
+                    if (errorData.message) {
+                        console.error(`[Manifest]   message:`, errorData.message);
+                    }
+                    if (errorData.title) {
+                        console.error(`[Manifest]   title:`, errorData.title);
+                    }
+                    if (errorData.code) {
+                        console.error(`[Manifest]   code:`, errorData.code);
+                    }
+                    if (errorData.instance) {
+                        console.error(`[Manifest]   instance:`, errorData.instance);
+                    }
+                    if (errorData.type) {
+                        console.error(`[Manifest]   type:`, errorData.type);
+                    }
+                    
+                    // Check for nested error structures
+                    if (errorData.validationErrors) {
+                        console.error(`[Manifest]   validationErrors:`, JSON.stringify(errorData.validationErrors, null, 2));
+                    }
+                    if (errorData.fieldErrors) {
+                        console.error(`[Manifest]   fieldErrors:`, JSON.stringify(errorData.fieldErrors, null, 2));
+                    }
+                }
                 
                 // Extract detailed error message from METRC API response
                 let errorMessage = `METRC API returned ${error.response.status}`;
@@ -1801,9 +2186,14 @@ class ManifestCreationService {
                             }
                         }
                         
+                        // Include detail if available
+                        if (errorData.detail && !errorMessage.includes(errorData.detail)) {
+                            errorMessage += ` | Detail: ${errorData.detail}`;
+                        }
+                        
                         // If we still have the generic message, include the full error data
                         if (errorMessage === `METRC API returned ${error.response.status}`) {
-                            errorMessage += ` | Response: ${JSON.stringify(errorData).substring(0, 500)}`;
+                            errorMessage += ` | Response: ${JSON.stringify(errorData).substring(0, 1000)}`;
                         }
                     }
                 }
@@ -2075,6 +2465,7 @@ class ManifestCreationService {
                     id, 
                     fk_batch_id, 
                     assigned_package_labels,
+                    specific_package_labels,
                     line_total,
                     quantity_ordered
                 FROM "ORDERS-invoice-line-items"

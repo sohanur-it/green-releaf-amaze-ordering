@@ -101,7 +101,35 @@ class InvoiceStateMachineService {
             
             // Validate the transition
             const validTransitions = this.constructor.VALID_TRANSITIONS[currentStatus];
-            if (!validTransitions || !validTransitions.includes(newStatus)) {
+            
+            // Special case: Allow Approved → Fulfillment_Issue when fulfillment has started
+            // (fulfillment_accepted_by is set or there's an active scanning session)
+            let transitionAllowed = validTransitions && validTransitions.includes(newStatus);
+            
+            if (!transitionAllowed && currentStatus === 'Approved' && newStatus === 'Fulfillment_Issue') {
+                // Check if fulfillment has started
+                const fulfillmentCheck = await client.query(`
+                    SELECT 
+                        fulfillment_accepted_by,
+                        EXISTS(
+                            SELECT 1 FROM "ORDERS-scanning-sessions" ss
+                            WHERE ss.fk_invoice_id = $1 
+                            AND ss.session_status = 'active'
+                        ) as has_active_scanning_session
+                    FROM "ORDERS-invoices"
+                    WHERE id = $1
+                `, [invoiceId]);
+                
+                if (fulfillmentCheck.rows.length > 0) {
+                    const fulfillmentStarted = fulfillmentCheck.rows[0].fulfillment_accepted_by !== null || 
+                                             fulfillmentCheck.rows[0].has_active_scanning_session === true;
+                    if (fulfillmentStarted) {
+                        transitionAllowed = true;
+                    }
+                }
+            }
+            
+            if (!transitionAllowed) {
                 await client.query('ROLLBACK');
                 return {
                     success: false,
@@ -379,45 +407,9 @@ class InvoiceStateMachineService {
             
             // Fulfillment_Issue → Approved (Sales fixed the issue)
             if (from === 'Fulfillment_Issue' && to === 'Approved') {
-                // Check if fulfillment_issue_modification column exists
-                const columnCheck = await client.query(`
-                    SELECT column_name 
-                    FROM information_schema.columns 
-                    WHERE table_schema = 'public'
-                    AND table_name = 'ORDERS-invoice-line-items' 
-                    AND column_name = 'fulfillment_issue_modification'
-                `);
-                const hasFulfillmentIssueModColumn = columnCheck.rows.length > 0;
-                
-                // Validate that changes were made to line items before allowing kick back
-                // Use fulfillment_issue_modification if column exists, otherwise just check was_modified
-                let modifiedLineItems;
-                if (hasFulfillmentIssueModColumn) {
-                    modifiedLineItems = await client.query(`
-                        SELECT COUNT(*) as count
-                        FROM "ORDERS-invoice-line-items"
-                        WHERE fk_invoice_id = $1 
-                        AND (was_modified = true OR fulfillment_issue_modification = true)
-                    `, [invoiceId]);
-                } else {
-                    // Column doesn't exist, just check was_modified
-                    modifiedLineItems = await client.query(`
-                        SELECT COUNT(*) as count
-                        FROM "ORDERS-invoice-line-items"
-                        WHERE fk_invoice_id = $1 
-                        AND was_modified = true
-                    `, [invoiceId]);
-                }
-                
-                const hasModifications = parseInt(modifiedLineItems.rows[0]?.count || 0) > 0;
-                
-                if (!hasModifications) {
-                    return {
-                        success: false,
-                        error: 'Cannot kick back to fulfillment - no changes have been made to the invoice line items. Please modify at least one line item before returning to fulfillment.'
-                    };
-                }
-                
+                // Allow kick back to fulfillment without requiring line item modifications
+                // This allows status changes when issues are resolved through other means
+                // (e.g., clarification, note updates, etc.) without inventory changes
                 await client.query(`
                     UPDATE "ORDERS-invoices"
                     SET fulfillment_issue_reported_at = NULL, fulfillment_issue_note = NULL

@@ -114,7 +114,8 @@ class AdminSessionService {
             SELECT 
                 li.id,
                 li.quantity_ordered,
-                li.assigned_package_labels
+                li.assigned_package_labels,
+                li.specific_package_labels
             FROM "ORDERS-invoice-line-items" li
             WHERE li.fk_invoice_id = $1
         `, [invoiceId]);
@@ -123,12 +124,39 @@ class AdminSessionService {
         let totalScanned = 0;
 
         for (const li of lineItems.rows) {
-            const labels = Array.isArray(li.assigned_package_labels)
-                ? li.assigned_package_labels
-                : (li.assigned_package_labels ? JSON.parse(li.assigned_package_labels) : []);
+            const isPartial = li.specific_package_labels !== null && li.specific_package_labels !== '';
             
-            totalNeeded += parseFloat(li.quantity_ordered) || 0;
-            totalScanned += labels.length;
+            if (isPartial) {
+                // For partial packages, count the number of specific labels
+                try {
+                    const specificLabels = Array.isArray(li.specific_package_labels)
+                        ? li.specific_package_labels
+                        : JSON.parse(li.specific_package_labels || '[]');
+                    const assignedLabels = li.assigned_package_labels
+                        ? (Array.isArray(li.assigned_package_labels)
+                            ? li.assigned_package_labels
+                            : JSON.parse(li.assigned_package_labels || '[]'))
+                        : [];
+                    
+                    // Normalize labels for comparison (uppercase) to handle case differences
+                    const normalizedSpecificLabels = specificLabels.map(label => String(label).toUpperCase());
+                    const normalizedAssignedLabels = assignedLabels.map(label => String(label).toUpperCase());
+                    
+                    totalNeeded += specificLabels.length;
+                    // Count how many specific labels have been scanned (case-insensitive comparison)
+                    totalScanned += normalizedSpecificLabels.filter(label => normalizedAssignedLabels.includes(label)).length;
+                } catch (error) {
+                    console.warn(`[AdminSession] Error parsing partial package labels:`, error);
+                }
+            } else {
+                // For full packages, count quantity_ordered and scanned labels
+                const labels = Array.isArray(li.assigned_package_labels)
+                    ? li.assigned_package_labels
+                    : (li.assigned_package_labels ? JSON.parse(li.assigned_package_labels) : []);
+                
+                totalNeeded += parseFloat(li.quantity_ordered) || 0;
+                totalScanned += labels.length;
+            }
         }
 
         return {

@@ -80,12 +80,22 @@ class ScanningSessionService {
                     id,
                     quantity_allocated,
                     assigned_package_labels,
-                    quantity_ordered
+                    quantity_ordered,
+                    specific_package_labels
                 FROM "ORDERS-invoice-line-items"
                 WHERE fk_invoice_id = $1
             `, [invoiceId]);
 
-            const needsAllocation = lineItemsCheck.rows.some(li => li.quantity_allocated === 0 && li.quantity_ordered > 0);
+            // Check if allocation is needed - skip partial packages (they have quantity_allocated = 0 by design)
+            const needsAllocation = lineItemsCheck.rows.some(li => {
+                // Skip partial packages - they don't use quantity_allocated
+                const isPartialPackage = li.specific_package_labels !== null && li.specific_package_labels !== '';
+                if (isPartialPackage) {
+                    return false; // Partial packages don't need allocation
+                }
+                // For full packages, check if allocation is needed
+                return li.quantity_allocated === 0 && li.quantity_ordered > 0;
+            });
             const hasPreviousScanData = lineItemsCheck.rows.some(li => {
                 try {
                     const labels = li.assigned_package_labels ? JSON.parse(li.assigned_package_labels) : [];
@@ -121,6 +131,14 @@ class ScanningSessionService {
                 try {
                     // Re-allocate all line items that need allocation
                     for (const lineItem of lineItemsCheck.rows) {
+                        // Skip partial packages - they don't use quantity_allocated
+                        const isPartialPackage = lineItem.specific_package_labels !== null && lineItem.specific_package_labels !== '';
+                        if (isPartialPackage) {
+                            console.log(`[Scanning] Skipping allocation for partial package line item ${lineItem.id}`);
+                            continue; // Partial packages don't need allocation
+                        }
+                        
+                        // Only allocate full packages that have quantity_allocated = 0
                         if (lineItem.quantity_allocated === 0 && lineItem.quantity_ordered > 0) {
                             // Get batch ID for this line item
                             const batchInfo = await client.query(`
@@ -771,29 +789,127 @@ class ScanningSessionService {
         `, [invoiceId]);
 
         const lineItems = progress.rows;
-        const totalPackagesNeeded = lineItems.reduce((sum, li) => sum + parseInt(li.quantity_ordered), 0);
-        const totalPackagesScanned = lineItems.reduce((sum, li) => sum + parseInt(li.scanned_count), 0);
+        
+        // Count all packages (both full and partial) for scanning progress
+        // Partial packages also need to be scanned to verify physical package matches order
+        const totalPackagesNeeded = lineItems.reduce((sum, li) => {
+            const isPartial = li.specific_package_labels !== null && li.specific_package_labels !== '';
+            if (isPartial) {
+                // For partial packages, count the number of specific labels
+                try {
+                    const specificLabels = Array.isArray(li.specific_package_labels)
+                        ? li.specific_package_labels
+                        : JSON.parse(li.specific_package_labels || '[]');
+                    return sum + specificLabels.length;
+                } catch {
+                    return sum;
+                }
+            } else {
+                // For full packages, count quantity_ordered
+                return sum + parseInt(li.quantity_ordered || 0);
+            }
+        }, 0);
+        
+        const totalPackagesScanned = lineItems.reduce((sum, li) => {
+            const isPartial = li.specific_package_labels !== null && li.specific_package_labels !== '';
+            if (isPartial) {
+                // For partial packages, count scanned labels from assigned_package_labels
+                // that match the specific_package_labels
+                try {
+                    const specificLabels = Array.isArray(li.specific_package_labels)
+                        ? li.specific_package_labels
+                        : JSON.parse(li.specific_package_labels || '[]');
+                    const assignedLabels = li.assigned_package_labels
+                        ? (Array.isArray(li.assigned_package_labels)
+                            ? li.assigned_package_labels
+                            : JSON.parse(li.assigned_package_labels || '[]'))
+                        : [];
+                    
+                    // Normalize labels for comparison (uppercase) to handle case differences
+                    const normalizedSpecificLabels = specificLabels.map(label => String(label).toUpperCase());
+                    const normalizedAssignedLabels = assignedLabels.map(label => String(label).toUpperCase());
+                    
+                    // Count how many specific labels have been scanned (case-insensitive comparison)
+                    const scannedCount = normalizedSpecificLabels.filter(label => normalizedAssignedLabels.includes(label)).length;
+                    return sum + scannedCount;
+                } catch {
+                    return sum;
+                }
+            } else {
+                // For full packages, use scanned_count
+                return sum + parseInt(li.scanned_count || 0);
+            }
+        }, 0);
 
         return {
             invoice_id: invoiceId,
-            line_items: lineItems.map(li => ({
-                line_item_id: li.line_item_id,
-                product_name: li.product_name,
-                batch_name: li.batch_name,
-                quantity_ordered: parseInt(li.quantity_ordered),
-                scanned_count: parseInt(li.scanned_count),
-                remaining_count: parseInt(li.remaining_count),
-                status: li.status,
-                scanned_packages: li.assigned_package_labels || [],
-                specific_package_labels: li.specific_package_labels
-            })),
+            line_items: lineItems.map(li => {
+                const isPartial = li.specific_package_labels !== null && li.specific_package_labels !== '';
+                
+                // For partial packages, calculate progress based on specific labels
+                let quantityNeeded = parseInt(li.quantity_ordered || 0);
+                let scannedCount = parseInt(li.scanned_count || 0);
+                let remainingCount = quantityNeeded - scannedCount;
+                let status = li.status;
+                
+                if (isPartial) {
+                    try {
+                        const specificLabels = Array.isArray(li.specific_package_labels)
+                            ? li.specific_package_labels
+                            : JSON.parse(li.specific_package_labels || '[]');
+                        const assignedLabels = li.assigned_package_labels
+                            ? (Array.isArray(li.assigned_package_labels)
+                                ? li.assigned_package_labels
+                                : JSON.parse(li.assigned_package_labels || '[]'))
+                            : [];
+                        
+                        quantityNeeded = specificLabels.length;
+                        
+                        // Normalize labels for comparison (uppercase) to handle case differences
+                        const normalizedSpecificLabels = specificLabels.map(label => String(label).toUpperCase());
+                        const normalizedAssignedLabels = assignedLabels.map(label => String(label).toUpperCase());
+                        
+                        // Count how many of the specific labels have been scanned (case-insensitive comparison)
+                        scannedCount = normalizedSpecificLabels.filter(label => normalizedAssignedLabels.includes(label)).length;
+                        remainingCount = quantityNeeded - scannedCount;
+                        
+                        // Determine status based on scanned count
+                        if (scannedCount === 0) {
+                            status = 'not_started';
+                        } else if (scannedCount === quantityNeeded) {
+                            status = 'complete';
+                        } else {
+                            status = 'in_progress';
+                        }
+                        
+                        console.log(`[ScanningProgress] Partial package line item ${li.line_item_id}: ${scannedCount}/${quantityNeeded} scanned. Specific labels: ${JSON.stringify(specificLabels)}, Assigned labels: ${JSON.stringify(assignedLabels)}`);
+                    } catch (error) {
+                        console.warn(`[ScanningProgress] Error parsing partial package labels for line item ${li.line_item_id}:`, error);
+                        console.warn(`[ScanningProgress] specific_package_labels:`, li.specific_package_labels);
+                        console.warn(`[ScanningProgress] assigned_package_labels:`, li.assigned_package_labels);
+                    }
+                }
+                
+                return {
+                    line_item_id: li.line_item_id,
+                    product_name: li.product_name,
+                    batch_name: li.batch_name,
+                    quantity_ordered: quantityNeeded,
+                    scanned_count: scannedCount,
+                    remaining_count: remainingCount,
+                    status: status,
+                    scanned_packages: li.assigned_package_labels || [],
+                    specific_package_labels: li.specific_package_labels,
+                    is_partial_package: isPartial
+                };
+            }),
             overall_progress: {
-                total_packages_needed: totalPackagesNeeded,
-                total_packages_scanned: totalPackagesScanned,
+                total_packages_needed: totalPackagesNeeded, // Only full packages count
+                total_packages_scanned: totalPackagesScanned, // Only full packages count
                 percentage: totalPackagesNeeded > 0 
                     ? Math.round((totalPackagesScanned / totalPackagesNeeded) * 100)
                     : 0,
-                all_complete: totalPackagesScanned === totalPackagesNeeded
+                all_complete: totalPackagesScanned === totalPackagesNeeded && totalPackagesNeeded > 0
             }
         };
     }

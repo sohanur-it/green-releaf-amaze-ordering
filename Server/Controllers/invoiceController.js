@@ -997,14 +997,19 @@ class InvoiceController {
             const isFulfillmentUser = hasFulfillmentRole && !isAdmin && !isSalesAdmin && !userRoleNames.some(r => r.toLowerCase() === 'sales representative');
             const isSalesRep = !isAdmin && !isSalesAdmin && !isFulfillmentUser && userRoleNames.some(r => r.toLowerCase() === 'sales representative');
             
-            // Get invoice with location info
+            // Get invoice with location info and check for active scanning session
             const invoice = await query(`
                 SELECT 
                     i.*,
                     b.name as buyer_name,
                     l.name as location_name,
                     l.assigned_sales_rep_id as location_assigned_sales_rep_id,
-                    COALESCE(b.name, u.username, 'System') as created_by_username
+                    COALESCE(b.name, u.username, 'System') as created_by_username,
+                    EXISTS(
+                        SELECT 1 FROM "ORDERS-scanning-sessions" ss
+                        WHERE ss.fk_invoice_id = i.id 
+                        AND ss.session_status = 'active'
+                    ) as has_active_scanning_session
                 FROM "ORDERS-invoices" i
                 INNER JOIN "ORDERS-buyers" b ON i.fk_buyer_id = b.entry_id
                 INNER JOIN "ORDERS-buyer_locations" l ON i.fk_location_id = l.entry_id
@@ -1138,47 +1143,119 @@ class InvoiceController {
             
             // Get products with available batches
             // Note: Products aren't location-specific, but we verify the location exists
-            let queryStr = `
-                SELECT DISTINCT
-                    p.entry_id as product_id,
-                    p.name,
-                    p.brand_name,
-                    p.product_type_name,
-                    p.category_name,
-                    p.default_price,
-                    p.cultivar_name,
-                    p.cultivar_type_name
-                FROM "ORDERS-products" p
-                INNER JOIN "ORDERS-batches" b ON p.entry_id = b.fk_master_product_id
-                WHERE p.is_archived = FALSE OR p.is_archived IS NULL
-                  AND (b.quantity - COALESCE(b.allocated_quantity, 0)) > 0
-            `;
-            
-            // For external invoices, only show products with full packages
-            // For internal invoices, show products with either full or partial packages
-            if (invoiceSource === 'External') {
-                queryStr += ` AND b.status = 'Sellable' AND b.full_package_count > 0`;
-            } else {
-                // Internal invoices can use both full and partial packages
-                queryStr += ` AND (b.full_package_count > 0 OR b.partial_package_count > 0)`;
-            }
-            
             const params = [];
             let paramIndex = 1;
+            let queryStr;
+            
+            // Build base conditions
+            // Note: We need to check batch availability, but also include products that match search
+            // even if their batches might not be fully available (for internal invoices)
+            let baseConditions = `
+                WHERE (p.is_archived = FALSE OR p.is_archived IS NULL)
+            `;
+            
+            // For external invoices, only show products with sellable full packages
+            // For internal invoices, show products with any available batches (full or partial)
+            if (invoiceSource === 'External') {
+                baseConditions += ` AND b.status = 'Sellable' 
+                    AND b.full_package_count > 0
+                    AND (b.quantity - COALESCE(b.allocated_quantity, 0)) > 0`;
+            } else {
+                // Internal invoices can use both full and partial packages
+                // Show products if they have:
+                // 1. Available full packages (quantity - allocated > 0 AND full_package_count > 0), OR
+                // 2. Partial packages (partial_package_count > 0)
+                baseConditions += ` AND (
+                    (b.full_package_count > 0 AND (b.quantity - COALESCE(b.allocated_quantity, 0)) > 0)
+                    OR 
+                    (b.partial_package_count > 0)
+                )`;
+            }
             
             if (search && search.trim().length > 0) {
                 const searchTerm = search.trim();
-                queryStr += ` AND (
+                const searchPattern = `%${searchTerm}%`;
+                const searchTermLower = searchTerm.toLowerCase();
+                const searchStartsWith = `${searchTermLower}%`;
+                
+                baseConditions += ` AND (
                     p.name ILIKE $${paramIndex} OR 
                     COALESCE(p.brand_name, '') ILIKE $${paramIndex} OR 
                     COALESCE(p.cultivar_name, '') ILIKE $${paramIndex} OR
-                    COALESCE(p.product_type_name, '') ILIKE $${paramIndex}
+                    COALESCE(p.product_type_name, '') ILIKE $${paramIndex} OR
+                    b.batch_name ILIKE $${paramIndex}
                 )`;
-                params.push(`%${searchTerm}%`);
+                params.push(searchPattern);
+                const searchPatternParam = paramIndex;
                 paramIndex++;
+                
+                // Add parameters for relevance sorting
+                params.push(searchTermLower); // For exact match
+                const exactMatchParam = paramIndex;
+                paramIndex++;
+                
+                params.push(searchStartsWith); // For starts with
+                const startsWithParam = paramIndex;
+                paramIndex++;
+                
+                // Use subquery to calculate relevance score, then order by it
+                // This avoids the DISTINCT + ORDER BY issue
+                queryStr = `
+                    SELECT 
+                        product_id,
+                        name,
+                        brand_name,
+                        product_type_name,
+                        category_name,
+                        default_price,
+                        cultivar_name,
+                        cultivar_type_name,
+                        relevance_score
+                    FROM (
+                        SELECT DISTINCT
+                            p.entry_id as product_id,
+                            p.name,
+                            p.brand_name,
+                            p.product_type_name,
+                            p.category_name,
+                            p.default_price,
+                            p.cultivar_name,
+                            p.cultivar_type_name,
+                            CASE 
+                                WHEN LOWER(p.name) = $${exactMatchParam} THEN 1
+                                WHEN LOWER(COALESCE(p.brand_name, '')) = $${exactMatchParam} THEN 2
+                                WHEN LOWER(p.name) LIKE $${startsWithParam} THEN 3
+                                WHEN LOWER(COALESCE(p.brand_name, '')) LIKE $${startsWithParam} THEN 4
+                                WHEN LOWER(p.name) LIKE $${searchPatternParam} THEN 5
+                                WHEN LOWER(COALESCE(p.brand_name, '')) LIKE $${searchPatternParam} THEN 6
+                                ELSE 7
+                            END as relevance_score
+                        FROM "ORDERS-products" p
+                        INNER JOIN "ORDERS-batches" b ON p.entry_id = b.fk_master_product_id
+                        ${baseConditions}
+                    ) ranked_products
+                    ORDER BY relevance_score, brand_name, name
+                    LIMIT 100
+                `;
+            } else {
+                // No search - simple query without relevance scoring
+                queryStr = `
+                    SELECT DISTINCT
+                        p.entry_id as product_id,
+                        p.name,
+                        p.brand_name,
+                        p.product_type_name,
+                        p.category_name,
+                        p.default_price,
+                        p.cultivar_name,
+                        p.cultivar_type_name
+                    FROM "ORDERS-products" p
+                    INNER JOIN "ORDERS-batches" b ON p.entry_id = b.fk_master_product_id
+                    ${baseConditions}
+                    ORDER BY p.brand_name, p.name
+                    LIMIT 100
+                `;
             }
-            
-            queryStr += ` ORDER BY p.brand_name, p.name LIMIT 100`;
             
             const products = await query(queryStr, params);
             
@@ -1877,11 +1954,15 @@ class InvoiceController {
                 // If manual_line_total is provided, use it for price override
                 if (manual_line_total !== null && manual_line_total !== undefined) {
                     newLineTotal = parseFloat(manual_line_total);
+                    // Ensure line_total is non-negative (can be 0 for partial packages with no price)
+                    newLineTotal = Math.max(0, newLineTotal);
                     // Calculate unit price from total (for display purposes)
                     unitPrice = newQuantity > 0 ? newLineTotal / newQuantity : 0;
                 } else {
                     // Standard calculation
                     newLineTotal = unitPrice * newQuantity - parseFloat(item.line_discount_amount || 0);
+                    // Ensure line_total is non-negative
+                    newLineTotal = Math.max(0, newLineTotal);
                 }
                 
                 // Set fulfillment_issue_modification flag if invoice is in Fulfillment_Issue status

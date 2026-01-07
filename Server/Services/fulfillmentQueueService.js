@@ -21,7 +21,7 @@ class FulfillmentQueueService {
             dateTo,
             myOrders,
             sortBy = 'age',
-            sortOrder = 'asc',
+            sortOrder = 'desc', // Default to latest first
             page = 1,
             limit = 25
         } = filters;

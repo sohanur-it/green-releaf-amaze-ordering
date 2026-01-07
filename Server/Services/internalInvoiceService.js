@@ -544,9 +544,15 @@ class InternalInvoiceService {
             }
         }
         
+        // Ensure non-negative values to satisfy database constraint
+        // Constraint requires: subtotal >= 0, discount_amount >= 0, credit_applied >= 0
+        const safeSubtotal = Math.max(0, subtotal);
+        const safeDiscountAmount = Math.max(0, discountAmount);
+        const safeCreditApplied = Math.max(0, creditApplied);
+        
         // Calculate final total: total = subtotal - discount_amount - credit_applied
         // This matches the constraint: total = subtotal - discount_amount - credit_applied
-        const total = subtotal - discountAmount - creditApplied;
+        const total = safeSubtotal - safeDiscountAmount - safeCreditApplied;
         
         await client.query(`
             UPDATE "ORDERS-invoices"
@@ -557,7 +563,7 @@ class InternalInvoiceService {
                 credit_applied = $4,
                 updated_at = NOW()
             WHERE id = $5
-        `, [subtotal, discountAmount, total, creditApplied, invoiceId]);
+        `, [safeSubtotal, safeDiscountAmount, total, safeCreditApplied, invoiceId]);
     }
 
     /**

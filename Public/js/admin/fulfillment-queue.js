@@ -13,7 +13,7 @@ let currentFilters = {
     dateTo: '',
     myOrders: false,
     sortBy: 'age',
-    sortOrder: 'asc'
+    sortOrder: 'desc' // Default to latest first (newest invoices on top)
 };
 
 /**

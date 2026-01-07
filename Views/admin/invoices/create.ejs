@@ -592,6 +592,13 @@ async function loadProductsForLocation(locationId) {
     }
 }
 
+// Helper function to highlight search query in text
+function highlightText(text, query) {
+    if (!query || !text) return text;
+    const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    return text.replace(regex, '<mark style="background-color: #ffeb3b; padding: 2px 4px; border-radius: 3px; font-weight: 600;">$1</mark>');
+}
+
 async function searchProducts(query) {
     if (!selectedLocationId) {
         if (typeof showNotification === 'function') {
@@ -609,16 +616,29 @@ async function searchProducts(query) {
         const data = await response.json();
         
         const resultsDiv = document.getElementById('product-search-results');
+        const searchQuery = query.trim().toLowerCase();
         
         if (data.success && data.products && data.products.length > 0) {
-            resultsDiv.innerHTML = data.products.map(product => `
+            resultsDiv.innerHTML = data.products.map(product => {
+                const brandName = product.brand_name || 'AMAZE';
+                const productName = product.name || '';
+                const productType = product.product_type_name || '';
+                const fullProductText = `${brandName} ${productName} ${productType}`;
+                
+                // Highlight matching text
+                const highlightedBrand = highlightText(brandName, searchQuery);
+                const highlightedName = highlightText(productName, searchQuery);
+                const highlightedType = highlightText(productType, searchQuery);
+                
+                return `
                 <div class="product-result-item" onclick="selectProduct(${product.product_id})">
-                    <strong>${product.brand_name || 'AMAZE'} ${product.name}</strong>
+                    <strong>${highlightedBrand} ${highlightedName}</strong>
                     <div style="font-size: 0.9rem; color: #666;">
-                        ${product.product_type_name || ''} | $${parseFloat(product.default_price || 0).toFixed(2)}
+                        ${highlightedType} | $${parseFloat(product.default_price || 0).toFixed(2)}
                     </div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
             resultsDiv.style.display = 'block';
         } else {
             resultsDiv.innerHTML = '<div class="product-result-item">No products found. Try a different search term.</div>';
@@ -710,6 +730,18 @@ async function showBatchSelectionModal(productId, productLabel, batches) {
     overlay.querySelector('#batch-modal-close').addEventListener('click', closeBatchModal);
 
     try {
+        // Calculate how many packages have already been added from each batch
+        const addedQuantities = {};
+        lineItems.forEach(item => {
+            // Only count full packages (not partials) for availability tracking
+            if (!item.is_partial_package && item.batch_id) {
+                if (!addedQuantities[item.batch_id]) {
+                    addedQuantities[item.batch_id] = 0;
+                }
+                addedQuantities[item.batch_id] += item.quantity || 0;
+            }
+        });
+
         // Separate batches into full packages and batches with partials
         const fullPackageBatches = batches.filter(batch => (batch.full_package_count || 0) > 0);
         const batchesWithPartials = batches.filter(batch => (batch.partial_package_count || 0) > 0);
@@ -750,15 +782,21 @@ async function showBatchSelectionModal(productId, productLabel, batches) {
         if (fullPackageBatches.length > 0) {
             html += '<div class="batch-section">';
             html += '<div class="section-title">Full Packages</div>';
-            html += fullPackageBatches.map(batch => `
+            html += fullPackageBatches.map(batch => {
+                // Calculate remaining available after subtracting already added
+                const alreadyAdded = addedQuantities[batch.id] || 0;
+                const remainingAvailable = Math.max(0, batch.available_quantity - alreadyAdded);
+                
+                return `
                 <div class="batch-card"
                      data-batch-id="${batch.id}"
                      data-batch-name="${escapeHtml(batch.batch_name)}"
                      data-unit-price="${batch.unit_price}"
-                     data-available="${batch.available_quantity}">
+                     data-available="${remainingAvailable}"
+                     data-original-available="${batch.available_quantity}">
                     <h4>${escapeHtml(batch.batch_name)}</h4>
                     <div class="batch-meta">
-                        Available: ${batch.available_quantity} • Unit Price: $${parseFloat(batch.unit_price || 0).toFixed(2)}
+                        Available: ${remainingAvailable}${alreadyAdded > 0 ? ` (${batch.available_quantity} total, ${alreadyAdded} already added)` : ''} • Unit Price: $${parseFloat(batch.unit_price || 0).toFixed(2)}
                     </div>
                     <div class="batch-actions">
                         <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
@@ -768,9 +806,11 @@ async function showBatchSelectionModal(productId, productLabel, batches) {
                                        id="batch-qty-${batch.id}"
                                        min="1"
                                        value="1"
-                                       max="${batch.available_quantity}"
+                                       max="${remainingAvailable}"
                                        data-qty-input="${batch.id}"
-                                       style="width: 80px;">
+                                       style="width: 80px;"
+                                       ${remainingAvailable === 0 ? 'disabled' : ''}
+                                       onchange="if(this.value > ${remainingAvailable}) { this.value = ${remainingAvailable}; alert('Only ${remainingAvailable} units available.'); }">
                             </div>
                             <div>
                                 <label for="batch-price-${batch.id}" style="font-weight: 600; display: block; margin-bottom: 4px;">Price Override: $</label>
@@ -791,7 +831,8 @@ async function showBatchSelectionModal(productId, productLabel, batches) {
                         </div>
                     </div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
             html += '</div>';
         }
 
@@ -831,14 +872,26 @@ async function showBatchSelectionModal(productId, productLabel, batches) {
 
         cardContainer.innerHTML = html;
 
+        // Add input validation for quantity inputs to prevent exceeding max
+        overlay.querySelectorAll('[data-qty-input]').forEach(input => {
+            input.addEventListener('input', function() {
+                const max = parseInt(this.max, 10);
+                const value = parseInt(this.value, 10);
+                if (value > max) {
+                    this.value = max;
+                    alert(`Only ${max} units available for this batch.`);
+                }
+            });
+        });
+
         // Add event listeners for full package batches
         overlay.querySelectorAll('[data-add-batch]').forEach(button => {
             button.addEventListener('click', () => {
                 const batchId = parseInt(button.dataset.addBatch, 10);
                 const card = button.closest('.batch-card');
-                const available = parseInt(card.dataset.available, 10);
                 const defaultUnitPrice = parseFloat(card.dataset.unitPrice);
                 const batchName = card.dataset.batchName;
+                const originalAvailable = parseInt(card.dataset.originalAvailable || card.dataset.available, 10);
                 const qtyInput = overlay.querySelector(`[data-qty-input="${batchId}"]`);
                 const priceInput = overlay.querySelector(`[data-price-input="${batchId}"]`);
                 const quantity = parseInt(qtyInput.value, 10);
@@ -850,10 +903,24 @@ async function showBatchSelectionModal(productId, productLabel, batches) {
                     return;
                 }
 
-                if (quantity > available) {
-                    alert(`Only ${available} units available for this batch.`);
+                // Recalculate available (in case user added items between opening modal and clicking)
+                const alreadyAdded = (lineItems
+                    .filter(item => !item.is_partial_package && item.batch_id === batchId)
+                    .reduce((sum, item) => sum + (item.quantity || 0), 0));
+                const remainingAvailable = Math.max(0, originalAvailable - alreadyAdded);
+                
+                if (quantity > remainingAvailable) {
+                    alert(`Only ${remainingAvailable} units available for this batch (${originalAvailable} total, ${alreadyAdded} already added).`);
                     return;
                 }
+                
+                // Update the max attribute and available display
+                qtyInput.max = remainingAvailable;
+                const metaEl = card.querySelector('.batch-meta');
+                if (metaEl) {
+                    metaEl.textContent = `Available: ${remainingAvailable}${alreadyAdded > 0 ? ` (${originalAvailable} total, ${alreadyAdded} already added)` : ''} • Unit Price: $${parseFloat(defaultUnitPrice || 0).toFixed(2)}`;
+                }
+                card.dataset.available = remainingAvailable;
 
                 // For full packages, if price is overridden, use manual pricing
                 const isPriceOverridden = priceInput && parseFloat(priceInput.value) !== defaultUnitPrice;
