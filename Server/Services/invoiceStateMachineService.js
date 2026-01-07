@@ -272,7 +272,8 @@ class InvoiceStateMachineService {
             
             // -> Cancelled (before shipping)
             if (to === 'Cancelled') {
-                const releaseResult = await this.releaseAllAllocations(invoiceId, client);
+                const allocationService = require('./allocationService');
+                const releaseResult = await allocationService.releaseAllAllocations(invoiceId, client);
                 if (!releaseResult.success) {
                     return releaseResult;
                 }
@@ -313,7 +314,8 @@ class InvoiceStateMachineService {
             
             // -> Voided (entire invoice voided)
             if (to === 'Voided') {
-                const releaseResult = await this.releaseAllAllocations(invoiceId, client);
+                const allocationService = require('./allocationService');
+                const releaseResult = await allocationService.releaseAllAllocations(invoiceId, client);
                 if (!releaseResult.success) {
                     return releaseResult;
                 }

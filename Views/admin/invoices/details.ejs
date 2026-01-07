@@ -687,7 +687,13 @@
                                 <strong style="color: var(--text-color);"><%= item.brand_name || 'AMAZE' %> <%= item.product_name %></strong>
                             </td>
                             <td style="color: var(--text-color);"><%= item.batch_name %></td>
-                            <td style="color: var(--text-color);"><%= item.quantity_ordered %> Case</td>
+                            <td style="color: var(--text-color);">
+                                <% if (item.is_partial_package) { %>
+                                    <%= parseFloat(item.quantity_ordered || 0).toFixed(2) %> Qty
+                                <% } else { %>
+                                    <%= item.quantity_ordered %> Case<%= item.quantity_ordered != 1 ? 's' : '' %>
+                                <% } %>
+                            </td>
                             <td style="color: var(--text-color);">$<%= parseFloat(item.unit_price || 0).toFixed(2) %></td>
                             <td><strong style="color: var(--text-color);">$<%= parseFloat(item.line_total || 0).toFixed(2) %></strong></td>
                         </tr>

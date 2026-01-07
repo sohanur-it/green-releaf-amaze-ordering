@@ -457,7 +457,8 @@ exports.getProductById = async (req, res) => {
                             INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
                             WHERE li.fk_batch_id = $1
                               AND li.specific_package_labels @> $2::jsonb
-                              AND i.status NOT IN ('Cancelled', 'Paid', 'Fully_Rejected')
+                              AND li.specific_package_labels IS NOT NULL
+                              AND i.status NOT IN ('Cancelled', 'Voided', 'Paid', 'Fully_Rejected')
                         `, [batch.id, JSON.stringify([pkg.label])]);
 
                         return allocationCheck.rows.length === 0; // Available if not allocated

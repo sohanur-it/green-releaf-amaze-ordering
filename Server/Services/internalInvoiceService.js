@@ -353,6 +353,10 @@ class InternalInvoiceService {
         `);
         const hasColumn = columnCheck.rows.length > 0;
 
+        // For partial packages, quantity_allocated should be 0 (they don't affect batch allocation)
+        // Only full packages should have quantity_allocated = quantity_ordered
+        const initialQuantityAllocated = (specificLabels && specificLabels.length > 0) ? 0 : itemData.quantity;
+        
         // Create line item
         let lineItem;
         if (hasColumn && isFulfillmentIssue) {
@@ -363,10 +367,10 @@ class InternalInvoiceService {
                     line_discount_amount, line_total, standing_discount_applied,
                     standing_discount_id, specific_package_labels, line_item_order,
                     fulfillment_issue_modification
-                ) VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $10,
+                ) VALUES ($1, $2, $3, $4, $11, $5, $6, $7, $8, $9, $10,
                           (SELECT COALESCE(MAX(line_item_order), 0) + 1
                            FROM "ORDERS-invoice-line-items" WHERE fk_invoice_id = $1),
-                          $11)
+                          true)
                 RETURNING id
             `, [
                 invoiceId, 
@@ -379,7 +383,7 @@ class InternalInvoiceService {
                 standingDiscount !== null,
                 standingDiscountId,
                 specificLabels ? JSON.stringify(specificLabels) : null,
-                true // fulfillment_issue_modification
+                initialQuantityAllocated // quantity_allocated: 0 for partials, quantity for full packages
             ]);
         } else {
             lineItem = await client.query(`
@@ -388,7 +392,7 @@ class InternalInvoiceService {
                     quantity_ordered, quantity_allocated, unit_price,
                     line_discount_amount, line_total, standing_discount_applied,
                     standing_discount_id, specific_package_labels, line_item_order
-                ) VALUES ($1, $2, $3, $4, $4, $5, $6, $7, $8, $9, $10,
+                ) VALUES ($1, $2, $3, $4, $11, $5, $6, $7, $8, $9, $10,
                           (SELECT COALESCE(MAX(line_item_order), 0) + 1
                            FROM "ORDERS-invoice-line-items" WHERE fk_invoice_id = $1))
                 RETURNING id
@@ -402,7 +406,8 @@ class InternalInvoiceService {
                 lineTotal,
                 standingDiscount !== null,
                 standingDiscountId,
-                specificLabels ? JSON.stringify(specificLabels) : null
+                specificLabels ? JSON.stringify(specificLabels) : null,
+                initialQuantityAllocated // quantity_allocated: 0 for partials, quantity for full packages
             ]);
         }
         
@@ -427,16 +432,19 @@ class InternalInvoiceService {
         const allocationService = require('./allocationService');
         
         // Section 17.3.1: Update quantity_allocated on line item with allocation timestamp tracking
-        await client.query(`
-            UPDATE "ORDERS-invoice-line-items"
-            SET 
-                quantity_allocated = $1,
-                allocated_at = CASE 
-                    WHEN allocated_at IS NULL THEN NOW()
-                    ELSE allocated_at
-                END
-            WHERE id = $2
-        `, [itemData.quantity, lineItem.rows[0].id]);
+        // For partial packages, quantity_allocated should remain 0 (already set during INSERT)
+        // Only full packages need allocation timestamp update
+        if (initialQuantityAllocated > 0) {
+            await client.query(`
+                UPDATE "ORDERS-invoice-line-items"
+                SET 
+                    allocated_at = CASE 
+                        WHEN allocated_at IS NULL THEN NOW()
+                        ELSE allocated_at
+                    END
+                WHERE id = $1
+            `, [lineItem.rows[0].id]);
+        }
         
         // For partial packages, don't increment batch allocated_quantity
         // Partial packages are individual packages that don't affect batch inventory

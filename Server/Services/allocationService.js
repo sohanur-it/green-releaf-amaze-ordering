@@ -319,8 +319,10 @@ class AllocationService {
                 
                 const currentAllocated = parseInt(batch.rows[0].allocated_quantity || 0);
                 
-                // Release full package allocation (if any)
-                if (quantity > 0) {
+                // CRITICAL: Only release allocation for full packages (quantity > 0)
+                // Partial packages should NEVER affect allocated_quantity
+                // If hasPartialPackages is true, quantity_allocated should be 0, but check anyway
+                if (quantity > 0 && !hasPartialPackages) {
                     // Prevent negative allocation - only release up to what's allocated
                     const releaseQty = Math.min(quantity, currentAllocated);
                     
@@ -344,6 +346,10 @@ class AllocationService {
                     } else {
                         console.warn(`⚠️  Cannot release allocation for batch ${batchId}: current allocated is ${currentAllocated}, trying to release ${quantity}`);
                     }
+                } else if (hasPartialPackages && quantity > 0) {
+                    // This is a data integrity issue: partial packages should have quantity_allocated = 0
+                    // Log warning but don't release allocation (partial packages don't affect batch allocation)
+                    console.warn(`⚠️  Line item ${item.id} has partial packages but quantity_allocated = ${quantity}. This should be 0. Not releasing allocation.`);
                 }
                 
                 // Clear partial package labels to release them back to availability

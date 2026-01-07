@@ -1031,7 +1031,8 @@ class InvoiceController {
             }
             
             // Get line items
-            const lineItems = await query(`
+            // Fetch line items first, then process in JavaScript to safely handle invalid JSON
+            const lineItemsResult = await query(`
                 SELECT 
                     li.*,
                     p.name as product_name,
@@ -1043,6 +1044,37 @@ class InvoiceController {
                 WHERE li.fk_invoice_id = $1
                 ORDER BY li.line_item_order
             `, [id]);
+            
+            // Process line items in JavaScript to safely check for partial packages
+            // This avoids SQL JSON parsing errors on invalid data
+            const lineItems = {
+                rows: lineItemsResult.rows.map(item => {
+                    let isPartialPackage = false;
+                    if (item.specific_package_labels) {
+                        try {
+                            // Parse the JSONB value (pg returns it as an object or string)
+                            const labels = typeof item.specific_package_labels === 'string' 
+                                ? JSON.parse(item.specific_package_labels)
+                                : item.specific_package_labels;
+                            
+                            // Check if it's an array with elements or a non-empty string
+                            if (Array.isArray(labels) && labels.length > 0) {
+                                isPartialPackage = true;
+                            } else if (typeof labels === 'string' && labels.trim().length > 0) {
+                                isPartialPackage = true;
+                            }
+                        } catch (e) {
+                            // If JSON parsing fails, it's not a valid partial package
+                            console.warn(`Invalid JSON in specific_package_labels for line item ${item.id}:`, e.message);
+                            isPartialPackage = false;
+                        }
+                    }
+                    return {
+                        ...item,
+                        is_partial_package: isPartialPackage
+                    };
+                })
+            };
             
             // Get modification history
             const history = await query(`

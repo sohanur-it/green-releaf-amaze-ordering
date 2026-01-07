@@ -1006,13 +1006,31 @@ function updatePartialSummary(batchId, summaryEl, qtyInput) {
 }
 
 async function addLineItem(productId, batchId, quantity, unitPrice, batchName, partialPackages = [], isPartialPackage = false, isPriceOverridden = false) {
-    // Check if product already added, if so update quantity
-    const existing = lineItems.find(item => item.product_id === productId && item.batch_id === batchId);
-    if (existing) {
-        existing.quantity += quantity;
-        if (partialPackages && partialPackages.length) {
-            existing.partial_packages_selected = partialPackages.slice();
+    // Check if product already added with the same type (full vs partial)
+    // Only merge if both are full packages (not partial) and same batch
+    // Partial packages should always be separate line items
+    const existing = lineItems.find(item => {
+        // Must be same product and batch
+        if (item.product_id !== productId || item.batch_id !== batchId) return false;
+        
+        // If adding a partial package, only merge with other partial packages that have the same labels
+        if (isPartialPackage) {
+            if (!item.is_partial_package) return false; // Don't merge partial with full
+            // Check if partial packages match
+            const existingLabels = (item.partial_packages_selected || []).sort().join(',');
+            const newLabels = (partialPackages || []).sort().join(',');
+            return existingLabels === newLabels;
+        } else {
+            // If adding a full package, only merge with other full packages (not partials)
+            if (item.is_partial_package) return false; // Don't merge full with partial
+            // For full packages, merge if no partial packages are selected
+            return !item.partial_packages_selected || item.partial_packages_selected.length === 0;
         }
+    });
+    
+    if (existing && !isPartialPackage) {
+        // Only merge full packages (not partials)
+        existing.quantity += quantity;
         renderLineItems();
         return;
     }
@@ -1131,6 +1149,11 @@ function renderLineItems() {
             ? parseFloat(item.manual_line_total) 
             : item.quantity * parseFloat(item.unit_price);
         total += lineTotal;
+        // Display quantity differently for partial vs full packages
+        const quantityDisplay = item.is_partial_package 
+            ? `Qty: ${item.quantity}` 
+            : `Qty: ${item.quantity} Case${item.quantity !== 1 ? 's' : ''}`;
+        
         const priceDisplay = item.is_partial_package || item.is_price_overridden
             ? `Manual Price: $${parseFloat(item.manual_line_total || 0).toFixed(2)}`
             : `Unit Price: $${parseFloat(item.unit_price).toFixed(2)}`;
@@ -1139,7 +1162,7 @@ function renderLineItems() {
                 <div class="line-item-info">
                     <strong>${item.brand_name || 'AMAZE'} ${item.product_name}</strong>
                     <div style="font-size: 0.9rem; color: #666;">
-                        ${item.batch_name || `Batch ID: ${item.batch_id}`} | Qty: ${item.quantity} | 
+                        ${item.batch_name || `Batch ID: ${item.batch_id}`} | ${quantityDisplay} | 
                         ${priceDisplay} | 
                         Total: $<strong>${parseFloat(lineTotal).toFixed(2)}</strong>
                     </div>
