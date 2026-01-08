@@ -447,8 +447,10 @@ exports.getProductById = async (req, res) => {
                 const partialPackageDetails = batch.partial_package_details.partial_packages || [];
                 
                 // Check which packages are allocated to active invoices
+                // Use case-insensitive comparison by normalizing labels to uppercase
                 const availablePartials = await Promise.all(
                     partialPackageDetails.map(async (pkg) => {
+                        const normalizedLabel = String(pkg.label).toUpperCase();
                         const allocationCheck = await pool.query(`
                             SELECT 
                                 i.id as invoice_id,
@@ -456,10 +458,14 @@ exports.getProductById = async (req, res) => {
                             FROM "ORDERS-invoice-line-items" li
                             INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
                             WHERE li.fk_batch_id = $1
-                              AND li.specific_package_labels @> $2::jsonb
                               AND li.specific_package_labels IS NOT NULL
+                              AND EXISTS (
+                                  SELECT 1
+                                  FROM jsonb_array_elements_text(li.specific_package_labels) AS label
+                                  WHERE UPPER(label) = $2
+                              )
                               AND i.status NOT IN ('Cancelled', 'Voided', 'Paid', 'Fully_Rejected')
-                        `, [batch.id, JSON.stringify([pkg.label])]);
+                        `, [batch.id, normalizedLabel]);
 
                         return allocationCheck.rows.length === 0; // Available if not allocated
                     })

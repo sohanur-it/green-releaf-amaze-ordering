@@ -393,6 +393,7 @@ body {
                                 </td>
                                 <td>
                                     <% 
+                                        const availablePartialCount = batch.available_partial_count || 0;
                                         const totalPartialCount = batch.partial_package_count || 0;
                                         const partialList = (batch.partial_package_details && batch.partial_package_details.partial_packages) || [];
                                         const partialTooltip = partialList.length
@@ -401,7 +402,7 @@ body {
                                     %>
                                     <% if (totalPartialCount > 0) { %>
                                         <span class="badge bg-warning text-dark" title="<%= partialTooltip %>">
-                                            Partial packages available
+                                            <%= availablePartialCount %> / <%= totalPartialCount %> <%= totalPartialCount === 1 ? 'partial package' : 'partial packages' %> available
                                         </span>
                                     <% } else { %>
                                         <span class="text-muted">-</span>

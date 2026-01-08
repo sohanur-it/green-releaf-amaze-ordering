@@ -545,14 +545,19 @@ class InternalInvoiceService {
         }
         
         // Ensure non-negative values to satisfy database constraint
-        // Constraint requires: subtotal >= 0, discount_amount >= 0, credit_applied >= 0
+        // Constraint requires: subtotal >= 0, discount_amount >= 0, credit_applied >= 0, total >= 0
         const safeSubtotal = Math.max(0, subtotal);
         const safeDiscountAmount = Math.max(0, discountAmount);
-        const safeCreditApplied = Math.max(0, creditApplied);
+        
+        // If subtotal after discounts is less than existing credits, cap credits to prevent negative total
+        // This can happen when line items are removed after credits were applied
+        const subtotalAfterDiscounts = safeSubtotal - safeDiscountAmount;
+        const safeCreditApplied = Math.max(0, Math.min(creditApplied, subtotalAfterDiscounts));
         
         // Calculate final total: total = subtotal - discount_amount - credit_applied
         // This matches the constraint: total = subtotal - discount_amount - credit_applied
-        const total = safeSubtotal - safeDiscountAmount - safeCreditApplied;
+        // Ensure total is never negative
+        const total = Math.max(0, safeSubtotal - safeDiscountAmount - safeCreditApplied);
         
         await client.query(`
             UPDATE "ORDERS-invoices"
