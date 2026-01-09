@@ -767,6 +767,40 @@ class ScanningSessionService {
                 li.assigned_package_labels,
                 p.name as product_name,
                 b.batch_name,
+                b.partial_package_details,
+                b.full_package_details,
+                
+                -- Try to restore specific_package_labels from manifest packages if it was cleared
+                -- This handles cases where manifest was voided and specific_package_labels was cleared
+                COALESCE(
+                    li.specific_package_labels,
+                    (
+                        SELECT jsonb_agg(DISTINCT mp.package_label ORDER BY mp.package_label)
+                        FROM "ORDERS-manifest-packages" mp
+                        WHERE mp.line_item_id = li.id
+                          AND mp.package_status = 'voided'
+                          AND mp.package_label IS NOT NULL
+                    )
+                ) as restored_specific_package_labels,
+                
+                -- Check if restored packages exist in METRC activepackages
+                -- This helps identify packages that may not be available after voiding
+                -- Note: activepackages uses sync_license (with underscore), manifest-packages uses synclicense
+                (
+                    SELECT jsonb_agg(DISTINCT mp.package_label)
+                    FROM "ORDERS-manifest-packages" mp
+                    WHERE mp.line_item_id = li.id
+                      AND mp.package_status = 'voided'
+                      AND mp.package_label IS NOT NULL
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM activepackages ap
+                          WHERE UPPER(ap.label) = UPPER(mp.package_label)
+                            AND ap.sync_license IN ('CUL000063', 'MAN000072')
+                            AND ap.isarchived = false
+                            AND ap.isfinished = false
+                      )
+                ) as missing_package_labels,
                 
                 -- Calculate progress
                 COALESCE(jsonb_array_length(li.assigned_package_labels), 0) as scanned_count,
@@ -790,19 +824,132 @@ class ScanningSessionService {
 
         const lineItems = progress.rows;
         
-        // Count all packages (both full and partial) for scanning progress
-        // Partial packages also need to be scanned to verify physical package matches order
-        const totalPackagesNeeded = lineItems.reduce((sum, li) => {
-            const isPartial = li.specific_package_labels !== null && li.specific_package_labels !== '';
-            if (isPartial) {
-                // For partial packages, count the number of specific labels
+        // Process each line item to determine if it's a partial package (same logic as below)
+        // This ensures overall progress uses the same determination as individual line items
+        const processedLineItems = lineItems.map(li => {
+            let isPartial = false;
+            let specificLabels = [];
+            
+            // Use same restoration logic as individual line items
+            let labelsToCheck = null;
+            if (li.specific_package_labels !== null && li.specific_package_labels !== '') {
+                labelsToCheck = li.specific_package_labels;
+            } else if (li.restored_specific_package_labels) {
                 try {
-                    const specificLabels = Array.isArray(li.specific_package_labels)
-                        ? li.specific_package_labels
-                        : JSON.parse(li.specific_package_labels || '[]');
-                    return sum + specificLabels.length;
-                } catch {
-                    return sum;
+                    const restoredLabels = Array.isArray(li.restored_specific_package_labels)
+                        ? li.restored_specific_package_labels
+                        : JSON.parse(li.restored_specific_package_labels || '[]');
+                    
+                    // CRITICAL: Only restore if we're confident it was a partial package order
+                    // Heuristic: If batch has full packages AND quantity_ordered is small (1-5), 
+                    // it's likely a full package order, not a partial package order
+                    // Only restore if:
+                    // 1. Restored count is much less than quantity_ordered (partial package: 1 package for 11 grams)
+                    // 2. OR batch has no full packages (all must be partial)
+                    let shouldRestore = false;
+                    
+                    if (restoredLabels.length > 0 && restoredLabels.length <= li.quantity_ordered) {
+                        // Check if batch has full packages
+                        let hasFullPackages = false;
+                        if (li.full_package_details) {
+                            try {
+                                const fullDetails = typeof li.full_package_details === 'string' 
+                                    ? JSON.parse(li.full_package_details || '{}')
+                                    : li.full_package_details;
+                                hasFullPackages = fullDetails.full_packages?.length > 0;
+                            } catch (e) {
+                                // Ignore
+                            }
+                        }
+                        
+                        // Restore if:
+                        // - Batch has no full packages (all must be partial), OR
+                        // - Restored count is much less than quantity_ordered (partial package pattern)
+                        //   AND quantity_ordered is > 5 (unlikely to be a full package order of 1 unit)
+                        // CRITICAL: If batch has full packages AND restoredLabels.length === quantity_ordered,
+                        // it's almost certainly a full package order, NOT a partial package
+                        if (!hasFullPackages) {
+                            shouldRestore = true;
+                            console.log(`[ScanningProgress] Pre-processing: Restoring ${restoredLabels.length} labels (batch has no full packages)`);
+                        } else if (restoredLabels.length < li.quantity_ordered && li.quantity_ordered > 5) {
+                            // Pattern: 1 package for 11+ grams = likely partial package
+                            shouldRestore = true;
+                            console.log(`[ScanningProgress] Pre-processing: Restoring ${restoredLabels.length} labels (pattern: ${restoredLabels.length} package for ${li.quantity_ordered} units = partial package)`);
+                        } else if (restoredLabels.length === li.quantity_ordered && hasFullPackages) {
+                            // CRITICAL: If restored count equals quantity_ordered AND batch has full packages,
+                            // this is almost certainly a full package order (e.g., 1 package for 1 case)
+                            // DO NOT restore - it will be misidentified as partial
+                            shouldRestore = false;
+                            console.log(`[ScanningProgress] Pre-processing: NOT restoring ${restoredLabels.length} labels (restoredLabels.length=${restoredLabels.length} === quantity_ordered=${li.quantity_ordered} AND hasFullPackages=true - this is a full package order)`);
+                        } else {
+                            console.log(`[ScanningProgress] Pre-processing: NOT restoring ${restoredLabels.length} labels (quantity_ordered=${li.quantity_ordered}, hasFullPackages=${hasFullPackages} - likely full package order)`);
+                        }
+                        
+                        if (shouldRestore) {
+                            labelsToCheck = li.restored_specific_package_labels;
+                        }
+                    }
+                } catch (error) {
+                    // Ignore
+                }
+            }
+            
+            if (labelsToCheck !== null && labelsToCheck !== '') {
+                try {
+                    specificLabels = Array.isArray(labelsToCheck)
+                        ? labelsToCheck
+                        : JSON.parse(labelsToCheck || '[]');
+                    isPartial = specificLabels.length > 0;
+                } catch (error) {
+                    isPartial = false;
+                }
+            }
+            
+            // If still not partial, check batch (same inference logic)
+            if (!isPartial && li.partial_package_details) {
+                try {
+                    const partialDetails = typeof li.partial_package_details === 'string'
+                        ? JSON.parse(li.partial_package_details)
+                        : li.partial_package_details;
+                    const partialPackages = partialDetails.partial_packages || [];
+                    
+                    if (partialPackages.length > 0) {
+                        let hasFullPackages = false;
+                        if (li.full_package_details) {
+                            try {
+                                const fullDetails = typeof li.full_package_details === 'string' 
+                                    ? JSON.parse(li.full_package_details || '{}')
+                                    : li.full_package_details;
+                                hasFullPackages = fullDetails.full_packages?.length > 0;
+                            } catch (e) {
+                                // Ignore
+                            }
+                        }
+                        
+                        // Only infer if batch has NO full packages
+                        if (!hasFullPackages) {
+                            isPartial = true;
+                            specificLabels = [];
+                        }
+                    }
+                } catch (error) {
+                    // Ignore
+                }
+            }
+            
+            return { ...li, _isPartial: isPartial, _specificLabels: specificLabels };
+        });
+        
+        // Count ALL packages (both full and partial) for overall progress
+        // This matches the user's expectation: "0/1" for a single package order
+        const totalPackagesNeeded = processedLineItems.reduce((sum, li) => {
+            if (li._isPartial) {
+                // For partial packages, count the number of specific labels
+                if (li._specificLabels.length > 0) {
+                    return sum + li._specificLabels.length;
+                } else {
+                    // Inferred partial package - use quantity_ordered
+                    return sum + parseInt(li.quantity_ordered || 0);
                 }
             } else {
                 // For full packages, count quantity_ordered
@@ -810,15 +957,14 @@ class ScanningSessionService {
             }
         }, 0);
         
-        const totalPackagesScanned = lineItems.reduce((sum, li) => {
-            const isPartial = li.specific_package_labels !== null && li.specific_package_labels !== '';
-            if (isPartial) {
+        const totalPackagesScanned = processedLineItems.reduce((sum, li) => {
+            if (li._isPartial) {
                 // For partial packages, count scanned labels from assigned_package_labels
                 // that match the specific_package_labels
                 try {
-                    const specificLabels = Array.isArray(li.specific_package_labels)
-                        ? li.specific_package_labels
-                        : JSON.parse(li.specific_package_labels || '[]');
+                    const specificLabels = li._specificLabels.length > 0 
+                        ? li._specificLabels
+                        : (li.specific_package_labels ? (Array.isArray(li.specific_package_labels) ? li.specific_package_labels : JSON.parse(li.specific_package_labels || '[]')) : []);
                     const assignedLabels = li.assigned_package_labels
                         ? (Array.isArray(li.assigned_package_labels)
                             ? li.assigned_package_labels
@@ -843,34 +989,56 @@ class ScanningSessionService {
 
         return {
             invoice_id: invoiceId,
-            line_items: lineItems.map(li => {
-                const isPartial = li.specific_package_labels !== null && li.specific_package_labels !== '';
+            line_items: processedLineItems.map(li => {
+                // Use the pre-processed isPartial flag and specificLabels from earlier processing
+                // All the logic for determining isPartial is already done in processedLineItems above
+                const isPartial = li._isPartial;
+                const specificLabels = li._specificLabels || [];
+                let inferredQuantityNeeded = null;
+                
+                console.log(`[ScanningProgress] Line item ${li.line_item_id}: Using pre-processed values - isPartial=${isPartial}, specificLabels.length=${specificLabels.length}`);
                 
                 // For partial packages, calculate progress based on specific labels
-                let quantityNeeded = parseInt(li.quantity_ordered || 0);
+                // Initialize quantityNeeded - use inferred value if set, otherwise use quantity_ordered
+                let quantityNeeded = inferredQuantityNeeded !== null 
+                    ? inferredQuantityNeeded  // Use inferred value if available
+                    : parseInt(li.quantity_ordered || 0);
+                
+                // CRITICAL: For partial packages, quantityNeeded should be the count of specific labels, not quantity_ordered
+                if (isPartial && specificLabels.length > 0) {
+                    quantityNeeded = specificLabels.length;
+                    console.log(`[ScanningProgress] Line item ${li.line_item_id}: Partial package - using specificLabels.length=${specificLabels.length} instead of quantity_ordered=${li.quantity_ordered}`);
+                }
+                
+                console.log(`[ScanningProgress] Line item ${li.line_item_id}: Final calculation - quantityNeeded=${quantityNeeded}, isPartial=${isPartial}, inferredQuantityNeeded=${inferredQuantityNeeded}, quantity_ordered=${li.quantity_ordered}, specificLabels.length=${specificLabels.length}`);
+                
                 let scannedCount = parseInt(li.scanned_count || 0);
                 let remainingCount = quantityNeeded - scannedCount;
                 let status = li.status;
                 
                 if (isPartial) {
                     try {
-                        const specificLabels = Array.isArray(li.specific_package_labels)
-                            ? li.specific_package_labels
-                            : JSON.parse(li.specific_package_labels || '[]');
+                        // specificLabels already parsed above (or inferred)
                         const assignedLabels = li.assigned_package_labels
                             ? (Array.isArray(li.assigned_package_labels)
                                 ? li.assigned_package_labels
                                 : JSON.parse(li.assigned_package_labels || '[]'))
                             : [];
                         
-                        quantityNeeded = specificLabels.length;
-                        
-                        // Normalize labels for comparison (uppercase) to handle case differences
-                        const normalizedSpecificLabels = specificLabels.map(label => String(label).toUpperCase());
-                        const normalizedAssignedLabels = assignedLabels.map(label => String(label).toUpperCase());
-                        
-                        // Count how many of the specific labels have been scanned (case-insensitive comparison)
-                        scannedCount = normalizedSpecificLabels.filter(label => normalizedAssignedLabels.includes(label)).length;
+                        // If specificLabels is empty (inferred partial package), use quantity_ordered
+                        if (specificLabels.length === 0) {
+                            quantityNeeded = 1; // Inferred partial package - needs 1 package
+                            scannedCount = assignedLabels.length; // Count scanned packages
+                        } else {
+                            quantityNeeded = specificLabels.length;
+                            
+                            // Normalize labels for comparison (uppercase) to handle case differences
+                            const normalizedSpecificLabels = specificLabels.map(label => String(label).toUpperCase());
+                            const normalizedAssignedLabels = assignedLabels.map(label => String(label).toUpperCase());
+                            
+                            // Count how many of the specific labels have been scanned (case-insensitive comparison)
+                            scannedCount = normalizedSpecificLabels.filter(label => normalizedAssignedLabels.includes(label)).length;
+                        }
                         remainingCount = quantityNeeded - scannedCount;
                         
                         // Determine status based on scanned count
@@ -890,7 +1058,19 @@ class ScanningSessionService {
                     }
                 }
                 
-                return {
+                // Check for missing packages (restored from manifest but not in METRC)
+                let missingPackages = [];
+                if (li.missing_package_labels) {
+                    try {
+                        missingPackages = Array.isArray(li.missing_package_labels)
+                            ? li.missing_package_labels
+                            : JSON.parse(li.missing_package_labels || '[]');
+                    } catch (error) {
+                        console.warn(`[ScanningProgress] Error parsing missing_package_labels:`, error);
+                    }
+                }
+                
+                const result = {
                     line_item_id: li.line_item_id,
                     product_name: li.product_name,
                     batch_name: li.batch_name,
@@ -899,13 +1079,19 @@ class ScanningSessionService {
                     remaining_count: remainingCount,
                     status: status,
                     scanned_packages: li.assigned_package_labels || [],
-                    specific_package_labels: li.specific_package_labels,
-                    is_partial_package: isPartial
+                    specific_package_labels: specificLabels.length > 0 ? specificLabels : (li.specific_package_labels || null),
+                    is_partial_package: isPartial,
+                    missing_package_labels: missingPackages,
+                    has_missing_packages: missingPackages.length > 0
                 };
+                
+                console.log(`[ScanningProgress] Line item ${li.line_item_id}: Final result - is_partial_package=${isPartial}, quantity_ordered=${quantityNeeded}, specific_package_labels.length=${result.specific_package_labels?.length || 0}`);
+                
+                return result;
             }),
             overall_progress: {
-                total_packages_needed: totalPackagesNeeded, // Only full packages count
-                total_packages_scanned: totalPackagesScanned, // Only full packages count
+                total_packages_needed: totalPackagesNeeded, // All packages (full + partial)
+                total_packages_scanned: totalPackagesScanned, // All packages (full + partial)
                 percentage: totalPackagesNeeded > 0 
                     ? Math.round((totalPackagesScanned / totalPackagesNeeded) * 100)
                     : 0,

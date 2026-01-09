@@ -226,9 +226,19 @@
                 
                 <div class="form-group full-width">
                     <label>Recipient Facility <span class="required">*</span></label>
-                    <select id="recipient-facility" name="recipientFacility" required style="color: #000000 !important;">
-                        <option value="">Loading recipients...</option>
-                    </select>
+                    <div style="position: relative;">
+                        <input type="text" 
+                               id="recipient-search" 
+                               placeholder="Type to search recipients by name or license number..." 
+                               style="width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 4px; margin-bottom: 0.5rem; color: #000000 !important; display: none;"
+                               autocomplete="off">
+                        <div id="recipient-suggestions" 
+                             style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: white; border: 1px solid #d1d5db; border-radius: 4px; max-height: 300px; overflow-y: auto; z-index: 1000; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-top: -0.5rem;">
+                        </div>
+                        <select id="recipient-facility" name="recipientFacility" required style="color: #000000 !important; width: 100%;">
+                            <option value="">Loading recipients...</option>
+                        </select>
+                    </div>
                     <div id="recipient-loading" class="loading-transporters">
                         <i class="fas fa-spinner fa-spin"></i> Loading available recipients from METRC...
                     </div>

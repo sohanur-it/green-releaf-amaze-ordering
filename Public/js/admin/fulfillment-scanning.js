@@ -586,8 +586,55 @@ function renderProgress(data) {
                     </span>
                 </div>
 
+                ${item.is_partial_package && item.specific_package_labels && item.specific_package_labels.length > 0 ? `
+                    <div class="required-packages" style="margin-top: 0.75rem; padding: 0.75rem; background: #fef3c7; border-radius: 6px; border-left: 3px solid #f59e0b;">
+                        <h5 style="margin: 0 0 0.5rem 0; font-size: 0.875rem; font-weight: 600; color: #92400e;">
+                            <i class="fas fa-tag" style="margin-right: 4px;"></i>Required Package Labels:
+                        </h5>
+                        ${item.has_missing_packages && item.missing_package_labels && item.missing_package_labels.length > 0 ? `
+                            <div style="margin-bottom: 0.5rem; padding: 0.5rem; background: #fee2e2; border-radius: 4px; border-left: 3px solid #ef4444;">
+                                <strong style="color: #991b1b; font-size: 0.875rem;">
+                                    <i class="fas fa-exclamation-triangle" style="margin-right: 4px;"></i>Warning:
+                                </strong>
+                                <span style="color: #991b1b; font-size: 0.875rem;">
+                                    The following package(s) are not found in METRC and may not be available: ${item.missing_package_labels.join(', ')}
+                                </span>
+                            </div>
+                        ` : ''}
+                        <div class="package-tags" style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                            ${item.specific_package_labels.map(label => {
+                                // Check if this label has been scanned
+                                const isScanned = item.scanned_packages && item.scanned_packages.some(pkg => 
+                                    String(pkg).toUpperCase() === String(label).toUpperCase()
+                                );
+                                const isMissing = item.missing_package_labels && item.missing_package_labels.some(mp => 
+                                    String(mp).toUpperCase() === String(label).toUpperCase()
+                                );
+                                const lockInfo = lockedPackages.get(label);
+                                const isLocked = lockInfo !== undefined;
+                                const lockedBy = lockInfo ? lockInfo.userName : null;
+                                
+                                return `
+                                <span class="package-tag ${isScanned ? 'scanned' : ''} ${isLocked ? 'package-locked' : ''} ${isMissing ? 'missing' : ''}" 
+                                      style="background: ${isMissing ? '#fee2e2' : isScanned ? '#d1fae5' : '#fef3c7'}; 
+                                             border: 1px solid ${isMissing ? '#ef4444' : isScanned ? '#10b981' : '#f59e0b'}; 
+                                             color: ${isMissing ? '#991b1b' : isScanned ? '#065f46' : '#92400e'};
+                                             ${isLocked ? 'opacity: 0.6; pointer-events: none; cursor: not-allowed;' : ''}"
+                                      ${isLocked ? `title="Locked by ${lockedBy || 'Another worker'}"` : `title="${isMissing ? '⚠️ NOT FOUND IN METRC' : isScanned ? 'Scanned' : 'Required - scan this package'}"`}
+                                      ${isLocked ? `data-locked-by="${lockedBy || 'Another worker'}"` : ''}>
+                                    ${isLocked ? '<i class="fas fa-lock lock-icon" style="margin-right: 4px; color: #ef4444;"></i>' : ''}
+                                    ${isMissing ? '<i class="fas fa-exclamation-triangle" style="margin-right: 4px; color: #ef4444;"></i>' : ''}
+                                    ${isScanned ? '<i class="fas fa-check-circle" style="margin-right: 4px; color: #10b981;"></i>' : '<i class="fas fa-tag" style="margin-right: 4px;"></i>'}
+                                    ${label}
+                                </span>
+                            `;
+                            }).join('')}
+                        </div>
+                    </div>
+                ` : ''}
+
                 ${item.scanned_packages.length > 0 ? `
-                    <div class="scanned-packages">
+                    <div class="scanned-packages" style="margin-top: ${item.is_partial_package && item.specific_package_labels && item.specific_package_labels.length > 0 ? '0.75rem' : '0'};">
                         <h5>Scanned Packages</h5>
                         <div class="package-tags">
                             ${item.scanned_packages.map(pkg => {

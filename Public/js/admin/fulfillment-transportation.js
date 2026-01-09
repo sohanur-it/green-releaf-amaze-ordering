@@ -135,6 +135,9 @@ async function loadRecipients() {
         loadingEl.style.display = 'none';
         recipientSelect.innerHTML = '<option value="">Select Recipient Facility</option>';
 
+        // Store all recipients for filtering
+        window.allRecipients = data.recipients || [];
+
         if (data.recipients && data.recipients.length > 0) {
             console.log(`[Recipients] ✅ Loaded ${data.recipients.length} recipient(s) from METRC API`);
             
@@ -146,8 +149,19 @@ async function loadRecipients() {
                 name: r.name
             })));
             
+            // Show search input if there are more than 3 recipients (makes it easier to find specific recipients)
+            const recipientSearch = document.getElementById('recipient-search');
+            if (recipientSearch && data.recipients.length > 3) {
+                recipientSearch.style.display = 'block';
+                setupRecipientSearch(recipientSearch, recipientSelect, data.recipients);
+            } else if (recipientSearch) {
+                // Hide search if 3 or fewer recipients
+                recipientSearch.style.display = 'none';
+            }
+            
             let autoSelectedRecipient = null;
             
+            // Populate dropdown with all recipients
             data.recipients.forEach(recipient => {
                 const option = document.createElement('option');
                 option.value = recipient.id; // Store the numeric ID as value
@@ -193,8 +207,18 @@ async function loadRecipients() {
                 console.warn(`[Recipients] ⚠️ ==========================================`);
                 console.warn(`[Recipients] ⚠️ No recipient found matching destination license: "${destinationLicense}"`);
                 console.warn(`[Recipients] ⚠️ ==========================================`);
-                console.warn(`[Recipients] ⚠️ Available license numbers from METRC:`, 
-                    data.recipients.map(r => `"${r.licenseNumber}"`).join(', '));
+                console.warn(`[Recipients] ⚠️ Total recipients loaded: ${data.recipients.length}`);
+                console.warn(`[Recipients] ⚠️ Available license numbers from METRC (first 20):`, 
+                    data.recipients.slice(0, 20).map(r => `"${r.licenseNumber}"`).join(', '));
+                if (data.recipients.length > 20) {
+                    console.warn(`[Recipients] ⚠️ ... and ${data.recipients.length - 20} more recipients`);
+                }
+                // Show full list in a more readable format
+                console.warn(`[Recipients] ⚠️ Full recipient list:`, data.recipients.map(r => ({
+                    id: r.id,
+                    name: r.name,
+                    licenseNumber: r.licenseNumber
+                })));
                 console.warn(`[Recipients] ⚠️ Possible reasons:`);
                 console.warn(`[Recipients] ⚠️ 1. License "${destinationLicense}" is not in METRC's list of available recipients`);
                 console.warn(`[Recipients] ⚠️ 2. License "${destinationLicense}" is not authorized to receive transfers from your source license`);
@@ -614,5 +638,223 @@ function setupDeliveryWindowValidation() {
             }
         }, 500);
     });
+}
+
+/**
+ * Setup search functionality for recipient dropdown with autocomplete suggestions
+ */
+function setupRecipientSearch(searchInput, selectElement, allRecipients) {
+    let searchTimeout = null;
+    const suggestionsDiv = document.getElementById('recipient-suggestions');
+    let selectedIndex = -1;
+    
+    // Show suggestions dropdown
+    function showSuggestions(query) {
+        if (!suggestionsDiv) return;
+        
+        const queryLower = query.toLowerCase().trim();
+        
+        if (!queryLower) {
+            suggestionsDiv.style.display = 'none';
+            return;
+        }
+        
+        // Filter recipients
+        const filtered = allRecipients.filter(recipient => {
+            const name = (recipient.name || '').toLowerCase();
+            const license = (recipient.licenseNumber || '').toLowerCase();
+            const displayName = (recipient.displayName || `${recipient.name} (${recipient.licenseNumber})`).toLowerCase();
+            
+            return name.includes(queryLower) || 
+                   license.includes(queryLower) || 
+                   displayName.includes(queryLower);
+        });
+        
+        if (filtered.length === 0) {
+            suggestionsDiv.innerHTML = '<div style="padding: 0.75rem; color: #6b7280; text-align: center;">No recipients found</div>';
+            suggestionsDiv.style.display = 'block';
+            return;
+        }
+        
+        // Build suggestions HTML
+        suggestionsDiv.innerHTML = filtered.map((recipient, index) => {
+            const displayName = recipient.displayName || `${recipient.name} (${recipient.licenseNumber})`;
+            return `
+                <div class="recipient-suggestion" 
+                     data-index="${index}"
+                     data-id="${recipient.id}"
+                     data-license="${recipient.licenseNumber}"
+                     data-name="${recipient.name}"
+                     style="padding: 0.75rem; cursor: pointer; border-bottom: 1px solid #e5e7eb; transition: background 0.2s;"
+                     onmouseover="this.style.background='#f3f4f6'"
+                     onmouseout="this.style.background='white'"
+                     onclick="selectRecipientFromSuggestion(${recipient.id}, '${recipient.licenseNumber}', '${recipient.name.replace(/'/g, "\\'")}')">
+                    <div style="font-weight: 600; color: #111827;">${recipient.name || 'Unknown'}</div>
+                    <div style="font-size: 0.875rem; color: #6b7280; margin-top: 0.25rem;">${recipient.licenseNumber || 'N/A'}</div>
+                </div>
+            `;
+        }).join('');
+        
+        suggestionsDiv.style.display = 'block';
+        selectedIndex = -1;
+    }
+    
+    // Make selectRecipientFromSuggestion available globally
+    window.selectRecipientFromSuggestion = function(id, licenseNumber, name) {
+        selectElement.value = id;
+        document.getElementById('recipient-id').value = id;
+        searchInput.value = `${name} (${licenseNumber})`;
+        suggestionsDiv.style.display = 'none';
+        
+        // Trigger change event
+        selectElement.dispatchEvent(new Event('change'));
+        
+        console.log(`[Recipients] ✅ Recipient selected from suggestions:`, {
+            id: id,
+            licenseNumber: licenseNumber,
+            name: name
+        });
+    };
+    
+    searchInput.addEventListener('input', (e) => {
+        clearTimeout(searchTimeout);
+        const query = e.target.value;
+        
+        // Debounce search
+        searchTimeout = setTimeout(() => {
+            showSuggestions(query);
+        }, 200);
+    });
+    
+    searchInput.addEventListener('keydown', (e) => {
+        if (!suggestionsDiv || suggestionsDiv.style.display === 'none') {
+            return;
+        }
+        
+        const suggestions = suggestionsDiv.querySelectorAll('.recipient-suggestion');
+        
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectedIndex = Math.min(selectedIndex + 1, suggestions.length - 1);
+            updateSelectedSuggestion(suggestions);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectedIndex = Math.max(selectedIndex - 1, -1);
+            updateSelectedSuggestion(suggestions);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            if (selectedIndex >= 0 && suggestions[selectedIndex]) {
+                suggestions[selectedIndex].click();
+            } else if (suggestions.length === 1) {
+                suggestions[0].click();
+            }
+        } else if (e.key === 'Escape') {
+            suggestionsDiv.style.display = 'none';
+            searchInput.blur();
+        }
+    });
+    
+    function updateSelectedSuggestion(suggestions) {
+        suggestions.forEach((suggestion, index) => {
+            if (index === selectedIndex) {
+                suggestion.style.background = '#3b82f6';
+                suggestion.style.color = 'white';
+                suggestion.querySelector('div').style.color = 'white';
+                suggestion.scrollIntoView({ block: 'nearest' });
+            } else {
+                suggestion.style.background = '';
+                suggestion.style.color = '';
+                suggestion.querySelector('div').style.color = '';
+            }
+        });
+    }
+    
+    // Hide suggestions when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!searchInput.contains(e.target) && !suggestionsDiv.contains(e.target)) {
+            suggestionsDiv.style.display = 'none';
+        }
+    });
+    
+    // Show suggestions on focus if there's text
+    searchInput.addEventListener('focus', () => {
+        if (searchInput.value.trim()) {
+            showSuggestions(searchInput.value);
+        }
+    });
+    
+    // Clear search when dropdown changes
+    selectElement.addEventListener('change', () => {
+        if (selectElement.value) {
+            suggestionsDiv.style.display = 'none';
+        }
+    });
+}
+
+/**
+ * Filter recipients based on search query
+ */
+function filterRecipients(selectElement, allRecipients, query) {
+    if (!query) {
+        // Show all options
+        Array.from(selectElement.options).forEach(opt => {
+            opt.style.display = '';
+        });
+        // Remove "no results" option if it exists
+        const noResults = selectElement.querySelector('option[data-no-results]');
+        if (noResults) {
+            noResults.remove();
+        }
+        return;
+    }
+    
+    // Always show the first empty option
+    if (selectElement.options.length > 0 && selectElement.options[0].value === '') {
+        selectElement.options[0].style.display = '';
+    }
+    
+    // Filter options
+    let hasVisibleOptions = false;
+    Array.from(selectElement.options).forEach((opt, index) => {
+        if (index === 0 && opt.value === '') {
+            return; // Skip empty option
+        }
+        
+        const license = opt.getAttribute('data-license') || '';
+        const name = opt.getAttribute('data-name') || '';
+        const text = opt.textContent.toLowerCase();
+        
+        const matches = text.includes(query) || 
+                       license.toLowerCase().includes(query) || 
+                       name.toLowerCase().includes(query);
+        
+        opt.style.display = matches ? '' : 'none';
+        if (matches) {
+            hasVisibleOptions = true;
+        }
+    });
+    
+    // If no matches, show message
+    if (!hasVisibleOptions) {
+        // Remove existing "no results" option if it exists
+        const existingNoResults = selectElement.querySelector('option[data-no-results]');
+        if (existingNoResults) {
+            existingNoResults.remove();
+        }
+        
+        // Add a "no results" option temporarily
+        const noResultsOpt = document.createElement('option');
+        noResultsOpt.value = '';
+        noResultsOpt.textContent = `No recipients found matching "${query}"`;
+        noResultsOpt.disabled = true;
+        noResultsOpt.setAttribute('data-no-results', 'true');
+        selectElement.appendChild(noResultsOpt);
+    } else {
+        // Remove "no results" option if it exists
+        const noResults = selectElement.querySelector('option[data-no-results]');
+        if (noResults) {
+            noResults.remove();
+        }
+    }
 }
 

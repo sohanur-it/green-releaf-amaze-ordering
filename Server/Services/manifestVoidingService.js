@@ -375,7 +375,10 @@ class ManifestVoidingService {
 
             // If all manifests voided, clear assigned packages and release allocations
             if (remainingManifests.length === 0) {
-                // Clear assigned packages (allow re-scanning)
+                // Clear assigned packages to allow re-scanning
+                // CRITICAL: Do NOT clear specific_package_labels - we need to preserve the partial package requirement
+                // so the scanning page shows the correct count (e.g., 0/1 instead of 0/11)
+                // Only clear assigned_package_labels to allow re-scanning the same specific packages
                 await client.query(`
                     UPDATE "ORDERS-invoice-line-items"
                     SET 
@@ -524,51 +527,67 @@ class ManifestVoidingService {
      * Called when manifest is voided
      */
     async releaseAllocationsForInvoice(invoiceId, client) {
-        // Get all line items
+        // Get all line items (including those with partial packages)
         const lineItems = await client.query(`
             SELECT 
                 li.id,
                 li.fk_batch_id,
-                li.quantity_allocated
+                li.quantity_allocated,
+                li.specific_package_labels
             FROM "ORDERS-invoice-line-items" li
             WHERE li.fk_invoice_id = $1
-                AND li.quantity_allocated > 0
+                AND (li.quantity_allocated > 0 OR li.specific_package_labels IS NOT NULL)
         `, [invoiceId]);
 
         // Release allocations for each line item
         for (const li of lineItems.rows) {
-            // Decrement batch allocated_quantity
-            await client.query(`
-                UPDATE "ORDERS-batches"
-                SET allocated_quantity = allocated_quantity - $1
-                WHERE id = $2
-            `, [li.quantity_allocated, li.fk_batch_id]);
+            const hasPartialPackages = li.specific_package_labels && 
+                (Array.isArray(li.specific_package_labels) ? li.specific_package_labels.length > 0 : 
+                 typeof li.specific_package_labels === 'string' ? li.specific_package_labels.length > 0 : false);
+            
+            // Only release batch allocation for full packages (quantity_allocated > 0)
+            // Partial packages don't affect batch allocated_quantity
+            if (li.quantity_allocated > 0 && !hasPartialPackages) {
+                // Decrement batch allocated_quantity
+                await client.query(`
+                    UPDATE "ORDERS-batches"
+                    SET allocated_quantity = GREATEST(0, allocated_quantity - $1)
+                    WHERE id = $2
+                `, [li.quantity_allocated, li.fk_batch_id]);
 
-            // Log to batch history
-            await client.query(`
-                INSERT INTO "ORDERS-batch-history" (
-                    batch_id,
-                    change_type,
-                    field_name,
-                    reason,
-                    related_invoice_id,
-                    changed_by_system,
-                    change_details
-                ) VALUES ($1, 'allocation_released', 'allocated_quantity',
-                         'Manifest voided - Invoice returned to sales', $2, true, $3)
-            `, [
-                li.fk_batch_id,
-                invoiceId,
-                JSON.stringify({
-                    quantity_released: li.quantity_allocated,
-                    reason: 'Manifest voided'
-                })
-            ]);
+                // Log to batch history
+                await client.query(`
+                    INSERT INTO "ORDERS-batch-history" (
+                        batch_id,
+                        change_type,
+                        field_name,
+                        reason,
+                        related_invoice_id,
+                        changed_by_system,
+                        change_details
+                    ) VALUES ($1, 'allocation_released', 'allocated_quantity',
+                             'Manifest voided - Invoice returned to sales', $2, true, $3)
+                `, [
+                    li.fk_batch_id,
+                    invoiceId,
+                    JSON.stringify({
+                        quantity_released: li.quantity_allocated,
+                        reason: 'Manifest voided'
+                    })
+                ]);
+            } else if (hasPartialPackages) {
+                // Log that partial packages are being released
+                console.log(`[Void] Releasing partial packages from line item ${li.id} for batch ${li.fk_batch_id}`);
+            }
 
             // Reset line item allocation
+            // CRITICAL: Do NOT clear specific_package_labels - preserve partial package requirement
+            // so scanning page shows correct count (e.g., 0/1 instead of 0/11)
+            // Only clear assigned_package_labels to allow re-scanning
             await client.query(`
                 UPDATE "ORDERS-invoice-line-items"
-                SET quantity_allocated = 0
+                SET quantity_allocated = 0,
+                    assigned_package_labels = NULL
                 WHERE id = $1
             `, [li.id]);
 

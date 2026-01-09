@@ -636,15 +636,29 @@ router.get('/fulfillment/transportation/:invoiceId', requireRole('Fulfillment Te
         `, [invoiceId]);
         
         const locationId = invoiceResult.rows[0]?.fk_location_id || null;
-        const storeId = invoiceResult.rows[0]?.state_license || 'N/A'; // Store ID (DIS000085)
-        // Priority: 1) metrc_license_number from location, 2) location_license_number from invoice (fallback)
-        const metrcLicense = invoiceResult.rows[0]?.metrc_license_number || invoiceResult.rows[0]?.location_license_number || null; // METRC License (CUL000027)
-        const locationName = invoiceResult.rows[0]?.location_name || 'Unknown Location';
+        // Store ID should be the destination facility's store ID (where it's going)
+        // Priority: 1) location_license_number from invoice (destination), 2) state_license from location (fallback)
+        const storeId = invoiceResult.rows[0]?.location_license_number || invoiceResult.rows[0]?.state_license || 'N/A'; // Destination Store ID
         
-        // Get source license (our license) for transporter auto-selection
-        // Transporters are typically our own license, but can be third-party
+        // Get source license (our license) to exclude it from destination selection
         const sourceLicense = process.env.T3_LICENSE_NUMBER || null;
-        const transporterLicense = sourceLicense; // Use source license for auto-selection
+        
+        // METRC License for recipient facility selection
+        // CRITICAL: Use location_license_number from invoice (destination) as primary source
+        // Do NOT use metrc_license_number if it matches source facility (CUL000063)
+        // metrc_license_number on buyer location might be incorrectly set to source facility
+        const metrcLicenseFromLocation = invoiceResult.rows[0]?.metrc_license_number;
+        const isSourceLicense = sourceLicense && metrcLicenseFromLocation && 
+            metrcLicenseFromLocation.toUpperCase().trim() === sourceLicense.toUpperCase().trim();
+        
+        // Only use metrc_license_number if it's NOT the source license
+        // Otherwise, fall back to location_license_number from invoice (destination)
+        const metrcLicense = (!isSourceLicense && metrcLicenseFromLocation) 
+            ? metrcLicenseFromLocation 
+            : (invoiceResult.rows[0]?.location_license_number || null);
+        
+        const locationName = invoiceResult.rows[0]?.location_name || 'Unknown Location';
+        const transporterLicense = sourceLicense; // Use source license for transporter auto-selection
         
         res.render('admin/fulfillment/transportation', {
             title: 'Transportation Details',

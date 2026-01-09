@@ -534,8 +534,15 @@ async function updateNotificationBadge() {
     if (!badge) return;
     
     try {
-        // Fetch with limit=0 to get total count without data, or use a small limit and check total
+        // Fetch with limit=1 to get total count without loading all data
         const response = await fetch('/api/v1/notifications?limit=1&unread=true');
+        
+        // Check if response is OK before parsing
+        if (!response.ok) {
+            console.warn(`[Notifications] Badge update failed: HTTP ${response.status} ${response.statusText}`);
+            return; // Silently fail - don't show error to user
+        }
+        
         const data = await response.json();
         
         if (data.success) {
@@ -549,7 +556,12 @@ async function updateNotificationBadge() {
             }
         }
     } catch (error) {
-        console.error('Error updating notification badge:', error);
+        // Silently fail - don't spam console with network errors
+        // Only log if it's not a network error (which is common during page transitions)
+        if (error.name !== 'TypeError' || !error.message.includes('Failed to fetch')) {
+            console.error('Error updating notification badge:', error);
+        }
+        // Don't show error to user - badge will just not update
     }
 }
 

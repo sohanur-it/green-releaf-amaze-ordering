@@ -400,29 +400,90 @@ exports.getProductById = async (req, res) => {
 
         const product = productResult.rows[0];
         
-        // OPTIONAL: Only refresh batches if explicitly requested via query parameter
-        // This prevents slow page loads on every view
-        // Users can click "Refresh from METRC" button for manual refresh
-        const refreshBatches = req.query.refresh === 'true';
-        
-        if (refreshBatches && product.metrc_linked_items && product.metrc_linked_items.length > 0) {
-            try {
-                const BatchSyncService = require('../Services/BatchSyncService');
-                const batchSyncService = new BatchSyncService();
-                const linkedItems = Array.isArray(product.metrc_linked_items) 
-                    ? product.metrc_linked_items 
-                    : JSON.parse(product.metrc_linked_items || '[]');
-                
-                if (linkedItems.length > 0) {
-                    console.log(`🔄 Refreshing batches for product ${productId} (explicitly requested)...`);
-                    // Pass productId to ensure batches are linked to this product
-                    await batchSyncService.refreshBatchesForItems(linkedItems, productId);
-                    console.log(`✅ Batches refreshed for product ${productId}`);
-                    await batchSyncService.close();
+        // Automatically refresh batches from METRC when viewing product details
+        // This ensures users always see the latest inventory without manual refresh
+        // Refresh runs in background - page loads immediately with cached data
+        if (product.metrc_linked_items && product.metrc_linked_items.length > 0) {
+            // Run refresh in background (don't await) so page loads immediately
+            // If user explicitly requested refresh (?refresh=true), wait for it to complete
+            const refreshBatches = req.query.refresh === 'true';
+            
+            const refreshPromise = (async () => {
+                let batchSyncService = null;
+                let timeoutId = null;
+                try {
+                    const BatchSyncService = require('../Services/BatchSyncService');
+                    batchSyncService = new BatchSyncService();
+                    const linkedItems = Array.isArray(product.metrc_linked_items) 
+                        ? product.metrc_linked_items 
+                        : JSON.parse(product.metrc_linked_items || '[]');
+                    
+                    if (linkedItems.length > 0) {
+                        console.log(`🔄 Refreshing batches for product ${productId} (auto-refresh on page view)...`);
+                        
+                        // Add timeout to prevent hanging (30 seconds max)
+                        const timeoutPromise = new Promise((_, reject) => {
+                            timeoutId = setTimeout(() => {
+                                reject(new Error('Batch refresh timeout after 30 seconds'));
+                            }, 30000);
+                        });
+                        
+                        // Pass productId to ensure batches are linked to this product
+                        await Promise.race([
+                            batchSyncService.refreshBatchesForItems(linkedItems, productId),
+                            timeoutPromise
+                        ]);
+                        
+                        // Clear timeout if operation completed
+                        if (timeoutId) {
+                            clearTimeout(timeoutId);
+                            timeoutId = null;
+                        }
+                        
+                        console.log(`✅ Batches refreshed for product ${productId}`);
+                    }
+                } catch (refreshError) {
+                    // Clear timeout if it was set
+                    if (timeoutId) {
+                        clearTimeout(timeoutId);
+                        timeoutId = null;
+                    }
+                    
+                    // Log error but don't crash - page will show current DB state
+                    console.warn(`⚠️ Failed to refresh batches for product ${productId}:`, refreshError.message);
+                    if (refreshError.stack) {
+                        console.warn(`⚠️ Stack trace:`, refreshError.stack.substring(0, 500));
+                    }
+                } finally {
+                    // Always close the service to release connections, even on error
+                    if (batchSyncService) {
+                        try {
+                            await batchSyncService.close();
+                        } catch (closeError) {
+                            console.warn(`⚠️ Error closing BatchSyncService for product ${productId}:`, closeError.message);
+                        }
+                    }
+                    // Ensure timeout is cleared
+                    if (timeoutId) {
+                        clearTimeout(timeoutId);
+                    }
                 }
-            } catch (refreshError) {
-                console.warn(`⚠️ Failed to refresh batches for product ${productId}:`, refreshError.message);
-                // Continue even if refresh fails - will show current DB state
+            })();
+            
+            // Add error handler to prevent unhandled promise rejection
+            refreshPromise.catch((error) => {
+                console.error(`❌ Unhandled error in background batch refresh for product ${productId}:`, error.message);
+            });
+            
+            // If explicitly requested, wait for refresh to complete before rendering
+            // Otherwise, let it run in background
+            if (refreshBatches) {
+                try {
+                    await refreshPromise;
+                } catch (error) {
+                    // If refresh was explicitly requested and fails, log but continue
+                    console.warn(`⚠️ Explicit refresh failed for product ${productId}:`, error.message);
+                }
             }
         }
 

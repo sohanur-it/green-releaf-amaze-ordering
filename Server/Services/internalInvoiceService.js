@@ -197,8 +197,44 @@ class InternalInvoiceService {
             
             // For partial packages, skip batch availability check
             // Instead, validate that each partial package exists in METRC and belongs to the batch
+            // CRITICAL: Also check if package is already allocated to another active invoice
             for (const label of specificLabels) {
-                // Check if package exists in activepackages
+                // First, check if this package is already allocated to another active invoice
+                // CRITICAL: Exclude invoices where packages have been released (assigned_package_labels is NULL)
+                // This handles the case where a manifest was voided and packages were released
+                const allocationCheck = await client.query(`
+                    SELECT 
+                        li.id as line_item_id,
+                        i.id as invoice_id,
+                        i.invoice_number,
+                        i.status
+                    FROM "ORDERS-invoice-line-items" li
+                    INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
+                    WHERE li.fk_batch_id = $1
+                      AND li.specific_package_labels IS NOT NULL
+                      AND EXISTS (
+                          SELECT 1
+                          FROM jsonb_array_elements_text(li.specific_package_labels) AS label
+                          WHERE UPPER(label) = UPPER($2)
+                      )
+                      AND i.status NOT IN ('Cancelled', 'Voided', 'Paid', 'Fully_Rejected', 'Cancelled_After_Ship')
+                      AND i.id != $3
+                      AND li.assigned_package_labels IS NOT NULL
+                      -- CRITICAL: Only consider packages allocated if they're actually assigned/scanned
+                      -- If assigned_package_labels is NULL, packages have been released (e.g., after voiding)
+                `, [itemData.fk_batch_id, label, invoiceId]);
+                
+                if (allocationCheck.rows.length > 0) {
+                    const conflictingInvoice = allocationCheck.rows[0];
+                    throw new Error(
+                        `Partial package ${label} is already allocated to invoice ${conflictingInvoice.invoice_number} (Status: ${conflictingInvoice.status}). ` +
+                        `Please select a different package or wait for the other invoice to be completed/cancelled.`
+                    );
+                }
+                
+                // Check if package exists in activepackages (METRC)
+                // Note: Package might not be in activepackages if it was transferred/voided in METRC,
+                // but if it's not allocated in our system, we allow it (METRC sync will catch up)
                 const licenseColumnCheck = await client.query(`
                     SELECT column_name 
                     FROM information_schema.columns 
@@ -217,10 +253,36 @@ class InternalInvoiceService {
                       AND isfinished = false
                 `, [label]);
                 
+                // Only throw error if package doesn't exist in METRC AND we don't have record of it being available
+                // If package is not in METRC but also not allocated in our system, allow it (might be in transit/transferred)
+                // The METRC sync will eventually catch up, and we prevent double-allocation via the check above
                 if (packageExists.rows.length === 0) {
-                    throw new Error(
-                        `Partial package ${label} is no longer available in METRC`
-                    );
+                    // Check if package exists in transferredpackages or intransitpackages (might have been transferred)
+                    const transferredCheck = await client.query(`
+                        SELECT label
+                        FROM transferredpackages
+                        WHERE UPPER(label) = UPPER($1)
+                        LIMIT 1
+                    `, [label]);
+                    
+                    const inTransitCheck = await client.query(`
+                        SELECT label
+                        FROM intransitpackages
+                        WHERE UPPER(label) = UPPER($1)
+                        LIMIT 1
+                    `, [label]);
+                    
+                    // If package is in transferred or in-transit, it's definitely not available
+                    if (transferredCheck.rows.length > 0 || inTransitCheck.rows.length > 0) {
+                        throw new Error(
+                            `Partial package ${label} is no longer available in METRC. ` +
+                            `It has been transferred or is in transit. Please select a different package.`
+                        );
+                    }
+                    
+                    // If not in activepackages, transferredpackages, or intransitpackages,
+                    // and not allocated in our system, warn but allow (METRC sync might be behind)
+                    console.warn(`⚠️ Partial package ${label} not found in METRC activepackages, but not allocated in our system. Allowing creation - METRC sync will catch up.`);
                 }
                 
                 // Validate package belongs to the batch

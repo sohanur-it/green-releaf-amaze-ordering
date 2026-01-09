@@ -609,12 +609,13 @@ class FulfillmentController {
                     }
                     
                     allRecipients = allRecipients.concat(pageRecipients);
-                    console.log(`[Fulfillment] Retrieved ${pageRecipients.length} recipients from page ${page} (total: ${allRecipients.length})`);
                     
                     // Check if there are more pages
+                    let total = 0;
+                    let totalPages = 0;
                     if (response.data) {
-                        const total = response.data.total || response.data.totalCount || 0;
-                        const totalPages = response.data.totalPages || Math.ceil(total / pageSize);
+                        total = response.data.total || response.data.totalCount || 0;
+                        totalPages = response.data.totalPages || Math.ceil(total / pageSize);
                         const currentPageSize = pageRecipients.length;
                         
                         // If we got fewer results than pageSize, we're done
@@ -625,6 +626,8 @@ class FulfillmentController {
                         hasMorePages = pageRecipients.length === pageSize;
                     }
                     
+                    console.log(`[Fulfillment] Retrieved ${pageRecipients.length} recipients from page ${page} (total so far: ${allRecipients.length}${total > 0 ? `, expected total: ${total}, total pages: ${totalPages || 'unknown'}` : ''})`);
+                    
                     page++;
                     
                     // Small delay to avoid rate limiting
@@ -634,7 +637,18 @@ class FulfillmentController {
                 }
                 
                 endpointWorks = true;
-                console.log(`[Fulfillment] ✅ Successfully fetched all recipients from ${endpointUsed} (${allRecipients.length} total)`);
+                console.log(`[Fulfillment] ✅ Successfully fetched all recipients from ${endpointUsed} (${allRecipients.length} total across ${page - 1} page(s))`);
+                
+                // Log all license numbers found for debugging
+                const allLicenseNumbers = allRecipients.map(r => {
+                    const license = r.licenseNumber || r.license || r.LicenseNumber || r.License || 
+                                   (r.facility && (r.facility.licenseNumber || r.facility.license)) || 'N/A';
+                    return license;
+                }).filter(l => l !== 'N/A');
+                console.log(`[Fulfillment] 📋 All license numbers found (${allLicenseNumbers.length}):`, allLicenseNumbers.slice(0, 50));
+                if (allLicenseNumbers.length > 50) {
+                    console.log(`[Fulfillment] 📋 ... and ${allLicenseNumbers.length - 50} more license numbers`);
+                }
             } catch (firstError) {
                 console.warn(`[Fulfillment] Endpoint ${endpointUsed} failed:`, firstError.message);
                 if (firstError.response) {
@@ -682,18 +696,21 @@ class FulfillmentController {
                         }
                         
                         allRecipients = allRecipients.concat(pageRecipients);
-                        console.log(`[Fulfillment] Retrieved ${pageRecipients.length} recipients from page ${page} (total: ${allRecipients.length})`);
                         
                         // Check if there are more pages
+                        let total = 0;
+                        let totalPages = 0;
                         if (response.data) {
-                            const total = response.data.total || response.data.totalCount || 0;
-                            const totalPages = response.data.totalPages || Math.ceil(total / pageSize);
+                            total = response.data.total || response.data.totalCount || 0;
+                            totalPages = response.data.totalPages || Math.ceil(total / pageSize);
                             const currentPageSize = pageRecipients.length;
                             
                             hasMorePages = currentPageSize === pageSize && (totalPages === 0 || page < totalPages);
                         } else {
                             hasMorePages = pageRecipients.length === pageSize;
                         }
+                        
+                        console.log(`[Fulfillment] Retrieved ${pageRecipients.length} recipients from page ${page} (total so far: ${allRecipients.length}${total > 0 ? `, expected total: ${total}, total pages: ${totalPages || 'unknown'}` : ''})`);
                         
                         page++;
                         
@@ -705,7 +722,18 @@ class FulfillmentController {
                     
                     endpointWorks = true;
                     error = null;
-                    console.log(`[Fulfillment] ✅ Successfully fetched all recipients from ${endpointUsed} (${allRecipients.length} total)`);
+                    console.log(`[Fulfillment] ✅ Successfully fetched all recipients from ${endpointUsed} (${allRecipients.length} total across ${page - 1} page(s))`);
+                    
+                    // Log all license numbers found for debugging
+                    const allLicenseNumbers = allRecipients.map(r => {
+                        const license = r.licenseNumber || r.license || r.LicenseNumber || r.License || 
+                                       (r.facility && (r.facility.licenseNumber || r.facility.license)) || 'N/A';
+                        return license;
+                    }).filter(l => l !== 'N/A');
+                    console.log(`[Fulfillment] 📋 All license numbers found (${allLicenseNumbers.length}):`, allLicenseNumbers.slice(0, 50));
+                    if (allLicenseNumbers.length > 50) {
+                        console.log(`[Fulfillment] 📋 ... and ${allLicenseNumbers.length - 50} more license numbers`);
+                    }
                 } catch (secondError) {
                     console.error(`[Fulfillment] ❌ Both endpoints failed. Last error:`, secondError.message);
                     if (secondError.response) {

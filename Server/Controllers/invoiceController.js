@@ -1734,22 +1734,30 @@ class InvoiceController {
     async updateLineItem(req, res) {
         try {
             const { id, lineItemId } = req.params;
-            const { quantity, modification_reason, manual_line_total } = req.body;
+            const { quantity, modification_reason, manual_line_total, unit_price, line_total } = req.body;
             const userId = req.session.userId || req.user?.id;
 
-            // Handle quantity = 0 as remove line item
-            if (!quantity || quantity < 0) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Valid quantity is required (use DELETE endpoint to remove line item)'
-                });
-            }
+            // Check if this is a price-only update (for Fulfillment_Accepted status)
+            // Can be either unit_price OR line_total (for partial packages)
+            const isPriceOnlyUpdate = ((unit_price !== null && unit_price !== undefined) || 
+                                      (line_total !== null && line_total !== undefined)) && 
+                                     (quantity === null || quantity === undefined);
 
-            // If quantity is 0, treat as remove line item
-            if (parseInt(quantity) === 0) {
-                // Call removeLineItem method directly with same request/response
-                // This handles the removal properly with all the same validations
-                return this.removeLineItem(req, res);
+            // Handle quantity = 0 as remove line item (only if not price-only update)
+            if (!isPriceOnlyUpdate) {
+                if (!quantity || quantity < 0) {
+                    return res.status(400).json({
+                        success: false,
+                        error: 'Valid quantity is required (use DELETE endpoint to remove line item)'
+                    });
+                }
+
+                // If quantity is 0, treat as remove line item
+                if (parseInt(quantity) === 0) {
+                    // Call removeLineItem method directly with same request/response
+                    // This handles the removal properly with all the same validations
+                    return this.removeLineItem(req, res);
+                }
             }
 
             const internalInvoiceService = require('../Services/internalInvoiceService');
@@ -1760,6 +1768,7 @@ class InvoiceController {
                 await client.query('BEGIN');
 
                 // Get current line item with invoice manifest info
+                // Include specific_package_labels to check if it's a partial package
                 const lineItem = await client.query(`
                     SELECT 
                         li.*,
@@ -1767,7 +1776,14 @@ class InvoiceController {
                         i.fk_location_id,
                         i.fk_buyer_id,
                         i.metrc_manifest_numbers,
-                        i.manifest_created_at
+                        i.manifest_created_at,
+                        CASE 
+                            WHEN li.specific_package_labels IS NOT NULL 
+                                 AND li.specific_package_labels != 'null'::jsonb
+                                 AND jsonb_array_length(li.specific_package_labels) > 0
+                            THEN true
+                            ELSE false
+                        END as is_partial_package
                     FROM "ORDERS-invoice-line-items" li
                     INNER JOIN "ORDERS-invoices" i ON li.fk_invoice_id = i.id
                     WHERE li.id = $1 AND li.fk_invoice_id = $2
@@ -1815,20 +1831,30 @@ class InvoiceController {
                 // Allow editing if:
                 // 1. Status is Draft, Pending_Approval, Approved (before fulfillment starts)
                 // 2. Status is Fulfillment_Issue (fulfillment kicked it back)
-                // 3. Status is Approved but fulfillment hasn't started yet
+                // 3. Status is Fulfillment_Accepted (only for price-only updates)
                 const editableStatuses = ['Draft', 'Pending_Approval', 'Approved', 'Fulfillment_Issue'];
                 const isEditableStatus = editableStatuses.includes(item.status);
+                const isFulfillmentAccepted = item.status === 'Fulfillment_Accepted';
                 
-                if (!isEditableStatus) {
+                // For Fulfillment_Accepted, only allow price-only updates (to fix 0 price issues)
+                if (isFulfillmentAccepted && !isPriceOnlyUpdate) {
                     await client.query('ROLLBACK');
                     return res.status(400).json({
                         success: false,
-                        error: `Line items can only be updated when invoice is in Draft, Pending Approval, Approved, or Fulfillment Issue status. Current status: ${item.status}`
+                        error: `For invoices in Fulfillment_Accepted status, only price updates are allowed. Cannot modify quantity.`
+                    });
+                }
+                
+                if (!isEditableStatus && !isFulfillmentAccepted) {
+                    await client.query('ROLLBACK');
+                    return res.status(400).json({
+                        success: false,
+                        error: `Line items can only be updated when invoice is in Draft, Pending Approval, Approved, Fulfillment_Accepted (price only), or Fulfillment Issue status. Current status: ${item.status}`
                     });
                 }
 
-                // Block if fulfillment has started (unless it's Fulfillment_Issue - fulfillment kicked it back)
-                if (fulfillmentStarted && item.status !== 'Fulfillment_Issue') {
+                // Block if fulfillment has started (unless it's Fulfillment_Issue or price-only update for Fulfillment_Accepted)
+                if (fulfillmentStarted && item.status !== 'Fulfillment_Issue' && !(isFulfillmentAccepted && isPriceOnlyUpdate)) {
                     await client.query('ROLLBACK');
                     return res.status(400).json({
                         success: false,
@@ -1838,8 +1864,8 @@ class InvoiceController {
 
                 const currentQuantity = parseInt(item.quantity_ordered);
                 const currentAllocated = parseInt(item.quantity_allocated || 0);
-                const newQuantity = parseInt(quantity);
-                const quantityDelta = newQuantity - currentQuantity;
+                const newQuantity = isPriceOnlyUpdate ? currentQuantity : parseInt(quantity);
+                const quantityDelta = isPriceOnlyUpdate ? 0 : (newQuantity - currentQuantity);
 
                 // Store original quantity if this is a modification (Module 4 requirement)
                 // Only store original_quantity if it hasn't been set before (first modification)
@@ -1849,15 +1875,18 @@ class InvoiceController {
                 // Use provided reason, or default based on context
                 let modReason = modification_reason;
                 if (!modReason) {
-                    if (item.status === 'Fulfillment_Issue') {
+                    if (isPriceOnlyUpdate) {
+                        modReason = 'Price updated for METRC compliance (was 0)';
+                    } else if (item.status === 'Fulfillment_Issue') {
                         modReason = 'Modified to resolve fulfillment issue';
                     } else {
                         modReason = 'Line item quantity updated';
                     }
                 }
 
+                // Skip batch allocation changes for price-only updates
                 // Check batch availability if increasing quantity
-                if (quantityDelta > 0) {
+                if (!isPriceOnlyUpdate && quantityDelta > 0) {
                     const batch = await client.query(`
                         SELECT quantity, allocated_quantity
                         FROM "ORDERS-batches"
@@ -1904,7 +1933,7 @@ class InvoiceController {
                         batch.rows[0].allocated_quantity + quantityDelta,
                         id
                     ]);
-                } else if (quantityDelta < 0) {
+                } else if (!isPriceOnlyUpdate && quantityDelta < 0) {
                     // Release allocation if decreasing quantity
                     const releaseQty = Math.abs(quantityDelta);
                     
@@ -1950,9 +1979,58 @@ class InvoiceController {
                 // Update line item with modification tracking (Module 4 requirement)
                 let unitPrice = parseFloat(item.unit_price);
                 let newLineTotal;
+                const isPartialPackage = item.is_partial_package === true;
                 
-                // If manual_line_total is provided, use it for price override
-                if (manual_line_total !== null && manual_line_total !== undefined) {
+                // Handle price-only updates for Fulfillment_Accepted
+                if (isPriceOnlyUpdate) {
+                    // For partial packages, prefer line_total; for full packages, use unit_price
+                    if (isPartialPackage && line_total !== null && line_total !== undefined) {
+                        // Partial package: set line_total directly
+                        newLineTotal = parseFloat(line_total);
+                        // Ensure line_total is positive (METRC requirement)
+                        if (newLineTotal <= 0) {
+                            await client.query('ROLLBACK');
+                            return res.status(400).json({
+                                success: false,
+                                error: 'Line total must be greater than 0 for METRC compliance'
+                            });
+                        }
+                        // Calculate unit_price from line_total for display (quantity might be in grams)
+                        unitPrice = currentQuantity > 0 ? newLineTotal / currentQuantity : 0;
+                    } else if (unit_price !== null && unit_price !== undefined) {
+                        // Full package or unit_price provided: use unit_price
+                        unitPrice = parseFloat(unit_price);
+                        // Ensure unit_price is positive (METRC requirement)
+                        if (unitPrice <= 0) {
+                            await client.query('ROLLBACK');
+                            return res.status(400).json({
+                                success: false,
+                                error: 'Unit price must be greater than 0 for METRC compliance'
+                            });
+                        }
+                        // Calculate line_total from new unit_price
+                        newLineTotal = unitPrice * currentQuantity - parseFloat(item.line_discount_amount || 0);
+                        newLineTotal = Math.max(0, newLineTotal);
+                    } else if (line_total !== null && line_total !== undefined) {
+                        // line_total provided for non-partial (fallback)
+                        newLineTotal = parseFloat(line_total);
+                        if (newLineTotal <= 0) {
+                            await client.query('ROLLBACK');
+                            return res.status(400).json({
+                                success: false,
+                                error: 'Line total must be greater than 0 for METRC compliance'
+                            });
+                        }
+                        unitPrice = currentQuantity > 0 ? newLineTotal / currentQuantity : 0;
+                    } else {
+                        await client.query('ROLLBACK');
+                        return res.status(400).json({
+                            success: false,
+                            error: 'Either unit_price or line_total must be provided for price update'
+                        });
+                    }
+                } else if (manual_line_total !== null && manual_line_total !== undefined) {
+                    // If manual_line_total is provided, use it for price override
                     newLineTotal = parseFloat(manual_line_total);
                     // Ensure line_total is non-negative (can be 0 for partial packages with no price)
                     newLineTotal = Math.max(0, newLineTotal);
@@ -1978,42 +2056,71 @@ class InvoiceController {
                 const hasColumn = columnCheck.rows.length > 0;
 
                 // Update unit_price if manual pricing was used
-                const updateFields = hasColumn && isFulfillmentIssueMod
-                    ? `quantity_ordered = $1,
-                       quantity_allocated = $1,
-                       unit_price = $7,
-                       line_total = $2,
-                       was_modified = true,
-                       original_quantity = $3,
-                       modification_reason = $4,
-                       modified_at = NOW(),
-                       modified_by = $5,
-                       updated_at = NOW(),
-                       fulfillment_issue_modification = true`
-                    : `quantity_ordered = $1,
-                       quantity_allocated = $1,
-                       unit_price = $7,
-                       line_total = $2,
-                       was_modified = true,
-                       original_quantity = $3,
-                       modification_reason = $4,
-                       modified_at = NOW(),
-                       modified_by = $5,
-                       updated_at = NOW()`;
-                
-                await client.query(`
-                    UPDATE "ORDERS-invoice-line-items"
-                    SET ${updateFields}
-                    WHERE id = $6
-                `, [newQuantity, newLineTotal, originalQuantity, modReason, userId, lineItemId, unitPrice]);
+                // For price-only updates, don't change quantity fields
+                // Use sequential placeholders to avoid parameter type issues
+                if (isPriceOnlyUpdate) {
+                    // Price-only update: only update price and total
+                    const priceUpdateFields = hasColumn && isFulfillmentIssueMod
+                        ? `unit_price = $1,
+                           line_total = $2,
+                           was_modified = true,
+                           modification_reason = $3,
+                           modified_at = NOW(),
+                           modified_by = $4,
+                           updated_at = NOW(),
+                           fulfillment_issue_modification = true`
+                        : `unit_price = $1,
+                           line_total = $2,
+                           was_modified = true,
+                           modification_reason = $3,
+                           modified_at = NOW(),
+                           modified_by = $4,
+                           updated_at = NOW()`;
+                    
+                    await client.query(`
+                        UPDATE "ORDERS-invoice-line-items"
+                        SET ${priceUpdateFields}
+                        WHERE id = $5
+                    `, [unitPrice, newLineTotal, modReason, userId, lineItemId]);
+                } else {
+                    // Full update: includes quantity changes
+                    const fullUpdateFields = hasColumn && isFulfillmentIssueMod
+                        ? `quantity_ordered = $1,
+                           quantity_allocated = $1,
+                           unit_price = $7,
+                           line_total = $2,
+                           was_modified = true,
+                           original_quantity = $3,
+                           modification_reason = $4,
+                           modified_at = NOW(),
+                           modified_by = $5,
+                           updated_at = NOW(),
+                           fulfillment_issue_modification = true`
+                        : `quantity_ordered = $1,
+                           quantity_allocated = $1,
+                           unit_price = $7,
+                           line_total = $2,
+                           was_modified = true,
+                           original_quantity = $3,
+                           modification_reason = $4,
+                           modified_at = NOW(),
+                           modified_by = $5,
+                           updated_at = NOW()`;
+                    
+                    await client.query(`
+                        UPDATE "ORDERS-invoice-line-items"
+                        SET ${fullUpdateFields}
+                        WHERE id = $6
+                    `, [newQuantity, newLineTotal, originalQuantity, modReason, userId, lineItemId, unitPrice]);
+                }
 
                 await lineItemHistoryService.addLineItemHistoryEntry({
                     client,
                     lineItemId: parseInt(lineItemId, 10),
-                    modificationType: 'quantity_changed',
-                    fieldChanged: 'quantity_ordered',
-                    oldValue: currentQuantity.toString(),
-                    newValue: newQuantity.toString(),
+                    modificationType: 'quantity_changed', // Use 'quantity_changed' for both quantity and price changes
+                    fieldChanged: isPriceOnlyUpdate ? 'unit_price' : 'quantity_ordered',
+                    oldValue: isPriceOnlyUpdate ? parseFloat(item.unit_price).toString() : currentQuantity.toString(),
+                    newValue: isPriceOnlyUpdate ? unitPrice.toString() : newQuantity.toString(),
                     reason: modReason,
                     changedByUserId: userId,
                     changedBySystem: false
@@ -2024,17 +2131,25 @@ class InvoiceController {
 
                 // Log to invoice history with modification reason
                 // Mark as triggered by fulfillment issue if invoice is in that state
+                // Note: Using 'line_item_quantity_changed' for both quantity and price changes
+                // since 'line_item_price_changed' doesn't exist in the enum
                 const triggeredByIssue = item.status === 'Fulfillment_Issue';
+                const historyFieldName = isPriceOnlyUpdate ? 'unit_price' : 'quantity_ordered';
+                const historyModType = 'line_item_quantity_changed'; // Use existing enum value for all line item changes
+                const historyOldValue = isPriceOnlyUpdate ? parseFloat(item.unit_price).toString() : currentQuantity.toString();
+                const historyNewValue = isPriceOnlyUpdate ? unitPrice.toString() : newQuantity.toString();
+                
                 await client.query(`
                     INSERT INTO "ORDERS-invoice-history" (
                         fk_invoice_id, modification_type, field_name,
                         old_value, new_value, reason, changed_by_user_id, triggered_by_fulfillment_issue
-                    ) VALUES ($1, 'line_item_quantity_changed', $2, $3, $4, $5, $6, $7)
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 `, [
                     id, 
-                    `line_item_${lineItemId}`, 
-                    currentQuantity.toString(), 
-                    newQuantity.toString(), 
+                    historyModType,
+                    `line_item_${lineItemId}_${historyFieldName}`, 
+                    historyOldValue, 
+                    historyNewValue, 
                     modReason,
                     userId,
                     triggeredByIssue
@@ -2042,8 +2157,8 @@ class InvoiceController {
 
                 await client.query('COMMIT');
 
-                // Broadcast inventory update
-                if (quantityDelta !== 0) {
+                // Broadcast inventory update (skip for price-only updates)
+                if (!isPriceOnlyUpdate && quantityDelta !== 0) {
                     try {
                         const batch = await client.query(`
                             SELECT quantity, allocated_quantity
