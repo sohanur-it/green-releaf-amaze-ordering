@@ -420,6 +420,55 @@ class FulfillmentQueueService {
                 WHERE id = $1
             `, [invoiceId]);
 
+            // CRITICAL: Clear any active scanning session
+            // This prevents the "Cannot void invoice - fulfillment team is currently scanning" error
+            const activeSessions = await client.query(`
+                SELECT id, currently_locked_packages
+                FROM "ORDERS-scanning-sessions"
+                WHERE fk_invoice_id = $1 AND session_status = 'active'
+            `, [invoiceId]);
+
+            if (activeSessions.rows.length > 0) {
+                // Cancel all active sessions and clear locked packages
+                await client.query(`
+                    UPDATE "ORDERS-scanning-sessions"
+                    SET 
+                        session_status = 'cancelled',
+                        cancelled_at = NOW(),
+                        currently_locked_packages = '[]'::jsonb
+                    WHERE fk_invoice_id = $1 AND session_status = 'active'
+                `, [invoiceId]);
+
+                // Broadcast package release for any locked packages
+                const websocketService = require('./websocketService');
+                for (const session of activeSessions.rows) {
+                    let lockedPackages = session.currently_locked_packages || [];
+                    // Handle JSON string format
+                    if (typeof lockedPackages === 'string') {
+                        try {
+                            lockedPackages = JSON.parse(lockedPackages);
+                        } catch (e) {
+                            lockedPackages = [];
+                        }
+                    }
+                    if (Array.isArray(lockedPackages) && lockedPackages.length > 0) {
+                        try {
+                            await websocketService.broadcastPackageReleased(lockedPackages, invoiceId);
+                        } catch (wsError) {
+                            console.error(`[ReleaseOrder] WebSocket broadcast error (non-critical):`, wsError.message);
+                        }
+                    }
+                }
+            }
+
+            // CRITICAL: Clear assigned packages (rollback scanning progress)
+            // This releases the packages that were scanned but not yet manifested
+            await client.query(`
+                UPDATE "ORDERS-invoice-line-items"
+                SET assigned_package_labels = NULL
+                WHERE fk_invoice_id = $1
+            `, [invoiceId]);
+
             // Log to invoice history
             await client.query(`
                 INSERT INTO "ORDERS-invoice-history" (
